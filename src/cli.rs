@@ -1,4 +1,6 @@
 use clap::{Parser, Subcommand};
+use omnidoc::doc;
+
 
 //
 // Create a git-like cli program to manage our document project.
