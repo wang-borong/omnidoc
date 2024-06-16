@@ -1,16 +1,14 @@
 // File and directory operation
 
-use std::fs::{DirBuilder,File,FileType,OpenOptions,ReadDir,
-    create_dir, create_dir_all, read, read_dir, remove_dir,
-    remove_dir_all, remove_file,rename, write};
-
 use std::path::{Path, PathBuf};
 use std::error::Error;
 use std::fmt;
 use std::string::String;
 
+use super::fs;
+
 #[derive(Debug, PartialEq)]
-struct Doc {
+pub struct Doc {
     name: String,
     path: PathBuf,
     author: String,
@@ -31,17 +29,22 @@ impl Doc {
         }
     }
 
-    pub fn create_project(&self) -> Result<(), DocError> {
+    pub fn create_project(&self) -> Result<(), std::io::Error> {
+        let mut project_path = PathBuf::from(&self.path);
+        project_path.push(&self.name);
+
+        fs::create_dir_all(project_path.as_path())?;
+
         Ok(())
     }    
-}
 
-pub fn build_project(path: &Path) -> Result<(), DocError> {
-    Ok(())
-}
+    pub fn build_project(&self) -> Result<(), std::io::Error> {
+        Ok(())
+    }
 
-pub fn clean_project(path: &Path) -> Result<(), DocError> {
-    Ok(())
+    pub fn clean_project(&self) -> Result<(), std::io::Error> {
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -77,7 +80,7 @@ mod tests {
 
     #[test]
     fn test_doc_struct_new() {
-        let mydoc = Doc::new("mydoc", Path::new("./mydoc"), "wbr", "v0.1", "v1.0", "zh_CN");
+        let mydoc = Doc::new("mydoc", &PathBuf::from("./mydoc"), "wbr", "v0.1", "v1.0", "zh_CN");
         assert_eq!(mydoc, Doc {
             name: String::from("mydoc"),
             path: PathBuf::from("./mydoc"),
@@ -90,7 +93,10 @@ mod tests {
 
     #[test]
     fn test_doc_create() {
+        let mydoc = Doc::new("mydoc", &PathBuf::from("./mydoc"), "wbr", "v0.1", "v1.0", "zh_CN");
 
+        let r = mydoc.create_project();
+        assert_eq!(r.is_ok(), true);
     }
 
     #[test]

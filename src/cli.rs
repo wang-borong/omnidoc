@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use omnidoc::doc;
+use omnidoc::doc::Doc;
 
 
 //
@@ -61,7 +61,7 @@ enum Commands {
 
     /// clean the document project
     Clean {
-
+        project: Option<String>,
     },
 }
 
