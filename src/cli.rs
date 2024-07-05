@@ -39,9 +39,31 @@ enum Commands {
         #[arg(short, long)]
         suffix: Option<String>,
 
-        /// create makefile
-        #[arg(long, default_value_t = false)]
-        makefile: bool,
+        // create makefile
+        //#[arg(long, default_value_t = false)]
+        //makefile: bool,
+    },
+
+    /// init a project
+    Init {
+        /// set project name
+        #[arg(short, long)]
+        project: String,
+        /// set author name
+        #[arg(short, long)]
+        author: Option<String>,
+        /// set document version
+        #[arg(short, long)]
+        docver: Option<String>,
+        /// set release name
+        #[arg(short, long)]
+        release: Option<String>,
+        /// set language
+        #[arg(short, long)]
+        language: Option<String>,
+        /// set suffix
+        #[arg(short, long)]
+        suffix: Option<String>,
     },
 
     /// build the document project
