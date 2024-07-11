@@ -1,5 +1,9 @@
 mod cli;
 
 fn main() {
-    cli::cli();
+    let r = cli::cli();
+    match r {
+        Err(e) => {eprintln!("{}", e)},
+        Ok(()) => {},
+    }
 }

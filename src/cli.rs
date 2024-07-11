@@ -83,13 +83,64 @@ enum Commands {
 
     /// clean the document project
     Clean {
-        project: Option<String>,
+        project: String,
     },
 }
 
-pub fn cli() {
+pub fn cli() -> Result<(), std::io::Error> {
     let args = OmniCli::parse();
 
     println!("{:?}", args);
+
+    match args.command {
+        Commands::Init { project, author, docver, release, language, suffix } => {
+            // TODO: Use configuration file to set the default infos
+            let _author = match author {
+                Some(_author) => _author,
+                None => "王伯榕".to_string(),
+            };
+            let _docver = match docver {
+                Some(_docver) => _docver,
+                None => "v0.1".to_string(),
+            };
+            let _release = match release {
+                Some(_release) => _release,
+                None => "v1.0".to_string(),
+            };
+            let _language = match language {
+                Some(_language) => _language,
+                None => "zh".to_string(),
+            };
+            let doc = Doc::new(&project, &project, &_author, &_docver, &_release, &_language);
+        },
+        Commands::Build { source, output, builder, jobs } => {
+            todo!();
+        },
+        Commands::Clean { project } => {
+            let doc = Doc::new("", &project, "", "", "", "");
+        },
+        Commands::Create { project, author, docver, release, language, suffix } => {
+            let _author = match author {
+                Some(_author) => _author,
+                None => "王伯榕".to_string(),
+            };
+            let _docver = match docver {
+                Some(_docver) => _docver,
+                None => "v0.1".to_string(),
+            };
+            let _release = match release {
+                Some(_release) => _release,
+                None => "v1.0".to_string(),
+            };
+            let _language = match language {
+                Some(_language) => _language,
+                None => "zh".to_string(),
+            };
+            let doc = Doc::new(&project, &project, &_author, &_docver, &_release, &_language);
+            doc.create_project()?;
+        }
+    }
+
+    Ok(())
 }
 

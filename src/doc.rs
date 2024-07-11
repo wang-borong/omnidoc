@@ -10,7 +10,7 @@ use std::env;
 use dirs::config_dir;
 
 use super::fs;
-use super::config::read_config;
+use super::config::read_download_config;
 use super::webreq::https_download;
 
 #[derive(Debug, PartialEq)]
@@ -24,10 +24,13 @@ pub struct Doc {
 }
 
 impl Doc {
-    pub fn new(name: &str, path: &Path, author: &str, version: &str, release: &str, language: &str) -> Self {
+    pub fn new<P>(name: &str, path: P, author: &str, version: &str, release: &str, language: &str) -> Self
+        where P: AsRef<Path>
+    {
+        let pathbuf = PathBuf::new().join(path);
         Self {
             name: String::from(name),
-            path: PathBuf::from(path),
+            path: pathbuf,
             author: String::from(author),
             version: String::from(version),
             release: String::from(release),
@@ -36,10 +39,9 @@ impl Doc {
     }
 
     pub fn create_project(&self) -> Result<(), std::io::Error> {
-        let mut project_path = PathBuf::from(&self.path);
-        project_path.push(&self.name);
+        fs::create_dir_all(&self.path)?;
 
-        fs::create_dir_all(project_path.as_path())?;
+        self.init_project()?;
 
         Ok(())
     }    
@@ -108,7 +110,7 @@ impl Doc {
 
         let conf_dir = config_dir();
         let conf_file = conf_dir.unwrap().join("omnidoc.toml");
-        let conf = read_config(&conf_file);
+        let conf = read_download_config(&conf_file);
         
         for (url, filename) in &conf.unwrap() {
             match https_download(url, filename) {

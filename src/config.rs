@@ -3,6 +3,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+//
+// [[download]]
+// url = ""
+// filename = ""
+//
 #[derive(Deserialize)]
 struct DownloadConfig {
     url: String,
@@ -12,9 +17,11 @@ struct DownloadConfig {
 #[derive(Deserialize)]
 struct Config {
     download: Vec<DownloadConfig>,
+    author: Option<String>,
+    language: Option<String>,
 }
 
-pub fn read_config<P>(config: P) -> Result<HashMap<String, String>, Box<dyn std::error::Error>>
+pub fn read_download_config<P>(config: P) -> Result<HashMap<String, String>, Box<dyn std::error::Error>>
     where P: AsRef<Path>
 {
     // Read the configuration file
@@ -41,7 +48,7 @@ mod tests {
     #[test]
     fn test_read_config() {
 
-        let conf = read_config("download.toml");
+        let conf = read_download_config("download.toml");
 
         println!("{:?}", conf);
         assert_eq!(conf.is_ok(), true);
