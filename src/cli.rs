@@ -22,7 +22,9 @@ enum Commands {
     Create {
         /// set project name
         #[arg(short, long)]
-        project: String,
+        project: String, // it's also the doc name
+        /// set root path to create the documentation project
+        root: Option<String>,
         /// set author name
         #[arg(short, long)]
         author: Option<String>,
@@ -46,9 +48,9 @@ enum Commands {
 
     /// init a project
     Init {
-        /// set project name
+        /// path to documentation project
         #[arg(short, long)]
-        project: String,
+        path: String,
         /// set author name
         #[arg(short, long)]
         author: Option<String>,
@@ -68,8 +70,8 @@ enum Commands {
 
     /// build the document project
     Build {
-        /// path to documentation source files
-        source: Option<String>, 
+        /// path to documentation project
+        path: Option<String>, 
         /// path to output directory
         output: Option<String>,
 
@@ -83,7 +85,8 @@ enum Commands {
 
     /// clean the document project
     Clean {
-        project: String,
+        /// path to documentation project
+        path: String,
     },
 }
 
@@ -93,7 +96,7 @@ pub fn cli() -> Result<(), std::io::Error> {
     println!("{:?}", args);
 
     match args.command {
-        Commands::Init { project, author, docver, release, language, suffix } => {
+        Commands::Init { path, author, docver, release, language, suffix } => {
             // TODO: Use configuration file to set the default infos
             let _author = match author {
                 Some(_author) => _author,
@@ -111,15 +114,20 @@ pub fn cli() -> Result<(), std::io::Error> {
                 Some(_language) => _language,
                 None => "zh".to_string(),
             };
-            let doc = Doc::new(&project, &project, &_author, &_docver, &_release, &_language);
+            let doc = Doc::new("", &path, &_author, &_docver, &_release, &_language);
+            doc.init_project()?;
         },
-        Commands::Build { source, output, builder, jobs } => {
+        Commands::Build { path, output, builder, jobs } => {
             todo!();
         },
-        Commands::Clean { project } => {
-            let doc = Doc::new("", &project, "", "", "", "");
+        Commands::Clean { path } => {
+            let doc = Doc::new("", &path, "", "", "", "");
         },
-        Commands::Create { project, author, docver, release, language, suffix } => {
+        Commands::Create { project, root, author, docver, release, language, suffix } => {
+            let _root = match root {
+                Some(_root) => _root,
+                None => "./".to_string(),
+            };
             let _author = match author {
                 Some(_author) => _author,
                 None => "王伯榕".to_string(),
@@ -136,7 +144,7 @@ pub fn cli() -> Result<(), std::io::Error> {
                 Some(_language) => _language,
                 None => "zh".to_string(),
             };
-            let doc = Doc::new(&project, &project, &_author, &_docver, &_release, &_language);
+            let doc = Doc::new(&project, &_root, &_author, &_docver, &_release, &_language);
             doc.create_project()?;
         }
     }

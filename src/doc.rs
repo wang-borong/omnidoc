@@ -27,7 +27,7 @@ impl Doc {
     pub fn new<P>(name: &str, path: P, author: &str, version: &str, release: &str, language: &str) -> Self
         where P: AsRef<Path>
     {
-        let pathbuf = PathBuf::new().join(path);
+        let pathbuf = PathBuf::new().join(path).join(name);
         Self {
             name: String::from(name),
             path: pathbuf,
