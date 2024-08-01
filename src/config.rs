@@ -8,37 +8,61 @@ use std::path::Path;
 // url = ""
 // filename = ""
 //
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct DownloadConfig {
     url: String,
     filename: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct Config {
     download: Vec<DownloadConfig>,
     author: Option<String>,
     language: Option<String>,
 }
 
-pub fn read_download_config<P>(config: P) -> Result<HashMap<String, String>, Box<dyn std::error::Error>>
-    where P: AsRef<Path>
-{
-    // Read the configuration file
-    let config_content = fs::read_to_string(config)?;
+pub struct ConfigParser {
+    config: Config,
+}
 
-    // Parse the TOML content
-    let config: Config = toml::from_str(&config_content)?;
+impl ConfigParser {
 
-    // Create a HashMap to store the URLs and filenames
-    let mut downloads = HashMap::new();
+    fn new<P>(config: P) -> Self
+        where P: AsRef<Path>
+    {
+        let config_cont = fs::read_to_string(&config).unwrap_or("".to_string());
+        let _config: Config = toml::from_str(&config_cont).unwrap();
 
-    // Populate the HashMap
-    for download in config.download {
-        downloads.insert(download.url, download.filename);
+        Self {
+            config: _config,
+        }
     }
 
-    Ok(downloads)
+    pub fn get_downloads(&self) -> Result<HashMap<String, String>, Box<dyn std::error::Error>>
+    {
+        let config = &self.config;
+
+        // Create a HashMap to store the URLs and filenames
+        let mut downloads = HashMap::new();
+
+        // Populate the HashMap
+        for download in &config.download {
+            downloads.insert(String::from(&download.url),
+                String::from(&download.filename));
+        }
+
+        Ok(downloads)
+    }
+
+    pub fn get_author(&self) -> Result<String, Box<dyn std::error::Error>>
+    {
+        let config = &self.config;
+        match &config.author {
+            Some(author) => Ok(author.to_owned()),
+            None => Err("no author configs".into())
+        }
+    }
+    
 }
 
 #[cfg(test)]
@@ -48,9 +72,11 @@ mod tests {
     #[test]
     fn test_read_config() {
 
-        let conf = read_download_config("download.toml");
+        let conf_parser = ConfigParser::new("omnidoc.toml");
+        
+        let downloads = conf_parser.get_downloads();
 
-        println!("{:?}", conf);
-        assert_eq!(conf.is_ok(), true);
+        println!("{:?}", downloads);
+        assert_eq!(downloads.is_ok(), true);
     }
 }
