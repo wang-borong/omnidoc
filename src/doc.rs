@@ -2,7 +2,6 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::error::Error;
 use std::fmt;
 use std::string::String;
 use walkdir::WalkDir;
@@ -12,6 +11,7 @@ use dirs::config_dir;
 use super::fs;
 use super::config::read_download_config;
 use super::webreq::https_download;
+use super::cmd::do_cmd;
 
 #[derive(Debug, PartialEq)]
 pub struct Doc {
@@ -122,11 +122,25 @@ impl Doc {
         Ok(())
     }
 
-    pub fn build_project(&self) -> Result<(), std::io::Error> {
+    pub fn build_project(&self, o: Option<String>, b: Option<String>) -> Result<(), std::io::Error> {
+        // call make
+        do_cmd("make", &[])?;
+
         Ok(())
     }
 
     pub fn clean_project(&self) -> Result<(), std::io::Error> {
+        // TODO
+        // if distclean {
+        // we can just remove output directory in the doc path
+        let mut output_dir = self.path.to_path_buf();
+        output_dir.push("output");
+        fs::remove_dir_all(&output_dir.as_path())?;
+        // } else {
+        // ... call make clean
+        //do_cmd("make", &["clean"])?;
+        // }
+
         Ok(())
     }
 }

@@ -71,16 +71,13 @@ enum Commands {
     /// build the document project
     Build {
         /// path to documentation project
-        path: Option<String>, 
+        path: String, 
         /// path to output directory
         output: Option<String>,
 
         /// builder to use (default to 'pdf')
         #[arg(short, long)]
         builder: Option<String>,
-        /// run in parallel with N processes, when possible.
-        #[arg(short, long, value_name = "N")]
-        jobs: Option<u8>,
     },
 
     /// clean the document project
@@ -90,7 +87,7 @@ enum Commands {
     },
 }
 
-pub fn cli() -> Result<(), std::io::Error> {
+pub fn cli() {
     let args = OmniCli::parse();
 
     println!("{:?}", args);
@@ -115,13 +112,24 @@ pub fn cli() -> Result<(), std::io::Error> {
                 None => "zh".to_string(),
             };
             let doc = Doc::new("", &path, &_author, &_docver, &_release, &_language);
-            doc.init_project()?;
+            match doc.init_project() {
+                Ok(_) => { },
+                Err(e) => { eprintln!("initial project failed ({})", e) },
+            }
         },
-        Commands::Build { path, output, builder, jobs } => {
-            todo!();
+        Commands::Build { path, output, builder } => {
+            let doc = Doc::new("", &path, "", "", "", "");
+            match doc.build_project(output, builder) {
+                Ok(_) => { },
+                Err(e) => { eprintln!("build project failed ({})", e) },
+            }
         },
         Commands::Clean { path } => {
             let doc = Doc::new("", &path, "", "", "", "");
+            match doc.clean_project() {
+                Ok(_) => { },
+                Err(e) => { eprintln!("clean project failed ({})", e) },
+            }
         },
         Commands::Create { project, root, author, docver, release, language, suffix } => {
             let _root = match root {
@@ -145,10 +153,11 @@ pub fn cli() -> Result<(), std::io::Error> {
                 None => "zh".to_string(),
             };
             let doc = Doc::new(&project, &_root, &_author, &_docver, &_release, &_language);
-            doc.create_project()?;
+            match doc.create_project() {
+                Ok(_) => { },
+                Err(e) => { eprintln!("create project failed ({})", e) },
+            }
         }
     }
-
-    Ok(())
 }
 

@@ -21,7 +21,6 @@ pub fn git_init<P>(p: P)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs;
 
     #[test]
     fn test_git_clone() {
