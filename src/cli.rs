@@ -37,6 +37,16 @@ enum Commands {
         #[arg(short, long)]
         language: Option<String>,
 
+        /// give the doc a title
+        #[arg(long)]
+        title: String,
+        /// give the output doc a name
+        #[arg(long)]
+        docname: String,
+        /// select a document type to create
+        #[arg(long)]
+        doctype: String,
+
         /// set project path to create the documentation project
         path: String,
 
@@ -59,6 +69,16 @@ enum Commands {
         /// set language
         #[arg(short, long)]
         language: Option<String>,
+
+        /// give the doc a title
+        #[arg(long)]
+        title: String,
+        /// give the output doc a name
+        #[arg(long)]
+        docname: String,
+        /// select a document type to create
+        #[arg(long)]
+        doctype: String,
 
         /// path to documentation project
         path: String,
@@ -100,7 +120,10 @@ enum Commands {
         /// update omnidoc lib
         #[arg(short, long)]
         update: bool,
-    }
+    },
+
+    /// list current supported document types
+    List,
 }
 
 pub fn cli() {
@@ -109,7 +132,7 @@ pub fn cli() {
     let mut config = ConfigParser::default();
 
     match args.command {
-        Commands::Init { path, author, docver, release, language } => {
+        Commands::Init { path, author, docver, release, language, title, docname, doctype } => {
             config.parse();
             let author_conf = config.get_author_name();
             let author = match author {
@@ -133,27 +156,33 @@ pub fn cli() {
                 Some(language) => language,
                 None => "zh".to_string(),
             };
-            let doc = Doc::new("", &path, &author, &docver, &release, &language);
+            let doc = Doc::new(&title, &path, &author, &docver,
+                &release, &language, &doctype, &docname);
             match doc.init_project() {
                 Ok(_) => { },
                 Err(e) => { eprintln!("initial project failed ({})", e) },
             }
+
+            match doc.create_entry(&title, &doctype) {
+                Ok(_) => { },
+                Err(e) => { eprintln!("create entry failed {}", e) }
+            }
         },
         Commands::Build { path, output, builder } => {
-            let doc = Doc::new("", &path, "", "", "", "");
+            let doc = Doc::new("", &path, "", "", "", "", "", "");
             match doc.build_project(output, builder) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("build project failed ({})", e) },
             }
         },
         Commands::Clean { path, distclean } => {
-            let doc = Doc::new("", &path, "", "", "", "");
+            let doc = Doc::new("", &path, "", "", "", "", "", "");
             match doc.clean_project(distclean) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("clean project failed ({})", e) },
             }
         },
-        Commands::Create { path, author, docver, release, language } => {
+        Commands::Create { path, author, docver, release, language, title, docname, doctype } => {
             config.parse();
             let author_conf = config.get_author_name();
             let author = match author {
@@ -177,10 +206,16 @@ pub fn cli() {
                 Some(language) => language,
                 None => "zh".to_string(),
             };
-            let doc = Doc::new("", &path, &author, &docver, &release, &language);
+            let doc = Doc::new(&title, &path, &author, &docver,
+                &release, &language, &doctype, &docname);
             match doc.create_project() {
                 Ok(_) => { },
                 Err(e) => { eprintln!("create project failed ({})", e) },
+            }
+
+            match doc.create_entry(&title, &doctype) {
+                Ok(_) => { },
+                Err(e) => { eprintln!("create entry failed {}", e) }
             }
         }
         Commands::Config => {
@@ -205,6 +240,11 @@ pub fn cli() {
                     Err(e) => eprintln!("update {} failed {}", olib.display(), e),
                 }
             }
+        }
+        Commands::List => {
+            println!(r#"doctypes:
+  ebook-md
+  enote-md"#);
         }
     }
 }

@@ -12,40 +12,44 @@ use super::git::{git_init, git_add, git_commit};
 
 #[derive(Debug, PartialEq)]
 pub struct Doc {
-    name: String,
+    title: String,
     path: PathBuf,
     author: String,
     version: String,
     release: String,
     language: String,
+    doctype:  String,
+    docname:  String,
 }
 
 impl Doc {
-    pub fn new<P>(name: &str, path: P, author: &str, version: &str, release: &str, language: &str) -> Self
+    pub fn new<P>(title: &str, path: P, author: &str,
+        version: &str, release: &str, language: &str,
+        doctype: &str, docname: &str) -> Self
         where P: AsRef<Path>
     {
-        let pathbuf = PathBuf::new().join(path).join(name);
+        let pathbuf = PathBuf::new().join(path);
 
         if !pathbuf.exists() {
-            let _ = fs::create_dir(&pathbuf);
+            let _ = fs::create_dir_all(&pathbuf);
         }
         // NOTE: We changed to the project directory,
         // the all document operations are in its directory.
         let _ = env::set_current_dir(&pathbuf);
 
         Self {
-            name: String::from(name),
+            title: String::from(title),
             path: pathbuf,
             author: String::from(author),
             version: String::from(version),
             release: String::from(release),
             language: String::from(language),
+            doctype:  String::from(doctype),
+            docname:  String::from(docname),
         }
     }
 
     pub fn create_project(&self) -> Result<(), std::io::Error> {
-        fs::create_dir_all(&self.path)?;
-
         self.init_project()?;
 
         Ok(())
@@ -119,7 +123,12 @@ impl Doc {
         }
 
         Doc::gen_file(include_str!("../assets/docfig-readme.md"), "figure/README.md")?;
-        Doc::gen_file(include_str!("../assets/Makefile"), "Makefile")?;
+
+        let mk_cont = include_str!("../assets/Makefile").to_string();
+        let new_mk_cont = mk_cont.replace("TARGET ?= ",
+            &format!("TARGET := {}", &self.docname));
+        Doc::gen_file(&new_mk_cont, "Makefile")?;
+
         Doc::gen_file(include_str!("../assets/gitignore"), ".gitignore")?;
         Doc::gen_file(include_str!("../assets/latexmkrc"), ".latexmkrc")?;
 
@@ -164,10 +173,7 @@ impl Doc {
 
     pub fn clean_project(&self, distclean: bool) -> Result<(), std::io::Error> {
         if distclean {
-            // we can just remove output directory in the doc path
-            let mut output_dir = self.path.to_path_buf();
-            output_dir.push("output");
-            fs::remove_dir_all(&output_dir.as_path())?;
+            do_cmd("make", &["dist-clean"])?;
         } else {
             // ... call make clean
             do_cmd("make", &["clean"])?;
@@ -175,49 +181,145 @@ impl Doc {
 
         Ok(())
     }
+
+    pub fn create_entry(&self, title: &str, doctype: &str) -> Result<(), std::io::Error> {
+
+        match doctype {
+            "ebook-md" => {
+                let cont = entry::make_md(title, &self.author, entry::DocType::EBOOK);
+                Doc::gen_file(&cont, "main.md")?;
+            },
+            "enote-md" => {
+                let cont = entry::make_md(title, &self.author, entry::DocType::ENOTE);
+                Doc::gen_file(&cont, "main.md")?;
+            },
+            _ => {  },
+        };
+
+        Ok(())
+    }
+}
+
+mod entry {
+    use indoc::formatdoc;
+    use chrono::prelude::*;
+
+    pub enum DocType {
+        EBOOK,
+        ENOTE,
+    }
+
+    pub fn make_md(title: &str, author: &str, dt: DocType) -> String {
+
+        let local: DateTime<Local> = Local::now();
+        let date = local.format("%Y/%m/%d").to_string();
+
+        let ebook = r#"
+documentclass: elegantbook
+papersize: a4
+classoption:
+  - cn
+  - chinese
+  - fancy
+  - onecol
+  - device=normal
+        "#;
+
+        let enote = r#"
+documentclass: elegantnote
+papersize: a4
+classoption:
+  - cn
+  - device=normal
+        "#;
+
+        let doctype: &str;
+        match dt {
+            DocType::EBOOK => doctype = ebook,
+            DocType::ENOTE => doctype = enote,
+        }
+            
+        let entry_md = formatdoc!(r#"
+---
+title: {title}
+author:
+  - {author}
+date:
+  - {date}
+
+{doctype}
+
+indent: true
+listings: true
+numbersections:
+  - sectiondepth: 5
+
+#bibliography: cs.bib
+#nocite: |
+#  @*
+
+csl: computer.csl
+#colorlinks: true
+graphics: true
+
+toc: true
+lof: true
+lot: true
+
+header-includes:
+  - |
+    ```{{=latex}}
+    \usepackage{{bookmark}}
+    \usepackage{{xr}}
+    \usepackage{{lstlangarm}}
+    \usepackage{{pdfpages}}
+
+    \usepackage{{utils}}
+
+    \usepackage{{circuitikz}}
+
+    \usepackage{{wrapfig}}
+    \usepackage{{enumitem}}
+    \setlist[description]{{nosep,labelindent=2em,leftmargin=4em}}
+
+    \usepackage{{bytefield}}
+    \lstset{{defaultdialect=[ARM]Assembler}}
+    \captionsetup{{font=small}}
+
+    %\cover{{cover}}
+    ```
+
+include-before:
+  - |
+    ```{{=latex}}
+    ```
+include-after:
+  - |
+    ```{{=latex}}
+    ```
+before-body:
+  - |
+    ```{{=latex}}
+    ```
+after-body:
+  - |
+    ```{{=latex}}
+    ```
+...
+
+```{{.include}}
+
+```
+
+\newpage
+# 参考文献
+        "#, title = title, author = author, date = date, doctype = doctype);
+
+        entry_md
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn test_doc_struct_new() {
-        let mydoc = Doc::new("mydoc", &PathBuf::from("./mydoc"), "wbr", "v0.1", "v1.0", "zh_CN");
-        assert_eq!(mydoc, Doc {
-            name: String::from("mydoc"),
-            path: PathBuf::from("./mydoc"),
-            author: String::from("wbr"),
-            version: String::from("v0.1"),
-            release: String::from("v1.0"),
-            language: String::from("zh_CN")
-        })
-    }
-
-    #[test]
-    fn test_doc_create() {
-        let mydoc = Doc::new("mydoc", &PathBuf::from("./mydoc"), "wbr", "v0.1", "v1.0", "zh_CN");
-
-        let r = mydoc.create_project();
-        assert_eq!(r.is_ok(), true);
-    }
-
-    #[test]
-    fn test_doc_init() {
-        let mydoc = Doc::new("mydoc", &PathBuf::from("./compiler"), "wbr", "v0.1", "v1.0", "zh_CN");
-
-        let r = mydoc.init_project();
-        assert_eq!(r.is_ok(), true);
-    }
-
-    #[test]
-    fn test_doc_build() {
-
-    }
-
-    #[test]
-    fn test_doc_clean() {
-
-    }
 }
 
