@@ -91,7 +91,7 @@ enum Commands {
         builder: Option<String>,
 
         /// path to documentation project
-        path: String, 
+        path: Option<String>,
         /// path to output directory
         output: Option<String>,
 
@@ -104,7 +104,7 @@ enum Commands {
         distclean: bool,
 
         /// path to documentation project
-        path: String,
+        path: Option<String>,
 
     },
 
@@ -162,21 +162,25 @@ pub fn cli() {
                 Ok(_) => { },
                 Err(e) => { eprintln!("initial project failed ({})", e) },
             }
-
-            match doc.create_entry(&title, &doctype) {
-                Ok(_) => { },
-                Err(e) => { eprintln!("create entry failed {}", e) }
-            }
         },
         Commands::Build { path, output, builder } => {
-            let doc = Doc::new("", &path, "", "", "", "", "", "");
+            let doc: Doc;
+            match path {
+                Some(path) => doc = Doc::new("", &path, "", "", "", "", "", ""),
+                None => doc = Doc::new("", ".", "", "", "", "", "", ""),
+            };
             match doc.build_project(output, builder) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("build project failed ({})", e) },
             }
         },
         Commands::Clean { path, distclean } => {
-            let doc = Doc::new("", &path, "", "", "", "", "", "");
+            let doc: Doc;
+            match path {
+                Some(path) => doc = Doc::new("", &path, "", "", "", "", "", ""),
+                None => doc = Doc::new("", ".", "", "", "", "", "", ""),
+            };
+
             match doc.clean_project(distclean) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("clean project failed ({})", e) },
@@ -211,11 +215,6 @@ pub fn cli() {
             match doc.create_project() {
                 Ok(_) => { },
                 Err(e) => { eprintln!("create project failed ({})", e) },
-            }
-
-            match doc.create_entry(&title, &doctype) {
-                Ok(_) => { },
-                Err(e) => { eprintln!("create entry failed {}", e) }
             }
         }
         Commands::Config => {

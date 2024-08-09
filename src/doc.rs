@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::string::String;
 use walkdir::WalkDir;
 use std::env;
+use std::io::Error;
 
 use super::fs;
 use super::cmd::do_cmd;
@@ -49,13 +50,13 @@ impl Doc {
         }
     }
 
-    pub fn create_project(&self) -> Result<(), std::io::Error> {
+    pub fn create_project(&self) -> Result<(), Error> {
         self.init_project()?;
 
         Ok(())
     }    
 
-    fn gen_file(cont: &str, target: &str) -> Result<(), std::io::Error>
+    fn gen_file(cont: &str, target: &str) -> Result<(), Error>
     {
         let target_file = PathBuf::from(target);
 
@@ -65,7 +66,7 @@ impl Doc {
         Ok(())
     }
 
-    pub fn init_project(&self) -> Result<(), std::io::Error> {
+    pub fn init_project(&self) -> Result<(), Error> {
 
         let projdir = Path::new(&self.path);
         let md = Path::new("md");
@@ -132,6 +133,11 @@ impl Doc {
         Doc::gen_file(include_str!("../assets/gitignore"), ".gitignore")?;
         Doc::gen_file(include_str!("../assets/latexmkrc"), ".latexmkrc")?;
 
+        match self.create_entry(&self.title, &self.doctype) {
+            Ok(_) => { },
+            Err(e) => { eprintln!("create entry failed {}", e) }
+        }
+
         match git_add(".", &[".gitignore", "Makefile", ".latexmkrc", "figure/README.md"], false) {
             Ok(_) => {},
             Err(e) => eprintln!("git add files failed {}", e),
@@ -147,7 +153,22 @@ impl Doc {
         Ok(())
     }
 
-    pub fn build_project(&self, o: Option<String>, _b: Option<String>) -> Result<(), std::io::Error> {
+    fn check_project(&self) -> bool {
+        let latexmkrc = Path::new(".latexmkrc");
+        let makefile = Path::new("Makefile");
+
+        if latexmkrc.exists() && makefile.exists() {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn build_project(&self, o: Option<String>, _b: Option<String>) -> Result<(), Error> {
+        // check if the path is a valid omnify document
+        if !self.check_project() {
+            return Err(Error::other("not a omnify document path"));
+        }
 
         // create build dir
         match o {
@@ -171,7 +192,12 @@ impl Doc {
         Ok(())
     }
 
-    pub fn clean_project(&self, distclean: bool) -> Result<(), std::io::Error> {
+    pub fn clean_project(&self, distclean: bool) -> Result<(), Error> {
+        // check if the path is a valid omnify document
+        if !self.check_project() {
+            return Err(Error::other("not a omnify document path"));
+        }
+
         if distclean {
             do_cmd("make", &["dist-clean"])?;
         } else {
@@ -182,7 +208,7 @@ impl Doc {
         Ok(())
     }
 
-    pub fn create_entry(&self, title: &str, doctype: &str) -> Result<(), std::io::Error> {
+    fn create_entry(&self, title: &str, doctype: &str) -> Result<(), Error> {
 
         match doctype {
             "ebook-md" => {
@@ -204,11 +230,6 @@ impl Doc {
             _ => {  },
         };
 
-        match git_commit(".", "Add entry file") {
-            Ok(_) => {},
-            Err(e) => eprintln!("git commit failed {}", e),
-        }
-
         Ok(())
     }
 }
@@ -227,24 +248,20 @@ mod entry {
         let local: DateTime<Local> = Local::now();
         let date = local.format("%Y/%m/%d").to_string();
 
-        let ebook = r#"
-documentclass: elegantbook
+        let ebook = r#"documentclass: elegantbook
 papersize: a4
 classoption:
   - cn
   - chinese
   - fancy
   - onecol
-  - device=normal
-        "#;
+  - device=normal"#;
 
-        let enote = r#"
-documentclass: elegantnote
+        let enote = r#"documentclass: elegantnote
 papersize: a4
 classoption:
   - cn
-  - device=normal
-        "#;
+  - device=normal"#;
 
         let doctype: &str;
         match dt {
@@ -325,8 +342,7 @@ after-body:
 ```
 
 \newpage
-# 参考文献
-        "#, title = title, author = author, date = date, doctype = doctype);
+# 参考文献"#, title = title, author = author, date = date, doctype = doctype);
 
         entry_md
     }
