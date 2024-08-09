@@ -12,12 +12,45 @@ pub fn git_clone<P>(url: &str, p: P)
     };
 }
 
-pub fn git_init<P>(p: P)
-    where P: AsRef<Path> {
-    let _repo = match Repository::init(p) {
-        Ok(repo) => repo,
-        Err(e) => panic!("failed to init {}", e),
+/// Unlike regular "git init", this example shows how to create an initial empty
+/// commit in the repository. This is the helper function that does that.
+fn create_initial_commit(repo: &Repository) -> Result<(), git2::Error> {
+    // First use the config to initialize a commit signature for the user.
+    let sig = repo.signature()?;
+
+    // Now let's create an empty tree for this commit
+    let tree_id = {
+        let mut index = repo.index()?;
+
+        // Outside of this example, you could call index.add_path()
+        // here to put actual files into the index. For our purposes, we'll
+        // leave it empty for now.
+
+        index.write_tree()?
     };
+
+    let tree = repo.find_tree(tree_id)?;
+
+    // Ready to create the initial commit.
+    //
+    // Normally creating a commit would involve looking up the current HEAD
+    // commit and making that be the parent of the initial commit, but here this
+    // is the first commit so there will be no parent.
+    repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])?;
+
+    Ok(())
+}
+
+pub fn git_init<P>(p: P, commit: bool) -> Result<(), git2::Error> 
+    where P: AsRef<Path>
+{
+    let repo = Repository::init(p)?;
+
+    if commit {
+        create_initial_commit(&repo)?;
+    }
+
+    Ok(())
 }
 
 fn do_fetch<'a>(
@@ -207,7 +240,7 @@ mod tests {
 
     #[test]
     fn test_git_init() {
-        git_init("test_git_init");
+        let _ = git_init("test_git_init", false);
         assert_eq!(Path::new("test_git_init").exists(), true);
     }
 }
