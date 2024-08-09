@@ -11,7 +11,7 @@ PANDOCMK := $(OMNIDOC_LIB)/tool/pandoc.mk
 # METADATA_FILE  ?= eleg-book
 
 OUTDIR ?= build
-BUILDIR := $(PWD)/$(OUTDIR)
+BUILDIR ?= $(OUTDIR)
 
 ifeq ($(V),)
 	TEXOPTS += -quiet
@@ -42,9 +42,6 @@ pandoc: $(BUILDIR)
 
 $(BUILDIR)/$(TARGET).tex: $(MAIN) $(BUILDIR)
 	@if [[ ! -f $@ ]]; then ln -sf ../$< $@; fi
-
-$(BUILDIR):
-	@mkdir -p $@
 
 pandoc-tex: $(BUILDIR)
 	@make -f $(PANDOCMK) tex

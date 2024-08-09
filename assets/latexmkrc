@@ -56,7 +56,11 @@ $ENV{"TEXINPUTS"} = "./tex//:";
 
 $clean_ext = 'synctex.gz';
 
-$out_dir = 'build';
+if (defined $ENV{OUTDIR}) {
+	$out_dir = $ENV{OUTDIR};
+} else {
+	$out_dir = "build";
+}
 
 $pdf_update_method = 2;
 # $pdf_previewer = "xdg-open %S";

@@ -138,7 +138,24 @@ impl Doc {
         Ok(())
     }
 
-    pub fn build_project(&self, _o: Option<String>, _b: Option<String>) -> Result<(), std::io::Error> {
+    pub fn build_project(&self, o: Option<String>, _b: Option<String>) -> Result<(), std::io::Error> {
+
+        // create build dir
+        match o {
+            Some(od) => {
+                if !Path::new(&od).exists() {
+                    fs::create_dir(&od)?;
+                }
+                env::set_var("OUTDIR", &od);
+            },
+            None     => {
+                if !Path::new("build").exists() {
+                    fs::create_dir("build")?;
+                }
+                env::set_var("OUTDIR", "build");
+            },
+        }
+
         // call make to do default building
         do_cmd("make", &[])?;
 
