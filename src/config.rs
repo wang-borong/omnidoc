@@ -5,6 +5,7 @@ use std::fs;
 use std::path::Path;
 use std::error::Error;
 use dirs::config_local_dir;
+use std::io::Write;
 
 //
 // [[download]]
@@ -101,6 +102,20 @@ impl ConfigParser {
         match &config.lib.path {
             Some(lib_path) => Ok(lib_path.to_owned()),
             None => Err("no omnidoc lib configured".into()),
+        }
+    }
+
+    pub fn gen(&self) -> Result<(), Box<dyn Error>>
+    {
+        let config = include_str!("../assets/omnidoc.toml");
+        if let Some(conf_path) = config_local_dir() {
+            let omnidoc_config_file = conf_path.join("omnidoc.toml");
+            let mut ocf = fs::File::create(&omnidoc_config_file)?;
+            ocf.write_all(config.as_bytes())?;
+
+            Ok(())
+        } else {
+            return Err("no config path in your local".into());
         }
     }
 }

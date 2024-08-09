@@ -1,0 +1,17 @@
+[author]
+name = "王伯榕"
+
+[lib]
+path = "/home/wbr/.local/share/omnidoc"
+
+[[download]]
+url = "https://raw.githubusercontent.com/wang-borong/omnidoc-libs/main/Makefile"
+filename = "Makefile"
+
+[[download]]
+url = "https://raw.githubusercontent.com/wang-borong/omnidoc-libs/main/.latexmkrc"
+filename = ".latexmk"
+
+[[download]]
+url = "https://raw.githubusercontent.com/wang-borong/embedded-knowledge/writing/.gitignore"
+filename = ".gitignore"

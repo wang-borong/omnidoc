@@ -38,9 +38,6 @@ enum Commands {
         /// set language
         #[arg(short, long)]
         language: Option<String>,
-        /// set suffix
-        #[arg(short, long)]
-        suffix: Option<String>,
 
         // create makefile
         //#[arg(long, default_value_t = false)]
@@ -64,9 +61,6 @@ enum Commands {
         /// set language
         #[arg(short, long)]
         language: Option<String>,
-        /// set suffix
-        #[arg(short, long)]
-        suffix: Option<String>,
     },
 
     /// build the document project
@@ -86,6 +80,9 @@ enum Commands {
         /// path to documentation project
         path: String,
     },
+
+    /// generate configuration
+    Config,
 }
 
 pub fn cli() {
@@ -97,7 +94,7 @@ pub fn cli() {
     let author_conf = config.get_author_name();
 
     match args.command {
-        Commands::Init { path, author, docver, release, language, suffix } => {
+        Commands::Init { path, author, docver, release, language } => {
             let author = match author {
                 Some(author) => author,
                 None => {
@@ -139,7 +136,7 @@ pub fn cli() {
                 Err(e) => { eprintln!("clean project failed ({})", e) },
             }
         },
-        Commands::Create { project, root, author, docver, release, language, suffix } => {
+        Commands::Create { project, root, author, docver, release, language } => {
             let root = match root {
                 Some(root) => root,
                 None => "./".to_string(),
@@ -169,6 +166,12 @@ pub fn cli() {
             match doc.create_project() {
                 Ok(_) => { },
                 Err(e) => { eprintln!("create project failed ({})", e) },
+            }
+        }
+        Commands::Config => {
+            match config.gen() {
+                Ok(_) => println!("generate configuration success"),
+                Err(e)  => eprintln!("generate configuration failed: {}", e),
             }
         }
     }
