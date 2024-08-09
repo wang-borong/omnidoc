@@ -104,16 +104,19 @@ impl Doc {
             fs::create_dir(&biblio)?;
         }
 
-        // move all markdown
-        //fs::rename(from, to);
         // Walk through the current directory and find .md or .tex files
         for entry in WalkDir::new(".").into_iter().filter_map(|e| e.ok()) {
             let path = entry.path();
             let fext = path.extension().and_then(|s| s.to_str());
+            let fstem = path.file_stem().and_then(|s| s.to_str());
             if path.is_file() && (fext == Some("md")
                             || fext == Some("tex")) {
                 let file_name = path.file_name().unwrap();
                 let destination;
+
+                if fstem == Some("main") {
+                    continue;
+                }
 
                 if fext == Some("md") {
                     destination = md.join(file_name);
@@ -121,7 +124,7 @@ impl Doc {
                     destination = tex.join(file_name);
                 }
 
-                // Move the file to the 'md' directory
+                // Move the file to the 'md' or 'tex' directory
                 fs::rename(path, destination)?;
                 //println!("Moved: {} to {}", path.display(), fext.unwrap());
             }
