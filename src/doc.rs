@@ -25,6 +25,14 @@ impl Doc {
         where P: AsRef<Path>
     {
         let pathbuf = PathBuf::new().join(path).join(name);
+
+        if !pathbuf.exists() {
+            let _ = fs::create_dir(&pathbuf);
+        }
+        // NOTE: We changed to the project directory,
+        // the all document operations are in its directory.
+        let _ = env::set_current_dir(&pathbuf);
+
         Self {
             name: String::from(name),
             path: pathbuf,
@@ -62,12 +70,6 @@ impl Doc {
         let drawio = Path::new("drawio");
         let figure = Path::new("figure");
         let figures = Path::new("figures");
-
-        if !projdir.exists() {
-            fs::create_dir(&projdir)?;
-        }
-        // NOTE: We changed to the project directory
-        env::set_current_dir(&projdir)?;
 
         match git_init(".", true) {
             Ok(_) => {},
