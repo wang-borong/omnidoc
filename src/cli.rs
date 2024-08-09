@@ -24,11 +24,6 @@ struct OmniCli {
 enum Commands {
     /// create a new project
     Create {
-        /// set project name
-        #[arg(short, long)]
-        project: String, // it's also the doc name
-        /// set root path to create the documentation project
-        root: Option<String>,
         /// set author name
         #[arg(short, long)]
         author: Option<String>,
@@ -41,6 +36,9 @@ enum Commands {
         /// set language
         #[arg(short, long)]
         language: Option<String>,
+
+        /// set project path to create the documentation project
+        path: String,
 
         // create makefile
         //#[arg(long, default_value_t = false)]
@@ -49,9 +47,6 @@ enum Commands {
 
     /// init a project
     Init {
-        /// path to documentation project
-        #[arg(short, long)]
-        path: String,
         /// set author name
         #[arg(short, long)]
         author: Option<String>,
@@ -64,28 +59,33 @@ enum Commands {
         /// set language
         #[arg(short, long)]
         language: Option<String>,
+
+        /// path to documentation project
+        path: String,
     },
 
     /// build the document project
     Build {
+        /// builder to use (default to 'pdf')
+        #[arg(short, long)]
+        builder: Option<String>,
+
         /// path to documentation project
         path: String, 
         /// path to output directory
         output: Option<String>,
 
-        /// builder to use (default to 'pdf')
-        #[arg(short, long)]
-        builder: Option<String>,
     },
 
     /// clean the document project
     Clean {
-        /// path to documentation project
-        path: String,
-
         /// distclean project
         #[arg(short, long)]
         distclean: bool,
+
+        /// path to documentation project
+        path: String,
+
     },
 
     /// generate configuration
@@ -153,13 +153,9 @@ pub fn cli() {
                 Err(e) => { eprintln!("clean project failed ({})", e) },
             }
         },
-        Commands::Create { project, root, author, docver, release, language } => {
+        Commands::Create { path, author, docver, release, language } => {
             config.parse();
             let author_conf = config.get_author_name();
-            let root = match root {
-                Some(root) => root,
-                None => "./".to_string(),
-            };
             let author = match author {
                 Some(author) => author,
                 None => {
@@ -181,7 +177,7 @@ pub fn cli() {
                 Some(language) => language,
                 None => "zh".to_string(),
             };
-            let doc = Doc::new(&project, &root, &author, &docver, &release, &language);
+            let doc = Doc::new("", &path, &author, &docver, &release, &language);
             match doc.create_project() {
                 Ok(_) => { },
                 Err(e) => { eprintln!("create project failed ({})", e) },
