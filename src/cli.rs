@@ -88,8 +88,6 @@ enum Commands {
 pub fn cli() {
     let args = OmniCli::parse();
 
-    println!("{:?}", args);
-
     let config = ConfigParser::default();
     let author_conf = config.get_author_name();
 

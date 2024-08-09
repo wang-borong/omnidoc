@@ -8,8 +8,6 @@ use walkdir::WalkDir;
 use std::env;
 
 use super::fs;
-use super::config::ConfigParser;
-use super::webreq::https_download;
 use super::cmd::do_cmd;
 
 #[derive(Debug, PartialEq)]
@@ -44,6 +42,16 @@ impl Doc {
 
         Ok(())
     }    
+
+    fn gen_file(cont: &str, target: &str) -> Result<(), std::io::Error>
+    {
+        let target_file = PathBuf::from(target);
+
+        let mut target_fh = fs::File::create(&target_file)?;
+        target_fh.write_all(cont.as_bytes())?;
+
+        Ok(())
+    }
 
     pub fn init_project(&self) -> Result<(), std::io::Error> {
 
@@ -102,20 +110,10 @@ impl Doc {
             }
         }
 
-        let figreadme_str = include_str!("../assets/docfig-readme.md");
-        let fr_path = figure.join("README.md");
-        let mut figreadme = fs::File::create(&fr_path)?;
-        figreadme.write_all(figreadme_str.as_bytes())?;
-
-        let config = ConfigParser::default();
-        let conf = config.get_downloads();
-        
-        for (url, filename) in &conf.unwrap() {
-            match https_download(url, filename) {
-                Err(_) => eprintln!("Error to download {}", filename),
-                Ok(_) => println!("Download {} success", filename),
-            }
-        }
+        Doc::gen_file(include_str!("../assets/docfig-readme.md"), "figure/README.md")?;
+        Doc::gen_file(include_str!("../assets/Makefile"), "Makefile")?;
+        Doc::gen_file(include_str!("../assets/gitignore"), ".gitignore")?;
+        Doc::gen_file(include_str!("../assets/latexmkrc"), ".latexmkrc")?;
 
         Ok(())
     }
