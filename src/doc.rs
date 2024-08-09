@@ -188,13 +188,26 @@ impl Doc {
             "ebook-md" => {
                 let cont = entry::make_md(title, &self.author, entry::DocType::EBOOK);
                 Doc::gen_file(&cont, "main.md")?;
+                match git_add(".", &["main.md"], false) {
+                    Ok(_) => {},
+                    Err(e) => eprintln!("git add files failed {}", e),
+                }
             },
             "enote-md" => {
                 let cont = entry::make_md(title, &self.author, entry::DocType::ENOTE);
                 Doc::gen_file(&cont, "main.md")?;
+                match git_add(".", &["main.md"], false) {
+                    Ok(_) => {},
+                    Err(e) => eprintln!("git add files failed {}", e),
+                }
             },
             _ => {  },
         };
+
+        match git_commit(".", "Add entry file") {
+            Ok(_) => {},
+            Err(e) => eprintln!("git commit failed {}", e),
+        }
 
         Ok(())
     }
