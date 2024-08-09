@@ -112,8 +112,8 @@ impl Doc {
         
         for (url, filename) in &conf.unwrap() {
             match https_download(url, filename) {
-                Err(_) => eprintln!("error to download {}", filename),
-                Ok(_) => {},
+                Err(_) => eprintln!("Error to download {}", filename),
+                Ok(_) => println!("Download {} success", filename),
             }
         }
 

@@ -18,12 +18,7 @@ pub fn https_download<P>(url: &str, file: P) -> Result<(), Box<dyn std::error::E
 
         // Copy the content to the file
         copy(&mut content, &mut file)?;
-
-        println!("File downloaded successfully!");
-    } else {
-        println!("Failed to download file: HTTP {}", response.status());
     }
-
     Ok(())
 }
 

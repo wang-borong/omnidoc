@@ -18,11 +18,20 @@ struct DownloadConfig {
 }
 
 #[derive(Deserialize, Debug)]
+struct Author {
+    name: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct Lib {
+    path: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
 struct Config {
     download: Vec<DownloadConfig>,
-    author:   Option<String>,
-    pandoc:   Option<String>,
-    texmf:    Option<String>,
+    author:   Author,
+    lib:      Lib,
 }
 
 pub struct ConfigParser {
@@ -75,33 +84,23 @@ impl ConfigParser {
         Ok(downloads)
     }
 
-    pub fn get_author(&self) -> Result<String, Box<dyn Error>>
+    pub fn get_author_name(&self) -> Result<String, Box<dyn Error>>
     {
         let config = &self.config;
 
-        match &config.author {
+        match &config.author.name {
             Some(author) => Ok(author.to_owned()),
-            None => Err("no author config".into())
-        }
-    }
-    
-    pub fn get_pandoc_dir(&self) -> Result<String, Box<dyn Error>>
-    {
-        let config = &self.config;
-
-        match &config.pandoc {
-            Some(pandoc) => Ok(pandoc.to_owned()),
-            None => Err("no pandoc config".into()),
+            None => Err("no author name configured".into())
         }
     }
 
-    pub fn get_texmf_dir(&self) -> Result<String, Box<dyn Error>>
+    pub fn get_omnidoc_lib(&self) -> Result<String, Box<dyn Error>>
     {
         let config = &self.config;
 
-        match &config.texmf {
-            Some(texmf) => Ok(texmf.to_owned()),
-            None => Err("no pandoc config".into()),
+        match &config.lib.path {
+            Some(lib_path) => Ok(lib_path.to_owned()),
+            None => Err("no omnidoc lib configured".into()),
         }
     }
 }
