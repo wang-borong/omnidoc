@@ -1,7 +1,10 @@
 use clap::{Parser, Subcommand};
-use omnidoc::doc::Doc;
+use git2::Repository;
+use dirs::data_local_dir;
 
+use omnidoc::doc::Doc;
 use omnidoc::config::ConfigParser;
+use omnidoc::git::git_pull;
 
 //
 // Create a git-like cli program to manage our document project.
@@ -83,6 +86,17 @@ enum Commands {
 
     /// generate configuration
     Config,
+
+    /// omnidoc maintenance
+    Lib {
+        /// install omnidoc lib to XDG_DATA_DIR
+        #[arg(short, long)]
+        install: bool,
+
+        /// update omnidoc lib
+        #[arg(short, long)]
+        update: bool,
+    }
 }
 
 pub fn cli() {
@@ -170,6 +184,23 @@ pub fn cli() {
             match config.gen() {
                 Ok(_) => println!("generate configuration success"),
                 Err(e)  => eprintln!("generate configuration failed: {}", e),
+            }
+        }
+        Commands::Lib { install, update } => {
+            let dld = data_local_dir().unwrap();
+            let olib = dld.join("omnidoc");
+
+            if install  {
+                let _repo = match Repository::clone_recurse("https://github.com/wang-borong/omnidoc-libs", &olib) {
+                    Ok(repo) => repo,
+                    Err(e) => panic!("failed to clone {}", e),
+                };
+
+            } else if update {
+                match git_pull(&olib) {
+                    Ok(()) => println!("update {} success", olib.display()),
+                    Err(e) => eprintln!("update {} failed {}", olib.display(), e),
+                }
             }
         }
     }
