@@ -6,10 +6,9 @@ use std::fmt;
 use std::string::String;
 use walkdir::WalkDir;
 use std::env;
-use dirs::config_dir;
 
 use super::fs;
-use super::config::read_download_config;
+use super::config::ConfigParser;
 use super::webreq::https_download;
 use super::cmd::do_cmd;
 
@@ -108,9 +107,8 @@ impl Doc {
         let mut figreadme = fs::File::create(&fr_path)?;
         figreadme.write_all(figreadme_str.as_bytes())?;
 
-        let conf_dir = config_dir();
-        let conf_file = conf_dir.unwrap().join("omnidoc.toml");
-        let conf = read_download_config(&conf_file);
+        let config = ConfigParser::default();
+        let conf = config.get_downloads();
         
         for (url, filename) in &conf.unwrap() {
             match https_download(url, filename) {

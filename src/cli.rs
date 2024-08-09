@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use omnidoc::doc::Doc;
 
+use omnidoc::config::ConfigParser;
 
 //
 // Create a git-like cli program to manage our document project.
@@ -92,26 +93,33 @@ pub fn cli() {
 
     println!("{:?}", args);
 
+    let config = ConfigParser::default();
+    let author_conf = config.get_author();
+
     match args.command {
         Commands::Init { path, author, docver, release, language, suffix } => {
-            // TODO: Use configuration file to set the default infos
-            let _author = match author {
-                Some(_author) => _author,
-                None => "王伯榕".to_string(),
+            let author = match author {
+                Some(author) => author,
+                None => {
+                    match author_conf {
+                        Ok(author) => author,
+                        Err(_) => "Someone".to_string(),
+                    }
+                }
             };
-            let _docver = match docver {
-                Some(_docver) => _docver,
+            let docver = match docver {
+                Some(docver) => docver,
                 None => "v0.1".to_string(),
             };
-            let _release = match release {
-                Some(_release) => _release,
+            let release = match release {
+                Some(release) => release,
                 None => "v1.0".to_string(),
             };
-            let _language = match language {
-                Some(_language) => _language,
+            let language = match language {
+                Some(language) => language,
                 None => "zh".to_string(),
             };
-            let doc = Doc::new("", &path, &_author, &_docver, &_release, &_language);
+            let doc = Doc::new("", &path, &author, &docver, &release, &language);
             match doc.init_project() {
                 Ok(_) => { },
                 Err(e) => { eprintln!("initial project failed ({})", e) },
@@ -132,27 +140,32 @@ pub fn cli() {
             }
         },
         Commands::Create { project, root, author, docver, release, language, suffix } => {
-            let _root = match root {
-                Some(_root) => _root,
+            let root = match root {
+                Some(root) => root,
                 None => "./".to_string(),
             };
-            let _author = match author {
-                Some(_author) => _author,
-                None => "王伯榕".to_string(),
+            let author = match author {
+                Some(author) => author,
+                None => {
+                    match author_conf {
+                        Ok(author) => author,
+                        Err(_) => "Someone".to_string(),
+                    }
+                }
             };
-            let _docver = match docver {
-                Some(_docver) => _docver,
+            let docver = match docver {
+                Some(docver) => docver,
                 None => "v0.1".to_string(),
             };
-            let _release = match release {
-                Some(_release) => _release,
+            let release = match release {
+                Some(release) => release,
                 None => "v1.0".to_string(),
             };
-            let _language = match language {
-                Some(_language) => _language,
+            let language = match language {
+                Some(language) => language,
                 None => "zh".to_string(),
             };
-            let doc = Doc::new(&project, &_root, &_author, &_docver, &_release, &_language);
+            let doc = Doc::new(&project, &root, &author, &docver, &release, &language);
             match doc.create_project() {
                 Ok(_) => { },
                 Err(e) => { eprintln!("create project failed ({})", e) },
