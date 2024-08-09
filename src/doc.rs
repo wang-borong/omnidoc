@@ -8,6 +8,7 @@ use std::env;
 
 use super::fs;
 use super::cmd::do_cmd;
+use super::git::{git_init, git_add, git_commit};
 
 #[derive(Debug, PartialEq)]
 pub struct Doc {
@@ -65,7 +66,13 @@ impl Doc {
         if !projdir.exists() {
             fs::create_dir(&projdir)?;
         }
+        // NOTE: We changed to the project directory
         env::set_current_dir(&projdir)?;
+
+        match git_init(".", true) {
+            Ok(_) => {},
+            Err(e) => eprintln!("git init project failed {}", e),
+        }
 
         if !md.exists() {
             fs::create_dir(&md)?;
@@ -105,7 +112,7 @@ impl Doc {
 
                 // Move the file to the 'md' directory
                 fs::rename(path, destination)?;
-                println!("Moved: {:?} to {}", path, fext.unwrap());
+                //println!("Moved: {} to {}", path.display(), fext.unwrap());
             }
         }
 
@@ -113,6 +120,18 @@ impl Doc {
         Doc::gen_file(include_str!("../assets/Makefile"), "Makefile")?;
         Doc::gen_file(include_str!("../assets/gitignore"), ".gitignore")?;
         Doc::gen_file(include_str!("../assets/latexmkrc"), ".latexmkrc")?;
+
+        match git_add(".", &[".gitignore", "Makefile", ".latexmkrc", "figure/README.md"], false) {
+            Ok(_) => {},
+            Err(e) => eprintln!("git add files failed {}", e),
+        }
+
+        match git_commit(".", "Create project") {
+            Ok(_) => {},
+            Err(e) => eprintln!("git commit failed {}", e),
+        }
+
+        println!("omnify project '{}' has been created", projdir.display());
 
         Ok(())
     }

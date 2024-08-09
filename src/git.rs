@@ -53,7 +53,7 @@ pub fn git_init<P>(p: P, commit: bool) -> Result<(), git2::Error>
     Ok(())
 }
 
-pub fn git_add<P>(repo: P, files: Vec<String>, update: bool) -> Result<(), git2::Error>
+pub fn git_add<P>(repo: P, files: &[&str], update: bool) -> Result<(), git2::Error>
     where P: AsRef<Path> {
     let repo = Repository::open(&repo)?;
     let mut index = repo.index()?;

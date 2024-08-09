@@ -106,11 +106,12 @@ enum Commands {
 pub fn cli() {
     let args = OmniCli::parse();
 
-    let config = ConfigParser::default();
-    let author_conf = config.get_author_name();
+    let mut config = ConfigParser::default();
 
     match args.command {
         Commands::Init { path, author, docver, release, language } => {
+            config.parse();
+            let author_conf = config.get_author_name();
             let author = match author {
                 Some(author) => author,
                 None => {
@@ -153,6 +154,8 @@ pub fn cli() {
             }
         },
         Commands::Create { project, root, author, docver, release, language } => {
+            config.parse();
+            let author_conf = config.get_author_name();
             let root = match root {
                 Some(root) => root,
                 None => "./".to_string(),
