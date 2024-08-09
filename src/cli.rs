@@ -94,7 +94,7 @@ pub fn cli() {
     println!("{:?}", args);
 
     let config = ConfigParser::default();
-    let author_conf = config.get_author();
+    let author_conf = config.get_author_name();
 
     match args.command {
         Commands::Init { path, author, docver, release, language, suffix } => {
