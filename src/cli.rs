@@ -82,6 +82,10 @@ enum Commands {
     Clean {
         /// path to documentation project
         path: String,
+
+        /// distclean project
+        #[arg(short, long)]
+        distclean: bool,
     },
 
     /// generate configuration
@@ -141,9 +145,9 @@ pub fn cli() {
                 Err(e) => { eprintln!("build project failed ({})", e) },
             }
         },
-        Commands::Clean { path } => {
+        Commands::Clean { path, distclean } => {
             let doc = Doc::new("", &path, "", "", "", "");
-            match doc.clean_project() {
+            match doc.clean_project(distclean) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("clean project failed ({})", e) },
             }
