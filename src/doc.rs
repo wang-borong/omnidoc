@@ -2,7 +2,6 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::fmt;
 use std::string::String;
 use walkdir::WalkDir;
 use std::env;
@@ -118,8 +117,8 @@ impl Doc {
         Ok(())
     }
 
-    pub fn build_project(&self, o: Option<String>, b: Option<String>) -> Result<(), std::io::Error> {
-        // call make
+    pub fn build_project(&self, _o: Option<String>, _b: Option<String>) -> Result<(), std::io::Error> {
+        // call make to do default building
         do_cmd("make", &[])?;
 
         Ok(())
@@ -139,33 +138,6 @@ impl Doc {
         Ok(())
     }
 }
-
-#[derive(Debug)]
-struct DocError {
-    //source: DocErrorSrc
-}
-
-impl fmt::Display for DocError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DocError occured!")
-    }
-}
-
-//impl Error for DocError {
-//    fn source(&self) -> Option<&(dyn Error + 'static)> {
-//        Some(&self.source)
-//    }
-//}
-
-//#[derive(Debug)]
-//struct DocErrorSrc;
-//
-//impl fmt::Display for DocErrorSrc {
-//    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//        write!(f, "DocErrorSrc occured")
-//    }
-//}
-
 
 #[cfg(test)]
 mod tests {

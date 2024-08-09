@@ -7,11 +7,6 @@ use std::error::Error;
 use dirs::config_local_dir;
 use std::io::Write;
 
-//
-// [[download]]
-// url = ""
-// filename = ""
-//
 #[derive(Deserialize, Debug)]
 struct DownloadConfig {
     url:      String,
