@@ -75,6 +75,7 @@ impl Doc {
         let drawio = Path::new("drawio");
         let figure = Path::new("figure");
         let figures = Path::new("figures");
+        let biblio = Path::new("biblio");
 
         match git_init(".", true) {
             Ok(_) => {},
@@ -98,6 +99,9 @@ impl Doc {
         }
         if !figures.exists() {
             fs::create_dir(&figures)?;
+        }
+        if !biblio.exists() {
+            fs::create_dir(&biblio)?;
         }
 
         // move all markdown

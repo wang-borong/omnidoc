@@ -1,5 +1,5 @@
 XDG_DATA_DIR := $(HOME)/.local/share
-OMNIDOC_LIB  := $(XDG_DATA_DIR)/omnidoc
+OMNIDOC_LIB  ?= $(XDG_DATA_DIR)/omnidoc
 
 LATEXMK := latexmk
 FIGENERATOR := python3 $(OMNIDOC_LIB)/tool/figure-generator.py
