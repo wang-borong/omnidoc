@@ -201,7 +201,7 @@ pub fn cli() {
                 };
 
             } else if update {
-                match git_pull(&olib) {
+                match git_pull(&olib, "origin", "main") {
                     Ok(()) => println!("update {} success", olib.display()),
                     Err(e) => eprintln!("update {} failed {}", olib.display(), e),
                 }

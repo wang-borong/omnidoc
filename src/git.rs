@@ -53,6 +53,63 @@ pub fn git_init<P>(p: P, commit: bool) -> Result<(), git2::Error>
     Ok(())
 }
 
+pub fn git_add<P>(repo: P, files: Vec<String>, update: bool) -> Result<(), git2::Error>
+    where P: AsRef<Path> {
+    let repo = Repository::open(&repo)?;
+    let mut index = repo.index()?;
+
+    let cb = &mut |path: &Path, _matched_spec: &[u8]| -> i32 {
+        let status = repo.status_file(path).unwrap();
+
+        let ret = if status.contains(git2::Status::WT_MODIFIED)
+            || status.contains(git2::Status::WT_NEW)
+        {
+            println!("add '{}'", path.display());
+            0
+        } else {
+            1
+        };
+
+        ret
+    };
+    let cb = if update {
+        Some(cb as &mut git2::IndexMatchedPath)
+    } else {
+        None
+    };
+
+    if update {
+        index.update_all(files.iter(), cb)?;
+    } else {
+        index.add_all(files.iter(), git2::IndexAddOption::DEFAULT, cb)?;
+    }
+
+    index.write()?;
+
+    Ok(())
+}
+
+pub fn git_commit<P>(repo: P, msg: &str) -> Result<(), git2::Error>
+    where P: AsRef<Path> {
+    let repo = Repository::open(&repo)?;
+
+    let mut index = repo.index()?;
+    let oid = index.write_tree()?;
+    let signature = repo.signature()?;
+    let parent_commit = repo.head()?.peel_to_commit()?;
+    let tree = repo.find_tree(oid)?;
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        msg,
+        &tree,
+        &[&parent_commit],
+    )?;
+
+    Ok(())
+}
+
 fn do_fetch<'a>(
     repo: &'a git2::Repository,
     refs: &[&str],
@@ -220,12 +277,12 @@ fn do_merge<'a>(
     Ok(())
 }
 
-pub fn git_pull<P>(repo: P) -> Result<(), git2::Error>
+pub fn git_pull<P>(repo: P, remote: &str, branch: &str) -> Result<(), git2::Error>
     where P: AsRef<Path> {
     let repo = Repository::open(repo)?;
-    let mut remote = repo.find_remote("origin")?;
-    let fetch_commit = do_fetch(&repo, &["main"], &mut remote)?;
-    do_merge(&repo, "main", fetch_commit)
+    let mut remote = repo.find_remote(remote)?;
+    let fetch_commit = do_fetch(&repo, &[branch], &mut remote)?;
+    do_merge(&repo, branch, fetch_commit)
 }
 
 #[cfg(test)]
