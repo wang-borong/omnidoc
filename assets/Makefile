@@ -11,7 +11,7 @@ PANDOCMK := $(OMNIDOC_LIB)/tool/pandoc.mk
 # METADATA_FILE  ?= eleg-book
 
 OUTDIR ?= build
-BUILDIR ?= $(OUTDIR)
+BUILDIR := $(OUTDIR)
 
 ifeq ($(V),)
 	TEXOPTS += -quiet
