@@ -227,15 +227,15 @@ pub fn cli() {
             let dld = data_local_dir().unwrap();
             let olib = dld.join("omnidoc");
 
-            if install  {
-                let _repo = match Repository::clone_recurse("https://github.com/wang-borong/omnidoc-libs", &olib) {
-                    Ok(repo) => repo,
-                    Err(e) => panic!("failed to clone {}", e),
+            if install {
+                match Repository::clone_recurse("https://github.com/wang-borong/omnidoc-libs", &olib) {
+                    Ok(_) => println!("install {} success", olib.display()),
+                    Err(e) => eprintln!("failed to clone {}", e),
                 };
 
             } else if update {
                 match git_pull(&olib, "origin", "main") {
-                    Ok(()) => println!("update {} success", olib.display()),
+                    Ok(_) => println!("update {} success", olib.display()),
                     Err(e) => eprintln!("update {} failed {}", olib.display(), e),
                 }
             }
