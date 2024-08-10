@@ -160,6 +160,10 @@ impl Doc {
         Ok(())
     }
 
+    pub fn update_project(&self) -> Result<(), Error> {
+        todo!();
+    }
+
     fn check_project(&self) -> bool {
         let latexmkrc = Path::new(".latexmkrc");
         let makefile = Path::new("Makefile");
@@ -215,26 +219,33 @@ impl Doc {
         Ok(())
     }
 
+    fn gen_entry_file(&self, lang: u8, title: &str, doctype: entry::DocType,
+        file: &str) -> Result<(), Error> {
+
+        let cont: String;
+        match lang {
+            1 => cont = entry::make_md(title, &self.author, doctype),
+            2 => cont = entry::make_tex(title, &self.author, doctype),
+            _ => return Err(Error::other("not supported lang")),
+        }
+
+        Doc::gen_file(&cont, file)?;
+        match git_add(".", &[file], false) {
+            Ok(_) => { },
+            Err(e) => return Err(Error::other(format!("git add files failed {}", e))),
+        }
+
+        Ok(())
+    }
+
     fn create_entry(&self, title: &str, doctype: &str) -> Result<(), Error> {
 
         match doctype {
-            "ebook-md" => {
-                let cont = entry::make_md(title, &self.author, entry::DocType::EBOOK);
-                Doc::gen_file(&cont, "main.md")?;
-                match git_add(".", &["main.md"], false) {
-                    Ok(_) => {},
-                    Err(e) => eprintln!("git add files failed {}", e),
-                }
-            },
-            "enote-md" => {
-                let cont = entry::make_md(title, &self.author, entry::DocType::ENOTE);
-                Doc::gen_file(&cont, "main.md")?;
-                match git_add(".", &["main.md"], false) {
-                    Ok(_) => {},
-                    Err(e) => eprintln!("git add files failed {}", e),
-                }
-            },
-            _ => {  },
+            "ebook-md" => self.gen_entry_file(1, title, entry::DocType::EBOOK, "main.md")?,
+            "enote-md" => self.gen_entry_file(1, title, entry::DocType::ENOTE, "main.md")?,
+            "ebook-tex" => self.gen_entry_file(2, title, entry::DocType::EBOOK, "main.tex")?,
+            "enote-tex" => self.gen_entry_file(2, title, entry::DocType::ENOTE, "main.tex")?,
+            _ => { return Err(Error::other(format!("unsupported doctype {}", doctype))) },
         };
 
         Ok(())
@@ -248,6 +259,10 @@ mod entry {
     pub enum DocType {
         EBOOK,
         ENOTE,
+    }
+
+    pub fn make_tex(title: &str, author: &str, dt: DocType) -> String {
+        todo!();
     }
 
     pub fn make_md(title: &str, author: &str, dt: DocType) -> String {

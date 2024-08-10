@@ -108,6 +108,12 @@ enum Commands {
 
     },
 
+    /// update doc repo
+    Update {
+        /// path to documentation project
+        path: Option<String>,
+    },
+
     /// generate configuration
     Config,
 
@@ -217,6 +223,18 @@ pub fn cli() {
                 Err(e) => { eprintln!("create project failed ({})", e) },
             }
         }
+        Commands::Update { path } => {
+            let doc: Doc;
+            match path {
+                Some(path) => doc = Doc::new("", &path, "", "", "", "", "", ""),
+                None => doc = Doc::new("", ".", "", "", "", "", "", ""),
+            };
+
+            match doc.update_project() {
+                Ok(_) => { },
+                Err(e) => { eprintln!("update project failed ({})", e) },
+            }
+        }
         Commands::Config => {
             match config.gen() {
                 Ok(_) => println!("generate configuration success"),
@@ -242,8 +260,10 @@ pub fn cli() {
         }
         Commands::List => {
             println!(r#"doctypes:
-  ebook-md
-  enote-md"#);
+  ebook-md  (elegantbook class based markdown document writing system)
+  enote-md  (elegantnote class based markdown document writing system)
+  ebook-tex (elegantbook class based latex document writing system)
+  enote-tex (elegantnote class based latex document writing system)"#);
         }
     }
 }
