@@ -117,7 +117,7 @@ enum Commands {
     /// generate configuration
     Config,
 
-    /// omnidoc maintenance
+    /// omnidoc library maintenance
     Lib {
         /// install omnidoc lib to XDG_DATA_DIR
         #[arg(short, long)]
