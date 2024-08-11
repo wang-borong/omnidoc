@@ -288,7 +288,7 @@ impl Doc {
             "enote-tex"     => self.gen_entry_file(2, title, entry::DocType::ENOTE, "main.tex")?,
             "mybook-tex"    => self.gen_entry_file(2, title, entry::DocType::MYBOOK, "main.tex")?,
             "myart-tex"     => self.gen_entry_file(2, title, entry::DocType::MYART, "main.tex")?,
-            _ => { return Err(Error::other(format!("Unsupported doctype {}", doctype))) },
+            _ => { return Err(Error::other(format!("Unsupported doctype '{}'", doctype))) },
         };
 
         Ok(())

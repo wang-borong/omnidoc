@@ -3,13 +3,16 @@ use std::path::{Path, PathBuf};
 use std::io::{self, Write};
 use std::str;
 
-pub fn git_clone<P>(url: &str, p: P)
+pub fn git_clone<P>(url: &str, p: P, recurse: bool) -> Result<(), git2::Error>
     where P: AsRef<Path> {
 
-    let _repo = match Repository::clone(url, p) {
-        Ok(repo) => repo,
-        Err(e) => panic!("failed to clone {}", e),
-    };
+    if recurse {
+        Repository::clone_recurse(url, p)?;
+    } else {
+        Repository::clone(url, p)?;
+    }
+
+    Ok(())
 }
 
 /// Unlike regular "git init", this example shows how to create an initial empty
@@ -305,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_git_clone() {
-        git_clone("https://github.com/wang-borong/embedded-knowledge", "embedded-knowledge");
+        let _ = git_clone("https://github.com/wang-borong/embedded-knowledge", "embedded-knowledge", false);
         assert_eq!(Path::new("embedded-knowledge").exists(), true);
     }
 

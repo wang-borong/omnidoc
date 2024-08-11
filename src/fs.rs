@@ -40,7 +40,7 @@ pub fn copy<U: AsRef<Path>, V: AsRef<Path>>(from: U, to: V) -> Result<(), std::i
                         fs::copy(&path, &dest_path)?;
                     }
                     None => {
-                        eprintln!("No such file {}", path.display());
+                        eprintln!("No such file '{}'", path.display());
                     }
                 }
             }
