@@ -111,8 +111,12 @@ impl ConfigParser {
         let config = include_str!("../assets/omnidoc.toml");
         if let Some(conf_path) = config_local_dir() {
             let omnidoc_config_file = conf_path.join("omnidoc.toml");
-            let mut ocf = fs::File::create(&omnidoc_config_file)?;
-            ocf.write_all(config.as_bytes())?;
+            if !omnidoc_config_file.exists() {
+                let mut ocf = fs::File::create(&omnidoc_config_file)?;
+                ocf.write_all(config.as_bytes())?;
+            } else {
+                return Err("the omnidoc.toml already exists".into());
+            }
 
             Ok(())
         } else {
