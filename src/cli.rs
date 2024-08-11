@@ -263,7 +263,9 @@ pub fn cli() {
   ebook-md  (elegantbook class based markdown document writing system)
   enote-md  (elegantnote class based markdown document writing system)
   ebook-tex (elegantbook class based latex document writing system)
-  enote-tex (elegantnote class based latex document writing system)"#);
+  enote-tex (elegantnote class based latex document writing system)
+  myart-tex (myart class based latex document writing system)
+  mybook-tex (mybook class based latex document writing system)"#);
         }
     }
 }

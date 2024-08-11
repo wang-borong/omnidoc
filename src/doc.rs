@@ -241,10 +241,12 @@ impl Doc {
     fn create_entry(&self, title: &str, doctype: &str) -> Result<(), Error> {
 
         match doctype {
-            "ebook-md" => self.gen_entry_file(1, title, entry::DocType::EBOOK, "main.md")?,
-            "enote-md" => self.gen_entry_file(1, title, entry::DocType::ENOTE, "main.md")?,
-            "ebook-tex" => self.gen_entry_file(2, title, entry::DocType::EBOOK, "main.tex")?,
-            "enote-tex" => self.gen_entry_file(2, title, entry::DocType::ENOTE, "main.tex")?,
+            "ebook-md"      => self.gen_entry_file(1, title, entry::DocType::EBOOK, "main.md")?,
+            "enote-md"      => self.gen_entry_file(1, title, entry::DocType::ENOTE, "main.md")?,
+            "ebook-tex"     => self.gen_entry_file(2, title, entry::DocType::EBOOK, "main.tex")?,
+            "enote-tex"     => self.gen_entry_file(2, title, entry::DocType::ENOTE, "main.tex")?,
+            "mybook-tex"    => self.gen_entry_file(2, title, entry::DocType::MYBOOK, "main.tex")?,
+            "myart-tex"     => self.gen_entry_file(2, title, entry::DocType::MYART, "main.tex")?,
             _ => { return Err(Error::other(format!("unsupported doctype {}", doctype))) },
         };
 
@@ -256,13 +258,77 @@ mod entry {
     use indoc::formatdoc;
     use chrono::prelude::*;
 
+    #[derive(PartialEq)]
     pub enum DocType {
         EBOOK,
         ENOTE,
+        MYBOOK,
+        MYART,
+        //MYREPORT,
     }
 
     pub fn make_tex(title: &str, author: &str, dt: DocType) -> String {
-        todo!();
+
+        let local: DateTime<Local> = Local::now();
+        let date = local.format("%Y/%m/%d").to_string();
+
+        let doclass: &str;
+        let frontmatter: &str;
+        let mainmatter: &str;
+
+        match dt {
+            DocType::EBOOK | DocType::MYBOOK => {
+                if dt == DocType::EBOOK {
+                    doclass = r"\documentclass{elegantbook}";
+                } else {
+                    doclass = r#"\documentclass{ctbook}
+\usepackage{mybook}"#;
+                }
+                frontmatter = r"\frontmatter % only for book";
+                mainmatter = r"\mainmatter % only for book";
+            },
+            DocType::ENOTE | DocType::MYART => {
+                if dt == DocType::EBOOK {
+                    doclass = r"\documentclass{elegantnote}";
+                } else {
+                    doclass = r#"\documentclass{ctart}
+\usepackage{myart}"#;
+                }
+                frontmatter = r"";
+                mainmatter = r"";
+
+            },
+            //_ => {
+            //    doclass = r"\usepackage{ctexart}";
+            //    frontmatter = r"";
+            //    mainmatter = r"";
+            //},
+        }
+
+        formatdoc!(r#"{doclass}
+
+%\addbibresource{{}}
+
+% 设置标题，作者与时间
+\title{{{title}}}
+\author{{{author}}}
+\date{{{date}}}
+
+\begin{{document}}
+
+{frontmatter}
+\maketitle
+
+\tableofcontents
+
+{mainmatter}
+% Input your tex files
+% \input{{}}
+
+\clearpage
+%\printbibliography[heading=bibintoc, title=参考文献]
+
+\end{{document}}"#, doclass = doclass, title = title, author = author, date = date)
     }
 
     pub fn make_md(title: &str, author: &str, dt: DocType) -> String {
@@ -289,6 +355,7 @@ classoption:
         match dt {
             DocType::EBOOK => doctype = ebook,
             DocType::ENOTE => doctype = enote,
+            _ => doctype = r"",
         }
             
         let entry_md = formatdoc!(r#"
