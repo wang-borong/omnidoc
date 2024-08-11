@@ -258,6 +258,10 @@ impl Doc {
 
     fn gen_entry_file(&self, lang: u8, title: &str, doctype: entry::DocType,
         file: &str) -> Result<(), Error> {
+        // if the entry file already exists, skip to generate a new one.
+        if Path::new(file).exists() {
+            return Ok(());
+        }
 
         let cont: String;
         match lang {
