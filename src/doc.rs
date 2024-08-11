@@ -112,12 +112,13 @@ impl Doc {
             let path = entry.path();
             let fext = path.extension().and_then(|s| s.to_str());
             let fstem = path.file_stem().and_then(|s| s.to_str());
-            if path.is_file() && (fext == Some("md")
-                            || fext == Some("tex")) {
+            if path.is_file()
+                    && (fext == Some("md") || fext == Some("tex"))
+                    && path.parent() == Some(Path::new(".")) {
                 let file_name = path.file_name().unwrap();
                 let destination;
 
-                if fstem == Some("main") {
+                if fstem == Some("main") || fstem == Some("README") {
                     continue;
                 }
 
