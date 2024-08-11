@@ -64,7 +64,7 @@ pub fn git_add<P>(repo: P, files: &[&str], update: bool) -> Result<(), git2::Err
         let ret = if status.contains(git2::Status::WT_MODIFIED)
             || status.contains(git2::Status::WT_NEW)
         {
-            println!("add '{}'", path.display());
+            //println!("add '{}'", path.display());
             0
         } else {
             1
@@ -120,19 +120,19 @@ fn do_fetch<'a>(
     // Print out our transfer progress.
     cb.transfer_progress(|stats| {
         if stats.received_objects() == stats.total_objects() {
-            print!(
-                "Resolving deltas {}/{}\r",
-                stats.indexed_deltas(),
-                stats.total_deltas()
-            );
+            //print!(
+            //    "Resolving deltas {}/{}\r",
+            //    stats.indexed_deltas(),
+            //    stats.total_deltas()
+            //);
         } else if stats.total_objects() > 0 {
-            print!(
-                "Received {}/{} objects ({}) in {} bytes\r",
-                stats.received_objects(),
-                stats.total_objects(),
-                stats.indexed_objects(),
-                stats.received_bytes()
-            );
+            //print!(
+            //    "Received {}/{} objects ({}) in {} bytes\r",
+            //    stats.received_objects(),
+            //    stats.total_objects(),
+            //    stats.indexed_objects(),
+            //    stats.received_bytes()
+            //);
         }
         io::stdout().flush().unwrap();
         true
@@ -143,28 +143,28 @@ fn do_fetch<'a>(
     // Always fetch all tags.
     // Perform a download and also update tips
     fo.download_tags(git2::AutotagOption::All);
-    println!("Fetching {} for repo", remote.name().unwrap());
+    //println!("Fetching {} for repo", remote.name().unwrap());
     remote.fetch(refs, Some(&mut fo), None)?;
 
     // If there are local objects (we got a thin pack), then tell the user
     // how many objects we saved from having to cross the network.
     let stats = remote.stats();
     if stats.local_objects() > 0 {
-        println!(
-            "\rReceived {}/{} objects in {} bytes (used {} local \
-             objects)",
-            stats.indexed_objects(),
-            stats.total_objects(),
-            stats.received_bytes(),
-            stats.local_objects()
-        );
+        //println!(
+        //    "\rReceived {}/{} objects in {} bytes (used {} local \
+        //     objects)",
+        //    stats.indexed_objects(),
+        //    stats.total_objects(),
+        //    stats.received_bytes(),
+        //    stats.local_objects()
+        //);
     } else {
-        println!(
-            "\rReceived {}/{} objects in {} bytes",
-            stats.indexed_objects(),
-            stats.total_objects(),
-            stats.received_bytes()
-        );
+        //println!(
+        //    "\rReceived {}/{} objects in {} bytes",
+        //    stats.indexed_objects(),
+        //    stats.total_objects(),
+        //    stats.received_bytes()
+        //);
     }
 
     let fetch_head = repo.find_reference("FETCH_HEAD")?;
@@ -181,7 +181,7 @@ fn fast_forward(
         None => String::from_utf8_lossy(lb.name_bytes()).to_string(),
     };
     let msg = format!("Fast-Forward: Setting {} to id: {}", name, rc.id());
-    println!("{}", msg);
+    //println!("{}", msg);
     lb.set_target(rc.id(), &msg)?;
     repo.set_head(&name)?;
     repo.checkout_head(Some(
@@ -207,7 +207,7 @@ fn normal_merge(
     let mut idx = repo.merge_trees(&ancestor, &local_tree, &remote_tree, None)?;
 
     if idx.has_conflicts() {
-        println!("Merge conflicts detected...");
+        //println!("Merge conflicts detected...");
         repo.checkout_index(Some(&mut idx), None)?;
         return Ok(());
     }
@@ -241,7 +241,7 @@ fn do_merge<'a>(
 
     // 2. Do the appropriate merge
     if analysis.0.is_fast_forward() {
-        println!("Doing a fast forward");
+        //println!("Doing a fast forward");
         // do a fast forward
         let refname = format!("refs/heads/{}", remote_branch);
         match repo.find_reference(&refname) {
@@ -272,8 +272,9 @@ fn do_merge<'a>(
         let head_commit = repo.reference_to_annotated_commit(&repo.head()?)?;
         normal_merge(&repo, &head_commit, &fetch_commit)?;
     } else {
-        println!("Nothing to do...");
+        //println!("Nothing to do...");
     }
+
     Ok(())
 }
 
