@@ -50,7 +50,7 @@ impl ConfigParser {
 
     pub fn default() -> Self
     {
-        let config_local_dir = config_local_dir().expect("no config dir in your local");
+        let config_local_dir = config_local_dir().expect("No ~/.config in your system");
         let omnidoc_config_file = config_local_dir.join("omnidoc.toml");
 
         Self {
@@ -59,15 +59,17 @@ impl ConfigParser {
         }
     }
 
-    pub fn parse(&mut self) {
+    pub fn parse(&mut self) -> Result<(), Box<dyn Error>> {
         if !self.path.exists() {
-            panic!("no omnidoc config file, please create it by `omnidoc config'");
+            return Err("No omnidoc config file, please create it by 'omnidoc config'".into());
         }
 
         let config_cont = fs::read_to_string(&self.path).unwrap_or("".to_string());
         let config: Config = toml::from_str(&config_cont).expect("can not parse configs");
 
         self.config = Some(config);
+
+        Ok(())
     }
 
     pub fn get_downloads(&self) -> Result<HashMap<String, String>, Box<dyn Error>>
@@ -92,7 +94,7 @@ impl ConfigParser {
 
         match &config.author.name {
             Some(author) => Ok(author.to_owned()),
-            None => Err("no author name configured".into())
+            None => Err("No author name configured".into())
         }
     }
 
@@ -102,7 +104,7 @@ impl ConfigParser {
 
         match &config.lib.path {
             Some(lib_path) => Ok(lib_path.to_owned()),
-            None => Err("no omnidoc lib configured".into()),
+            None => Err("No omnidoc lib configured".into()),
         }
     }
 
@@ -115,12 +117,12 @@ impl ConfigParser {
                 let mut ocf = fs::File::create(&omnidoc_config_file)?;
                 ocf.write_all(config.as_bytes())?;
             } else {
-                return Err("the omnidoc.toml already exists".into());
+                return Err("The omnidoc.toml already exists".into());
             }
 
             Ok(())
         } else {
-            return Err("no config path in your local".into());
+            return Err("No ~/.config in your system".into());
         }
     }
 }

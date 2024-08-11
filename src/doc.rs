@@ -81,7 +81,7 @@ impl Doc {
         if !git_repo_check(&projdir) {
             match git_init(".", true) {
                 Ok(_) => {},
-                Err(e) => return Err(Error::other(format!("git init project failed, because {}", e))),
+                Err(e) => return Err(Error::other(format!("Git init project failed ({})", e))),
             }
         }
 
@@ -151,7 +151,7 @@ impl Doc {
 
         match git_add(".", &["*"], false) {
             Ok(_) => { },
-            Err(e) => return Err(Error::other(format!("git add files failed, because {}", e))),
+            Err(e) => return Err(Error::other(format!("Git add files failed ({})", e))),
         }
 
         let cmsg: &str;
@@ -163,7 +163,7 @@ impl Doc {
         }
         match git_commit(".", cmsg) {
             Ok(_) => { },
-            Err(e) => return Err(Error::other(format!("git commit failed, because {}", e))),
+            Err(e) => return Err(Error::other(format!("Git commit failed ({})", e))),
         }
 
         println!("{} '{}' success", cmsg, projdir.display());
@@ -175,11 +175,11 @@ impl Doc {
         let re = Regex::new(r"TARGET\s*[\?:]=\s*(.*)").unwrap();
         let contents = match fs::read_to_string("Makefile") {
             Ok(contents) => contents,
-            Err(e) => return Err(Error::other(format!("read Makefile failed, because {}", e))),
+            Err(e) => return Err(Error::other(format!("Read Makefile failed ({})", e))),
         };
 
         let Some(docname) = re.captures(&contents) else {
-            return Err(Error::other("can not match docname in Makefile"));
+            return Err(Error::other("Can not match docname in Makefile"));
         };
 
         Ok(docname[1].to_string())
@@ -215,7 +215,7 @@ impl Doc {
     pub fn build_project(&self, o: Option<String>, _b: Option<String>) -> Result<(), Error> {
         // check if the path is a valid omnify document
         if !self.check_project() {
-            return Err(Error::other("not a omnify document path"));
+            return Err(Error::other("Not a omnified document path"));
         }
 
         // create build dir
@@ -243,7 +243,7 @@ impl Doc {
     pub fn clean_project(&self, distclean: bool) -> Result<(), Error> {
         // check if the path is a valid omnify document
         if !self.check_project() {
-            return Err(Error::other("not a omnify document path"));
+            return Err(Error::other("Not a omnified document path"));
         }
 
         if distclean {
@@ -267,13 +267,13 @@ impl Doc {
         match lang {
             1 => cont = entry::make_md(title, &self.author, doctype),
             2 => cont = entry::make_tex(title, &self.author, doctype),
-            _ => return Err(Error::other("not supported lang")),
+            _ => return Err(Error::other("Unsupported lang")),
         }
 
         Doc::gen_file(&cont, file)?;
         match git_add(".", &[file], false) {
             Ok(_) => { },
-            Err(e) => return Err(Error::other(format!("git add files failed, because {}", e))),
+            Err(e) => return Err(Error::other(format!("Git add files failed ({})", e))),
         }
 
         Ok(())
@@ -288,7 +288,7 @@ impl Doc {
             "enote-tex"     => self.gen_entry_file(2, title, entry::DocType::ENOTE, "main.tex")?,
             "mybook-tex"    => self.gen_entry_file(2, title, entry::DocType::MYBOOK, "main.tex")?,
             "myart-tex"     => self.gen_entry_file(2, title, entry::DocType::MYART, "main.tex")?,
-            _ => { return Err(Error::other(format!("unsupported doctype {}", doctype))) },
+            _ => { return Err(Error::other(format!("Unsupported doctype {}", doctype))) },
         };
 
         Ok(())

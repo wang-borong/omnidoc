@@ -143,7 +143,10 @@ pub fn cli() {
 
     match args.command {
         Commands::Init { path, author, version, release, language, title, name, doctype } => {
-            config.parse();
+            match config.parse() {
+                Ok(()) => { },
+                Err(e) => eprintln!("{}", e),
+            }
             let author_conf = config.get_author_name();
             let author = match author {
                 Some(author) => author,
@@ -170,7 +173,7 @@ pub fn cli() {
                 &release, &language, &doctype, &name);
             match doc.init_project(false) {
                 Ok(_) => { },
-                Err(e) => { eprintln!("initial project failed ({})", e) },
+                Err(e) => { eprintln!("Initial project failed ({})", e) },
             }
         },
         Commands::Build { path, output, builder } => {
@@ -181,7 +184,7 @@ pub fn cli() {
             };
             match doc.build_project(output, builder) {
                 Ok(_) => { },
-                Err(e) => { eprintln!("build project failed ({})", e) },
+                Err(e) => { eprintln!("Build project failed ({})", e) },
             }
         },
         Commands::Clean { path, distclean } => {
@@ -193,7 +196,7 @@ pub fn cli() {
 
             match doc.clean_project(distclean) {
                 Ok(_) => { },
-                Err(e) => { eprintln!("clean project failed ({})", e) },
+                Err(e) => { eprintln!("Clean project failed ({})", e) },
             }
         },
         Commands::New { path, author, version, release, language, title, name, doctype } => {
@@ -224,7 +227,7 @@ pub fn cli() {
                 &release, &language, &doctype, &name);
             match doc.create_project() {
                 Ok(_) => { },
-                Err(e) => { eprintln!("create project failed ({})", e) },
+                Err(e) => { eprintln!("Create project failed ({})", e) },
             }
         }
         Commands::Update { path, name } => {
@@ -247,13 +250,13 @@ pub fn cli() {
 
             match doc.update_project(has_name) {
                 Ok(_) => { },
-                Err(e) => { eprintln!("update project failed ({})", e) },
+                Err(e) => { eprintln!("Update project failed ({})", e) },
             }
         }
         Commands::Config => {
             match config.gen() {
-                Ok(_) => println!("generate configuration success"),
-                Err(e)  => eprintln!("generate configuration failed: ({})", e),
+                Ok(_) => println!("Generate configuration success"),
+                Err(e)  => eprintln!("Generate configuration failed: ({})", e),
             }
         }
         Commands::Lib { install, update } => {
@@ -262,19 +265,19 @@ pub fn cli() {
 
             if install {
                 match Repository::clone_recurse("https://github.com/wang-borong/omnidoc-libs", &olib) {
-                    Ok(_) => println!("install {} success", olib.display()),
-                    Err(e) => eprintln!("clone omnidoc-libs failed ({})", e),
+                    Ok(_) => println!("Install {} success", olib.display()),
+                    Err(e) => eprintln!("Clone omnidoc-libs failed ({})", e),
                 };
 
             } else if update {
                 match git_pull(&olib, "origin", "main") {
-                    Ok(_) => println!("update {} success", olib.display()),
-                    Err(e) => eprintln!("update {} failed ({})", olib.display(), e),
+                    Ok(_) => println!("Update {} success", olib.display()),
+                    Err(e) => eprintln!("Update {} failed ({})", olib.display(), e),
                 }
             }
         }
         Commands::List => {
-            println!(r#"document types:
+            println!(r#"Document types:
   ebook-md  (elegantbook class based markdown document writing system)
   enote-md  (elegantnote class based markdown document writing system)
   ebook-tex (elegantbook class based latex document writing system)
