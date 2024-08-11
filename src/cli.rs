@@ -112,6 +112,10 @@ enum Commands {
     Update {
         /// path to documentation project
         path: Option<String>,
+
+        /// give the output doc a name
+        #[arg(long)]
+        docname: Option<String>,
     },
 
     /// generate configuration
@@ -164,7 +168,7 @@ pub fn cli() {
             };
             let doc = Doc::new(&title, &path, &author, &docver,
                 &release, &language, &doctype, &docname);
-            match doc.init_project() {
+            match doc.init_project(false) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("initial project failed ({})", e) },
             }
@@ -223,14 +227,25 @@ pub fn cli() {
                 Err(e) => { eprintln!("create project failed ({})", e) },
             }
         }
-        Commands::Update { path } => {
-            let doc: Doc;
+        Commands::Update { path, docname } => {
+            let mut doc: Doc;
+            let has_name: bool;
+            let docname = match docname {
+                Some(docname) => {
+                    has_name = true;
+                    docname
+                },
+                None => {
+                    has_name = false;
+                    "".to_string()
+                },
+            };
             match path {
-                Some(path) => doc = Doc::new("", &path, "", "", "", "", "", ""),
-                None => doc = Doc::new("", ".", "", "", "", "", "", ""),
+                Some(path) => doc = Doc::new("", &path, "", "", "", "", "", &docname),
+                None => doc = Doc::new("", ".", "", "", "", "", "", &docname),
             };
 
-            match doc.update_project() {
+            match doc.update_project(has_name) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("update project failed ({})", e) },
             }

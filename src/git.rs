@@ -1,5 +1,5 @@
 use git2::Repository;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::io::{self, Write};
 use std::str;
 
@@ -283,6 +283,19 @@ pub fn git_pull<P>(repo: P, remote: &str, branch: &str) -> Result<(), git2::Erro
     let mut remote = repo.find_remote(remote)?;
     let fetch_commit = do_fetch(&repo, &[branch], &mut remote)?;
     do_merge(&repo, branch, fetch_commit)
+}
+
+pub fn git_repo_check<P>(repo: P) -> bool
+    where P: AsRef<Path> {
+
+    let git_repo = PathBuf::new();
+    let dot_git = git_repo.join(repo).join(".git");
+
+    if dot_git.exists() {
+        true
+    } else {
+        false
+    }
 }
 
 #[cfg(test)]

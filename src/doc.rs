@@ -6,10 +6,11 @@ use std::string::String;
 use walkdir::WalkDir;
 use std::env;
 use std::io::Error;
+use regex::Regex;
 
 use super::fs;
 use super::cmd::do_cmd;
-use super::git::{git_init, git_add, git_commit};
+use super::git::{git_init, git_add, git_commit, git_repo_check};
 
 #[derive(Debug, PartialEq)]
 pub struct Doc {
@@ -51,7 +52,7 @@ impl Doc {
     }
 
     pub fn create_project(&self) -> Result<(), Error> {
-        self.init_project()?;
+        self.init_project(false)?;
 
         Ok(())
     }    
@@ -66,7 +67,7 @@ impl Doc {
         Ok(())
     }
 
-    pub fn init_project(&self) -> Result<(), Error> {
+    pub fn init_project(&self, update: bool) -> Result<(), Error> {
 
         let projdir = Path::new(&self.path);
         let md = Path::new("md");
@@ -77,9 +78,11 @@ impl Doc {
         let figures = Path::new("figures");
         let biblio = Path::new("biblio");
 
-        match git_init(".", true) {
-            Ok(_) => {},
-            Err(e) => eprintln!("git init project failed {}", e),
+        if !git_repo_check(&projdir) {
+            match git_init(".", true) {
+                Ok(_) => {},
+                Err(e) => return Err(Error::other(format!("git init project failed {}", e))),
+            }
         }
 
         if !md.exists() {
@@ -140,28 +143,61 @@ impl Doc {
         Doc::gen_file(include_str!("../assets/gitignore"), ".gitignore")?;
         Doc::gen_file(include_str!("../assets/latexmkrc"), ".latexmkrc")?;
 
-        match self.create_entry(&self.title, &self.doctype) {
+        // we assume the user has the document entry file when updating
+        if !update {
+            self.create_entry(&self.title, &self.doctype)?;
+        }
+
+        match git_add(".", &["*"], false) {
             Ok(_) => { },
-            Err(e) => { eprintln!("create entry failed {}", e) }
+            Err(e) => return Err(Error::other(format!("git add files failed {}", e))),
         }
 
-        match git_add(".", &[".gitignore", "Makefile", ".latexmkrc", "figure/README.md"], false) {
-            Ok(_) => {},
-            Err(e) => eprintln!("git add files failed {}", e),
+        let cmsg: &str;
+
+        if update {
+            cmsg = "Update project";
+        } else {
+            cmsg = "Create project";
+        }
+        match git_commit(".", cmsg) {
+            Ok(_) => { },
+            Err(e) => return Err(Error::other(format!("git commit failed {}", e))),
         }
 
-        match git_commit(".", "Create project") {
-            Ok(_) => {},
-            Err(e) => eprintln!("git commit failed {}", e),
-        }
-
-        println!("omnify project '{}' has been created", projdir.display());
+        println!("{} '{}' success", cmsg, projdir.display());
 
         Ok(())
     }
 
-    pub fn update_project(&self) -> Result<(), Error> {
-        todo!();
+    fn get_docname(&self) -> Result<String, Error> {
+        let re = Regex::new(r"TARGET\s*[\?:]=\s*(.*)").unwrap();
+        let contents = match fs::read_to_string("Makefile") {
+            Ok(contents) => contents,
+            Err(e) => return Err(Error::other(format!("get_docname failed {}", e))),
+        };
+
+        let Some(docname) = re.captures(&contents) else {
+            return Err(Error::other("get_docname failed can not match docname"));
+        };
+
+        Ok(docname[1].to_string())
+    }
+
+    pub fn update_project(&mut self, has_name: bool) -> Result<(), Error> {
+        if !has_name {
+            self.docname = self.get_docname()?;
+        }
+
+        let update_files = vec!["figure/README.md", "Makefile", ".latexmkrc", ".gitignore"];
+
+        for uf in update_files {
+            fs::remove_file(uf)?;
+        }
+
+        self.init_project(true)?;
+
+        Ok(())
     }
 
     fn check_project(&self) -> bool {
