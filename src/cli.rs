@@ -23,31 +23,31 @@ struct OmniCli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// create a new project
-    Create {
-        /// set author name
+    New {
+        /// set the author name
         #[arg(short, long)]
         author: Option<String>,
-        /// set document version
+        /// set the document version
         #[arg(short, long)]
-        docver: Option<String>,
-        /// set release name
+        version: Option<String>,
+        /// set the release name
         #[arg(short, long)]
         release: Option<String>,
-        /// set language
+        /// set the language
         #[arg(short, long)]
         language: Option<String>,
 
-        /// give the doc a title
-        #[arg(long)]
+        /// set the document title
+        #[arg(short = 't', long)]
         title: String,
-        /// give the output doc a name
-        #[arg(long)]
-        docname: String,
-        /// select a document type to create
-        #[arg(long)]
+        /// set the output document file name
+        #[arg(short, long)]
+        name: String,
+        /// select a document type
+        #[arg(short = 'T', long)]
         doctype: String,
 
-        /// set project path to create the documentation project
+        /// set the path to a documentation project
         path: String,
 
         // create makefile
@@ -57,30 +57,30 @@ enum Commands {
 
     /// init a project
     Init {
-        /// set author name
+        /// set the author name
         #[arg(short, long)]
         author: Option<String>,
-        /// set document version
+        /// set the document version
         #[arg(short, long)]
-        docver: Option<String>,
-        /// set release name
+        version: Option<String>,
+        /// set the release name
         #[arg(short, long)]
         release: Option<String>,
-        /// set language
+        /// set the language
         #[arg(short, long)]
         language: Option<String>,
 
-        /// give the doc a title
-        #[arg(long)]
+        /// set the document title
+        #[arg(short = 't', long)]
         title: String,
-        /// give the output doc a name
-        #[arg(long)]
-        docname: String,
-        /// select a document type to create
-        #[arg(long)]
+        /// set the output document file name
+        #[arg(short, long)]
+        name: String,
+        /// select a document type
+        #[arg(short = 'T', long)]
         doctype: String,
 
-        /// path to documentation project
+        /// set the path to a documentation project
         path: String,
     },
 
@@ -90,44 +90,44 @@ enum Commands {
         #[arg(short, long)]
         builder: Option<String>,
 
-        /// path to documentation project
+        /// set the path to a documentation project
         path: Option<String>,
-        /// path to output directory
+        /// set the output path
         output: Option<String>,
 
     },
 
     /// clean the document project
     Clean {
-        /// distclean project
-        #[arg(short, long)]
+        /// distclean the project
+        #[arg(short = 'D', long)]
         distclean: bool,
 
-        /// path to documentation project
+        /// set the path to a documentation project
         path: Option<String>,
 
     },
 
-    /// update doc repo
+    /// update a doc repo
     Update {
-        /// path to documentation project
+        /// set the path to a documentation project
         path: Option<String>,
 
-        /// give the output doc a name
-        #[arg(long)]
-        docname: Option<String>,
+        /// set the output document file name
+        #[arg(short, long)]
+        name: Option<String>,
     },
 
-    /// generate configuration
+    /// generate a default configuration
     Config,
 
-    /// omnidoc library maintenance
+    /// maintain the omnidoc library
     Lib {
-        /// install omnidoc lib to XDG_DATA_DIR
+        /// install the omnidoc lib to XDG_DATA_DIR
         #[arg(short, long)]
         install: bool,
 
-        /// update omnidoc lib
+        /// update the omnidoc lib
         #[arg(short, long)]
         update: bool,
     },
@@ -142,7 +142,7 @@ pub fn cli() {
     let mut config = ConfigParser::default();
 
     match args.command {
-        Commands::Init { path, author, docver, release, language, title, docname, doctype } => {
+        Commands::Init { path, author, version, release, language, title, name, doctype } => {
             config.parse();
             let author_conf = config.get_author_name();
             let author = match author {
@@ -154,8 +154,8 @@ pub fn cli() {
                     }
                 }
             };
-            let docver = match docver {
-                Some(docver) => docver,
+            let version = match version {
+                Some(version) => version,
                 None => "v0.1".to_string(),
             };
             let release = match release {
@@ -166,8 +166,8 @@ pub fn cli() {
                 Some(language) => language,
                 None => "zh".to_string(),
             };
-            let doc = Doc::new(&title, &path, &author, &docver,
-                &release, &language, &doctype, &docname);
+            let doc = Doc::new(&title, &path, &author, &version,
+                &release, &language, &doctype, &name);
             match doc.init_project(false) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("initial project failed ({})", e) },
@@ -196,7 +196,7 @@ pub fn cli() {
                 Err(e) => { eprintln!("clean project failed ({})", e) },
             }
         },
-        Commands::Create { path, author, docver, release, language, title, docname, doctype } => {
+        Commands::New { path, author, version, release, language, title, name, doctype } => {
             config.parse();
             let author_conf = config.get_author_name();
             let author = match author {
@@ -208,8 +208,8 @@ pub fn cli() {
                     }
                 }
             };
-            let docver = match docver {
-                Some(docver) => docver,
+            let version = match version {
+                Some(version) => version,
                 None => "v0.1".to_string(),
             };
             let release = match release {
@@ -220,20 +220,20 @@ pub fn cli() {
                 Some(language) => language,
                 None => "zh".to_string(),
             };
-            let doc = Doc::new(&title, &path, &author, &docver,
-                &release, &language, &doctype, &docname);
+            let doc = Doc::new(&title, &path, &author, &version,
+                &release, &language, &doctype, &name);
             match doc.create_project() {
                 Ok(_) => { },
                 Err(e) => { eprintln!("create project failed ({})", e) },
             }
         }
-        Commands::Update { path, docname } => {
+        Commands::Update { path, name } => {
             let mut doc: Doc;
             let has_name: bool;
-            let docname = match docname {
-                Some(docname) => {
+            let name = match name {
+                Some(name) => {
                     has_name = true;
-                    docname
+                    name
                 },
                 None => {
                     has_name = false;
@@ -241,8 +241,8 @@ pub fn cli() {
                 },
             };
             match path {
-                Some(path) => doc = Doc::new("", &path, "", "", "", "", "", &docname),
-                None => doc = Doc::new("", ".", "", "", "", "", "", &docname),
+                Some(path) => doc = Doc::new("", &path, "", "", "", "", "", &name),
+                None => doc = Doc::new("", ".", "", "", "", "", "", &name),
             };
 
             match doc.update_project(has_name) {
@@ -274,7 +274,7 @@ pub fn cli() {
             }
         }
         Commands::List => {
-            println!(r#"doctypes:
+            println!(r#"document types:
   ebook-md  (elegantbook class based markdown document writing system)
   enote-md  (elegantnote class based markdown document writing system)
   ebook-tex (elegantbook class based latex document writing system)
