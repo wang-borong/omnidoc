@@ -200,7 +200,10 @@ pub fn cli() {
             }
         },
         Commands::New { path, author, version, release, language, title, name, doctype } => {
-            config.parse();
+            match config.parse() {
+                Ok(()) => { },
+                Err(e) => eprintln!("{}", e),
+            }
             let author_conf = config.get_author_name();
             let author = match author {
                 Some(author) => author,
