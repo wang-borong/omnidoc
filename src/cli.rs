@@ -253,7 +253,7 @@ pub fn cli() {
         Commands::Config => {
             match config.gen() {
                 Ok(_) => println!("generate configuration success"),
-                Err(e)  => eprintln!("generate configuration failed: {}", e),
+                Err(e)  => eprintln!("generate configuration failed: ({})", e),
             }
         }
         Commands::Lib { install, update } => {
@@ -263,13 +263,13 @@ pub fn cli() {
             if install {
                 match Repository::clone_recurse("https://github.com/wang-borong/omnidoc-libs", &olib) {
                     Ok(_) => println!("install {} success", olib.display()),
-                    Err(e) => eprintln!("failed to clone {}", e),
+                    Err(e) => eprintln!("clone omnidoc-libs failed ({})", e),
                 };
 
             } else if update {
                 match git_pull(&olib, "origin", "main") {
                     Ok(_) => println!("update {} success", olib.display()),
-                    Err(e) => eprintln!("update {} failed {}", olib.display(), e),
+                    Err(e) => eprintln!("update {} failed ({})", olib.display(), e),
                 }
             }
         }

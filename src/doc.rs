@@ -81,7 +81,7 @@ impl Doc {
         if !git_repo_check(&projdir) {
             match git_init(".", true) {
                 Ok(_) => {},
-                Err(e) => return Err(Error::other(format!("git init project failed {}", e))),
+                Err(e) => return Err(Error::other(format!("git init project failed, because {}", e))),
             }
         }
 
@@ -151,7 +151,7 @@ impl Doc {
 
         match git_add(".", &["*"], false) {
             Ok(_) => { },
-            Err(e) => return Err(Error::other(format!("git add files failed {}", e))),
+            Err(e) => return Err(Error::other(format!("git add files failed, because {}", e))),
         }
 
         let cmsg: &str;
@@ -163,7 +163,7 @@ impl Doc {
         }
         match git_commit(".", cmsg) {
             Ok(_) => { },
-            Err(e) => return Err(Error::other(format!("git commit failed {}", e))),
+            Err(e) => return Err(Error::other(format!("git commit failed, because {}", e))),
         }
 
         println!("{} '{}' success", cmsg, projdir.display());
@@ -175,11 +175,11 @@ impl Doc {
         let re = Regex::new(r"TARGET\s*[\?:]=\s*(.*)").unwrap();
         let contents = match fs::read_to_string("Makefile") {
             Ok(contents) => contents,
-            Err(e) => return Err(Error::other(format!("get_docname failed {}", e))),
+            Err(e) => return Err(Error::other(format!("read Makefile failed, because {}", e))),
         };
 
         let Some(docname) = re.captures(&contents) else {
-            return Err(Error::other("get_docname failed can not match docname"));
+            return Err(Error::other("can not match docname in Makefile"));
         };
 
         Ok(docname[1].to_string())
@@ -273,7 +273,7 @@ impl Doc {
         Doc::gen_file(&cont, file)?;
         match git_add(".", &[file], false) {
             Ok(_) => { },
-            Err(e) => return Err(Error::other(format!("git add files failed {}", e))),
+            Err(e) => return Err(Error::other(format!("git add files failed, because {}", e))),
         }
 
         Ok(())
