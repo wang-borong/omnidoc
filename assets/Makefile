@@ -38,13 +38,13 @@ latex: $(BUILDIR)/$(TARGET).tex
 	@$(LATEXMK) $(TEXOPTS) $< || $(LATEXMK) -c $<
 
 pandoc: $(BUILDIR)
-	@make -f $(PANDOCMK)
+	@make -f $(PANDOCMK) V=$(V)
 
 $(BUILDIR)/$(TARGET).tex: $(MAIN) $(BUILDIR)
 	@if [[ ! -f $@ ]]; then ln -sf ../$< $@; fi
 
 pandoc-tex: $(BUILDIR)
-	@make -f $(PANDOCMK) tex
+	@make -f $(PANDOCMK) V=$(V) tex
 
 format: $(TEXES)
 	@$(CONTFORM) $^

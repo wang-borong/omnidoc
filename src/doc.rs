@@ -245,7 +245,8 @@ impl Doc {
         }
     }
 
-    pub fn build_project(&self, o: Option<String>, envs: HashMap<&str, Option<String>>) -> Result<(), Error> {
+    pub fn build_project(&self, o: Option<String>, envs: HashMap<&str, Option<String>>, 
+                                verbose: bool) -> Result<(), Error> {
         // check if the path is a valid omnify document
         if !self.check_project() {
             return Err(Error::other("Not a omnified document path"));
@@ -287,8 +288,11 @@ impl Doc {
             }
         }
 
-        // call make to do default building
-        do_cmd("make", &["V=1"])?;
+        if verbose {
+            do_cmd("make", &["V=1"])?;
+        } else {
+            do_cmd("make", &[])?;
+        }
 
         Ok(())
     }

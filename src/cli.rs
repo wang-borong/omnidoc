@@ -94,6 +94,10 @@ enum Commands {
         /// set the output path
         #[arg(short, long, value_hint = ValueHint::AnyPath)]
         output: Option<String>,
+
+        /// show verbose message
+        #[arg(short = 'v', long)]
+        verbose: bool,
     },
 
     /// clean the document project
@@ -207,7 +211,7 @@ pub fn cli() {
                 Err(e) => { eprintln!("Initial project failed ({})", e) },
             }
         },
-        Commands::Build { path, output } => {
+        Commands::Build { path, output, verbose } => {
             let mut config_parser = ConfigParser::default();
             match config_parser.parse() {
                 Ok(()) => { },
@@ -220,7 +224,7 @@ pub fn cli() {
                 Some(path) => doc = Doc::new("", &path, "", "", "", "", "", ""),
                 None => doc = Doc::new("", ".", "", "", "", "", "", ""),
             };
-            match doc.build_project(output, envs) {
+            match doc.build_project(output, envs, verbose) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("Build project failed ({})", e) },
             }
