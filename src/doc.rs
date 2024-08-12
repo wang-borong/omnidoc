@@ -141,7 +141,11 @@ impl Doc {
             }
         }
 
-        Doc::gen_file(include_str!("../assets/docfig-readme.md"), "figure/README.md")?;
+        let fig_readme = "**Figures in this directory are third-party,\n\
+                          and may be used in the document project!\n\
+                          If you have no idea where the figures come from,\n\
+                          you must not remove them.**";
+        Doc::gen_file(&fig_readme, "figure/README.md")?;
 
         let mk_cont = include_str!("../assets/Makefile").to_string();
         let new_mk_cont = mk_cont.replace("TARGET ?= ",
