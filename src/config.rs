@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::error::Error;
 use dirs::config_local_dir;
 use std::io::Write;
+use dirs::data_local_dir;
 
 #[derive(Deserialize, Debug)]
 struct DownloadConfig {
@@ -23,10 +24,18 @@ struct Lib {
 }
 
 #[derive(Deserialize, Debug)]
+struct Env {
+    texmfhome: Option<String>,
+    bibinputs: Option<String>,
+    texinputs: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
 struct Config {
     download: Option<Vec<DownloadConfig>>,
     author:   Author,
     lib:      Lib,
+    env:      Env,
 }
 
 pub struct ConfigParser {
@@ -107,9 +116,70 @@ impl ConfigParser {
         }
     }
 
-    pub fn gen(&self) -> Result<(), Box<dyn Error>>
+    fn rander_config(&self, author: String, lib: Option<String>,
+        outdir: Option<String>, texmfhome: Option<String>,
+        bibinputs: Option<String>, texinputs: Option<String>)
+        -> Result<String, Box<dyn Error>>
     {
-        let config = include_str!("../assets/omnidoc.toml");
+        let default_envs = HashMap::from([
+            ("TEXMFHOME", r"$ENV{HOME}/.local/share/omnidoc/texmf//:"),
+            ("BIBINPUTS", r"./biblio//:"),
+            ("TEXINPUTS", r"./tex//:"),
+        ]);
+
+        let mut config = String::new();
+
+        config.push_str("[author]\n");
+        config.push_str(&format!("name = {}\n", author));
+
+        if let Some(lib) = lib {
+            config.push_str(&format!("[lib]\npath = {}\n", lib));
+        } else {
+            let dld = data_local_dir().unwrap();
+            let olib = dld.join("omnidoc");
+            config.push_str(&format!("[lib]\npath = {}\n", olib.to_str().unwrap()))
+        }
+
+        config.push_str("[env]\n");
+        if let Some(outdir) = outdir {
+            config.push_str(&format!("OUTDIR = \"{}\"\n", outdir))
+        } else {
+            config.push_str("OUTDIR = \"build\"\n")
+        }
+
+        if let Some(texmfhome) = texmfhome {
+            let mut new_env = String::from(default_envs["TEXMFHOME"]);
+            new_env.push_str(&texmfhome);
+            config.push_str(&format!("TEXMFHOME = \"{}\"\n", new_env))
+        } else {
+            config.push_str(&format!("TEXMFHOME = \"{}\"\n", default_envs["TEXMFHOME"]))
+        }
+
+        if let Some(texinputs) = texinputs {
+            let mut new_env = String::from(default_envs["TEXINPUTS"]);
+            new_env.push_str(&texinputs);
+            config.push_str(&format!("TEXINPUTS = \"{}\"\n", new_env))
+        } else {
+            config.push_str(&format!("TEXINPUTS = \"{}\"\n", default_envs["TEXINPUTS"]))
+        }
+
+        if let Some(bibinputs) = bibinputs {
+            let mut new_env = String::from(default_envs["BIBINPUTS"]);
+            new_env.push_str(&bibinputs);
+            config.push_str(&format!("BIBINPUTS = \"{}\"\n", new_env))
+        } else {
+            config.push_str(&format!("BIBINPUTS = \"{}\"\n", default_envs["BIBINPUTS"]))
+        }
+
+        Ok(config)
+    }
+
+    pub fn gen(&self, author: String, lib: Option<String>,
+        outdir: Option<String>, texmfhome: Option<String>,
+        bibinputs: Option<String>, texinputs: Option<String>)
+        -> Result<(), Box<dyn Error>>
+    {
+        let config = self.rander_config(author, lib, outdir, texmfhome, bibinputs, texinputs)?;
         if let Some(conf_path) = config_local_dir() {
             let omnidoc_config_file = conf_path.join("omnidoc.toml");
             if !omnidoc_config_file.exists() {

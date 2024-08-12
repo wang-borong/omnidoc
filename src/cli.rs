@@ -118,7 +118,26 @@ enum Commands {
     },
 
     /// generate a default configuration
-    Config,
+    Config {
+        /// config the author name
+        #[arg(short, long)]
+        authors: String,
+        /// config the omindoc lib path
+        #[arg(short, long)]
+        lib: Option<String>,
+        /// config the output directory for building
+        #[arg(short, long)]
+        outdir: Option<String>,
+        /// config the TEXMFHOME env (in which does the system find the texmf home)
+        #[arg(short = 'T', long)]
+        texmfhome: Option<String>,
+        /// config the BIBINPUTS env (in which does the system find the bibliograpies)
+        #[arg(short, long)]
+        bibinputs: Option<String>,
+        /// config the TEXINPUTS env (in which does the system find the tex sources)
+        #[arg(short, long)]
+        texinputs: Option<String>,
+    },
 
     /// maintain the omnidoc library
     Lib {
@@ -255,8 +274,8 @@ pub fn cli() {
                 Err(e) => { eprintln!("Update project failed ({})", e) },
             }
         }
-        Commands::Config => {
-            match config.gen() {
+        Commands::Config {authors, lib, outdir, texmfhome, bibinputs, texinputs} => {
+            match config.gen(authors, lib, outdir, texmfhome, bibinputs, texinputs) {
                 Ok(_) => println!("Generate configuration success"),
                 Err(e)  => eprintln!("Generate configuration failed ({})", e),
             }
