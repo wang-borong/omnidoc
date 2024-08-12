@@ -7,6 +7,7 @@ use walkdir::WalkDir;
 use std::env;
 use std::io::Error;
 use regex::Regex;
+use sha256::digest;
 
 use super::fs;
 use super::cmd::do_cmd;
@@ -185,7 +186,33 @@ impl Doc {
         Ok(docname[1].to_string())
     }
 
+    fn compare_two_file(&self, f1_cont: &str, f2: &str) -> bool {
+        let asset_makefile_sha256 = digest(f1_cont);
+
+        if !Path::new(f2).exists() {
+            return false;
+        }
+
+        // FIXME: If the file is modified by user on purpose,
+        // do we update?
+        let cur_makefile_sha256 = match fs::read_to_string(f2) {
+            Ok(cont) => digest(cont),
+            Err(_) => digest("fake"),
+        };
+        if asset_makefile_sha256 == cur_makefile_sha256 {
+            return true;
+        }
+
+        false
+    }
+
     pub fn update_project(&mut self, has_name: bool) -> Result<(), Error> {
+        // Check if the project should update
+        if self.compare_two_file(include_str!("../assets/Makefile"), "Makefile")
+            || self.compare_two_file(include_str!("../assets/latexmkrc"), ".latexmkrc") {
+            return Ok(())
+        }
+
         if !has_name {
             self.docname = self.get_docname()?;
         }
