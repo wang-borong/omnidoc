@@ -85,10 +85,6 @@ enum Commands {
 
     /// build the document project
     Build {
-        /// builder to use (default to 'pdf')
-        #[arg(short, long)]
-        builder: Option<String>,
-
         /// set the path to a documentation project
         path: Option<String>,
         /// set the output path
@@ -157,15 +153,16 @@ enum Commands {
 pub fn cli() {
     let args = OmniCli::parse();
 
-    let mut config = ConfigParser::default();
-
     match args.command {
         Commands::Init { path, author, version, release, language, title, name, doctype } => {
-            match config.parse() {
+            let mut config_parser = ConfigParser::default();
+            match config_parser.parse() {
                 Ok(()) => { },
-                Err(e) => eprintln!("{}", e),
+                Err(e) => eprintln!("Parse config failed ({})", e),
             }
-            let author_conf = config.get_author_name();
+            let envs = config_parser.get_envs().expect("Unable get envs");
+
+            let author_conf = config_parser.get_author_name();
             let author = match author {
                 Some(author) => author,
                 None => {
@@ -189,40 +186,57 @@ pub fn cli() {
             };
             let doc = Doc::new(&title, &path, &author, &version,
                 &release, &language, &doctype, &name);
-            match doc.init_project(false) {
+            match doc.init_project(envs, false) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("Initial project failed ({})", e) },
             }
         },
-        Commands::Build { path, output, builder } => {
+        Commands::Build { path, output } => {
+            let mut config_parser = ConfigParser::default();
+            match config_parser.parse() {
+                Ok(()) => { },
+                Err(e) => eprintln!("Parse config failed ({})", e),
+            }
+            let envs = config_parser.get_envs().expect("Unable get envs");
+
             let doc: Doc;
             match path {
                 Some(path) => doc = Doc::new("", &path, "", "", "", "", "", ""),
                 None => doc = Doc::new("", ".", "", "", "", "", "", ""),
             };
-            match doc.build_project(output, builder) {
+            match doc.build_project(output, envs) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("Build project failed ({})", e) },
             }
         },
         Commands::Clean { path, distclean } => {
+            let mut config_parser = ConfigParser::default();
+            match config_parser.parse() {
+                Ok(()) => { },
+                Err(e) => eprintln!("Parse config failed ({})", e),
+            }
+            let envs = config_parser.get_envs().expect("Unable get envs");
+
             let doc: Doc;
             match path {
                 Some(path) => doc = Doc::new("", &path, "", "", "", "", "", ""),
                 None => doc = Doc::new("", ".", "", "", "", "", "", ""),
             };
 
-            match doc.clean_project(distclean) {
+            match doc.clean_project(envs, distclean) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("Clean project failed ({})", e) },
             }
         },
         Commands::New { path, author, version, release, language, title, name, doctype } => {
-            match config.parse() {
+            let mut config_parser = ConfigParser::default();
+            match config_parser.parse() {
                 Ok(()) => { },
-                Err(e) => eprintln!("{}", e),
+                Err(e) => eprintln!("Parse config failed ({})", e),
             }
-            let author_conf = config.get_author_name();
+            let envs = config_parser.get_envs().expect("Unable get envs");
+
+            let author_conf = config_parser.get_author_name();
             let author = match author {
                 Some(author) => author,
                 None => {
@@ -246,12 +260,19 @@ pub fn cli() {
             };
             let doc = Doc::new(&title, &path, &author, &version,
                 &release, &language, &doctype, &name);
-            match doc.create_project() {
+            match doc.create_project(envs) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("Create project failed ({})", e) },
             }
         }
         Commands::Update { path, name } => {
+            let mut config_parser = ConfigParser::default();
+            match config_parser.parse() {
+                Ok(()) => { },
+                Err(e) => eprintln!("Parse config failed ({})", e),
+            }
+            let envs = config_parser.get_envs().expect("Unable get envs");
+
             let mut doc: Doc;
             let has_name: bool;
             let name = match name {
@@ -269,13 +290,15 @@ pub fn cli() {
                 None => doc = Doc::new("", ".", "", "", "", "", "", &name),
             };
 
-            match doc.update_project(has_name) {
+            match doc.update_project(envs, has_name) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("Update project failed ({})", e) },
             }
         }
         Commands::Config {authors, lib, outdir, texmfhome, bibinputs, texinputs} => {
-            match config.gen(authors, lib, outdir, texmfhome, bibinputs, texinputs) {
+            let config_parser = ConfigParser::default();
+
+            match config_parser.gen(authors, lib, outdir, texmfhome, bibinputs, texinputs) {
                 Ok(_) => println!("Generate configuration success"),
                 Err(e)  => eprintln!("Generate configuration failed ({})", e),
             }

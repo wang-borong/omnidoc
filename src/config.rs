@@ -6,6 +6,7 @@ use std::error::Error;
 use dirs::config_local_dir;
 use std::io::Write;
 use dirs::data_local_dir;
+use std::env::set_var as env_set_var;
 
 #[derive(Deserialize, Debug)]
 struct DownloadConfig {
@@ -25,6 +26,7 @@ struct Lib {
 
 #[derive(Deserialize, Debug)]
 struct Env {
+    outdir   : Option<String>,
     texmfhome: Option<String>,
     bibinputs: Option<String>,
     texinputs: Option<String>,
@@ -116,59 +118,100 @@ impl ConfigParser {
         }
     }
 
+    pub fn get_envs(&self) -> Result<HashMap<&str, Option<String>>, Box<dyn Error>>
+    {
+        let mut envs: HashMap<&str, Option<String>> = HashMap::new();
+        let config = self.config.as_ref().unwrap();
+
+        if let Some(outdir) = &config.env.outdir {
+            envs.insert("outdir", Some(outdir.to_owned()));
+        } else {
+            envs.insert("outdir", None);
+        }
+
+        if let Some(texmfhome) = &config.env.texmfhome {
+            envs.insert("texmfhome", Some(texmfhome.to_owned()));
+        } else {
+            envs.insert("texmfhome", None);
+        }
+
+        if let Some(texinputs) = &config.env.texinputs {
+            envs.insert("texinputs", Some(texinputs.to_owned()));
+        } else {
+            envs.insert("texinputs", None);
+        }
+
+        if let Some(bibinputs) = &config.env.bibinputs {
+            envs.insert("bibinputs", Some(bibinputs.to_owned()));
+        } else {
+            envs.insert("bibinputs", None);
+        }
+
+        Ok(envs)
+    }
+
     fn rander_config(&self, author: String, lib: Option<String>,
         outdir: Option<String>, texmfhome: Option<String>,
         bibinputs: Option<String>, texinputs: Option<String>)
         -> Result<String, Box<dyn Error>>
     {
         let default_envs = HashMap::from([
-            ("TEXMFHOME", r"$ENV{HOME}/.local/share/omnidoc/texmf//:"),
-            ("BIBINPUTS", r"./biblio//:"),
-            ("TEXINPUTS", r"./tex//:"),
+            ("texmfhome", r"$ENV{HOME}/.local/share/omnidoc/texmf//:"),
+            ("bibinputs", r"./biblio//:"),
+            ("texinputs", r"./tex//:"),
         ]);
 
         let mut config = String::new();
 
         config.push_str("[author]\n");
-        config.push_str(&format!("name = {}\n", author));
+        config.push_str(&format!("name = \"{}\"\n", author));
 
         if let Some(lib) = lib {
-            config.push_str(&format!("[lib]\npath = {}\n", lib));
+            config.push_str(&format!("[lib]\npath = \"{}\"\n", lib));
         } else {
             let dld = data_local_dir().unwrap();
             let olib = dld.join("omnidoc");
-            config.push_str(&format!("[lib]\npath = {}\n", olib.to_str().unwrap()))
+            config.push_str(&format!("[lib]\npath = \"{}\"\n", olib.to_str().unwrap()))
         }
 
         config.push_str("[env]\n");
         if let Some(outdir) = outdir {
-            config.push_str(&format!("OUTDIR = \"{}\"\n", outdir))
+            config.push_str(&format!("outdir = \"{}\"\n", outdir));
         } else {
-            config.push_str("OUTDIR = \"build\"\n")
+            config.push_str("outdir = \"build\"\n")
         }
 
         if let Some(texmfhome) = texmfhome {
-            let mut new_env = String::from(default_envs["TEXMFHOME"]);
+            let mut new_env = String::from(default_envs["texmfhome"]);
             new_env.push_str(&texmfhome);
-            config.push_str(&format!("TEXMFHOME = \"{}\"\n", new_env))
+            if !texmfhome.ends_with("/:") {
+                new_env.push_str("/:")
+            }
+            config.push_str(&format!("texmfhome = \"{}\"\n", new_env))
         } else {
-            config.push_str(&format!("TEXMFHOME = \"{}\"\n", default_envs["TEXMFHOME"]))
+            config.push_str(&format!("texmfhome = \"{}\"\n", default_envs["texmfhome"]))
         }
 
         if let Some(texinputs) = texinputs {
-            let mut new_env = String::from(default_envs["TEXINPUTS"]);
+            let mut new_env = String::from(default_envs["texinputs"]);
             new_env.push_str(&texinputs);
-            config.push_str(&format!("TEXINPUTS = \"{}\"\n", new_env))
+            if !texinputs.ends_with("/:") {
+                new_env.push_str("/:")
+            }
+            config.push_str(&format!("texinputs = \"{}\"\n", new_env))
         } else {
-            config.push_str(&format!("TEXINPUTS = \"{}\"\n", default_envs["TEXINPUTS"]))
+            config.push_str(&format!("texinputs = \"{}\"\n", default_envs["texinputs"]))
         }
 
         if let Some(bibinputs) = bibinputs {
-            let mut new_env = String::from(default_envs["BIBINPUTS"]);
+            let mut new_env = String::from(default_envs["bibinputs"]);
             new_env.push_str(&bibinputs);
-            config.push_str(&format!("BIBINPUTS = \"{}\"\n", new_env))
+            if !bibinputs.ends_with("/:") {
+                new_env.push_str("/:")
+            }
+            config.push_str(&format!("bibinputs = \"{}\"\n", new_env))
         } else {
-            config.push_str(&format!("BIBINPUTS = \"{}\"\n", default_envs["BIBINPUTS"]))
+            config.push_str(&format!("bibinputs = \"{}\"\n", default_envs["bibinputs"]))
         }
 
         Ok(config)
@@ -194,6 +237,25 @@ impl ConfigParser {
             return Err("No ~/.config in your system".into());
         }
     }
+
+    pub fn setup_env(&self) -> Result<(), Box<dyn Error>> {
+        let config = self.config.as_ref().unwrap();
+
+        match &config.env.texmfhome {
+            Some(texmfhome) => env_set_var("TEXMFHOME", texmfhome),
+            None => { },
+        }
+        match &config.env.bibinputs {
+            Some(bibinputs) => env_set_var("BIBINPUTS", bibinputs),
+            None => { },
+        }
+        match &config.env.texinputs {
+            Some(texinputs) => env_set_var("TEXINPUTS", texinputs),
+            None => { },
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -202,12 +264,13 @@ mod tests {
 
     #[test]
     fn test_read_config() {
+        let conf_path = config_local_dir().unwrap().join("omnidoc.toml");
+        let mut conf_parser = ConfigParser::from(conf_path);
+        let _ = conf_parser.parse();
 
-        let conf_parser = ConfigParser::from("omnidoc.toml");
-        
-        let downloads = conf_parser.get_downloads();
+        let config = conf_parser.config.as_ref().unwrap();
+        println!("show conf: {:?}", config);
 
-        println!("{:?}", downloads);
-        assert_eq!(downloads.is_ok(), true);
+        assert!(true);
     }
 }

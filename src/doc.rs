@@ -8,6 +8,7 @@ use std::env;
 use std::io::Error;
 use regex::Regex;
 use sha256::digest;
+use std::collections::HashMap;
 
 use super::fs;
 use super::cmd::do_cmd;
@@ -52,8 +53,8 @@ impl Doc {
         }
     }
 
-    pub fn create_project(&self) -> Result<(), Error> {
-        self.init_project(false)?;
+    pub fn create_project(&self, envs: HashMap<&str, Option<String>>) -> Result<(), Error> {
+        self.init_project(envs, false)?;
 
         Ok(())
     }    
@@ -68,11 +69,16 @@ impl Doc {
         Ok(())
     }
 
-    pub fn init_project(&self, update: bool) -> Result<(), Error> {
+    pub fn init_project(&self, envs: HashMap<&str, Option<String>>, update: bool) -> Result<(), Error> {
 
         let projdir = Path::new(&self.path);
         let md = Path::new("md");
-        let tex = Path::new("tex");
+        // Just use the last texinput path
+        let texinput = envs["texinputs"].clone().unwrap_or("tex".to_owned());
+        let texinput = texinput.strip_suffix(":").unwrap_or(&texinput);
+        let texinputs = texinput.split(":").collect::<Vec<&str>>();
+        let last_texinput = texinputs.last().unwrap();
+        let tex = Path::new(&last_texinput);
         let dac = Path::new("dac");
         let drawio = Path::new("drawio");
         let figure = Path::new("figure");
@@ -206,7 +212,7 @@ impl Doc {
         false
     }
 
-    pub fn update_project(&mut self, has_name: bool) -> Result<(), Error> {
+    pub fn update_project(&mut self, envs: HashMap<&str, Option<String>>, has_name: bool) -> Result<(), Error> {
         // Check if the project should update
         if self.compare_two_file(include_str!("../assets/Makefile"), "Makefile")
             || self.compare_two_file(include_str!("../assets/latexmkrc"), ".latexmkrc") {
@@ -223,7 +229,7 @@ impl Doc {
             fs::remove_file(uf)?;
         }
 
-        self.init_project(true)?;
+        self.init_project(envs, true)?;
 
         Ok(())
     }
@@ -239,7 +245,7 @@ impl Doc {
         }
     }
 
-    pub fn build_project(&self, o: Option<String>, _b: Option<String>) -> Result<(), Error> {
+    pub fn build_project(&self, o: Option<String>, envs: HashMap<&str, Option<String>>) -> Result<(), Error> {
         // check if the path is a valid omnify document
         if !self.check_project() {
             return Err(Error::other("Not a omnified document path"));
@@ -254,23 +260,61 @@ impl Doc {
                 env::set_var("OUTDIR", &od);
             },
             None     => {
-                if !Path::new("build").exists() {
-                    fs::create_dir("build")?;
+                let conf_o = &envs["outdir"];
+                match conf_o {
+                    Some(conf_o) => {
+                        if !Path::new(&conf_o).exists() {
+                            fs::create_dir(&conf_o)?;
+                        }
+                        env::set_var("OUTDIR", &conf_o);
+                    },
+                    None => {
+                        if !Path::new("build").exists() {
+                            fs::create_dir("build")?;
+                        }
+                    }
                 }
-                env::set_var("OUTDIR", "build");
             },
+        }
+        for env_key in vec!["texinputs", "bibinputs", "texmfhome"] {
+            let env_val = &envs[env_key];
+            match env_val {
+                Some(env_val) => {
+                    println!("Set {} = {}", env_key.to_uppercase(), &env_val);
+                    env::set_var(env_key.to_uppercase(), &env_val);
+                },
+                None => { },
+            }
         }
 
         // call make to do default building
-        do_cmd("make", &[])?;
+        do_cmd("make", &["V=1"])?;
 
         Ok(())
     }
 
-    pub fn clean_project(&self, distclean: bool) -> Result<(), Error> {
+    pub fn clean_project(&self, envs: HashMap<&str, Option<String>>, distclean: bool) -> Result<(), Error> {
         // check if the path is a valid omnify document
         if !self.check_project() {
             return Err(Error::other("Not a omnified document path"));
+        }
+
+        let conf_o = &envs["outdir"];
+        match conf_o {
+            Some(conf_o) => {
+                env::set_var("OUTDIR", &conf_o);
+            },
+            None => { },
+        }
+
+        for env_key in vec!["texinputs", "bibinputs", "texmfhome"] {
+            let env_val = &envs[env_key];
+            match env_val {
+                Some(env_val) => {
+                    env::set_var(env_key.to_uppercase(), &env_val);
+                },
+                None => { },
+            }
         }
 
         if distclean {
