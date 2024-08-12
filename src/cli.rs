@@ -1,10 +1,12 @@
 use clap::{Command, CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{generate, Generator, Shell};
-use dirs::data_local_dir;
+use dirs::{data_local_dir, config_local_dir};
+use std::io::Write;
 
 use omnidoc::doc::Doc;
 use omnidoc::config::ConfigParser;
 use omnidoc::git::{git_clone, git_pull};
+use omnidoc::fs;
 
 //
 // Create a git-like cli program to manage our document project.
@@ -116,10 +118,6 @@ enum Commands {
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
         path: Option<String>,
-
-        /// set the output document file name
-        #[arg(short, long)]
-        name: Option<String>,
     },
 
     /// generate a default configuration
@@ -289,7 +287,7 @@ pub fn cli() {
                 Err(e) => { eprintln!("Create project failed ({})", e) },
             }
         }
-        Commands::Update { path, name } => {
+        Commands::Update { path } => {
             let mut config_parser = ConfigParser::default();
             match config_parser.parse() {
                 Ok(()) => { },
@@ -298,23 +296,13 @@ pub fn cli() {
             let envs = config_parser.get_envs().expect("Unable get envs");
 
             let mut doc: Doc;
-            let has_name: bool;
-            let name = match name {
-                Some(name) => {
-                    has_name = true;
-                    name
-                },
-                None => {
-                    has_name = false;
-                    "".to_string()
-                },
-            };
+
             match path {
-                Some(path) => doc = Doc::new("", &path, "", "", "", "", "", &name),
-                None => doc = Doc::new("", ".", "", "", "", "", "", &name),
+                Some(path) => doc = Doc::new("", &path, "", "", "", "", "", ""),
+                None => doc = Doc::new("", ".", "", "", "", "", "", ""),
             };
 
-            match doc.update_project(envs, has_name) {
+            match doc.update_project(envs) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("Update project failed ({})", e) },
             }
@@ -341,6 +329,28 @@ pub fn cli() {
                 match git_pull(&olib, "origin", "main") {
                     Ok(_) => println!("Update '{}' success", olib.display()),
                     Err(e) => eprintln!("Update {} failed ({})", olib.display(), e),
+                }
+            }
+
+            let mut latexmkrc = config_local_dir().unwrap();
+
+            latexmkrc.push("latexmk");
+            if !latexmkrc.exists() {
+                match fs::create_dir_all(&latexmkrc) {
+                    Ok(_) => { },
+                    Err(e) => eprintln!("Create latexmk config dir failed ({})", e),
+                }
+            }
+
+            latexmkrc.push("latexmkrc");
+            if !latexmkrc.exists() {
+                let cont = include_str!("../assets/latexmkrc");
+                if let Ok(mut fh) = fs::File::create(&latexmkrc) {
+                    match fh.write_all(cont.as_bytes()) {
+                        Ok(_) => { },
+                        Err(e) => eprintln!("Write latexmkrc failed ({})", e),
+                    }
+
                 }
             }
         }

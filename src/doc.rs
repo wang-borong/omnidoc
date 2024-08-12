@@ -6,9 +6,8 @@ use std::string::String;
 use walkdir::WalkDir;
 use std::env;
 use std::io::Error;
-use regex::Regex;
-use sha256::digest;
 use std::collections::HashMap;
+use dirs::data_local_dir;
 
 use super::fs;
 use super::cmd::do_cmd;
@@ -146,14 +145,7 @@ impl Doc {
                           If you have no idea where the figures come from,\n\
                           you must not remove them.**";
         Doc::gen_file(&fig_readme, "figure/README.md")?;
-
-        let mk_cont = include_str!("../assets/Makefile").to_string();
-        let new_mk_cont = mk_cont.replace("TARGET ?= ",
-            &format!("TARGET := {}", &self.docname));
-        Doc::gen_file(&new_mk_cont, "Makefile")?;
-
         Doc::gen_file(include_str!("../assets/gitignore"), ".gitignore")?;
-        Doc::gen_file(include_str!("../assets/latexmkrc"), ".latexmkrc")?;
 
         // we assume the user has the document entry file when updating
         if !update {
@@ -182,51 +174,7 @@ impl Doc {
         Ok(())
     }
 
-    fn get_docname(&self) -> Result<String, Error> {
-        let re = Regex::new(r"TARGET\s*[\?:]=\s*(.*)").unwrap();
-        let contents = match fs::read_to_string("Makefile") {
-            Ok(contents) => contents,
-            Err(e) => return Err(Error::other(format!("Read Makefile failed ({})", e))),
-        };
-
-        let Some(docname) = re.captures(&contents) else {
-            return Err(Error::other("Can not match docname in Makefile"));
-        };
-
-        Ok(docname[1].to_string())
-    }
-
-    fn compare_two_file(&self, f1_cont: &str, f2: &str) -> bool {
-        let asset_makefile_sha256 = digest(f1_cont);
-
-        if !Path::new(f2).exists() {
-            return false;
-        }
-
-        // FIXME: If the file is modified by user on purpose,
-        // do we update?
-        let cur_makefile_sha256 = match fs::read_to_string(f2) {
-            Ok(cont) => digest(cont),
-            Err(_) => digest("fake"),
-        };
-        if asset_makefile_sha256 == cur_makefile_sha256 {
-            return true;
-        }
-
-        false
-    }
-
-    pub fn update_project(&mut self, envs: HashMap<&str, Option<String>>, has_name: bool) -> Result<(), Error> {
-        // Check if the project should update
-        if self.compare_two_file(include_str!("../assets/Makefile"), "Makefile")
-            || self.compare_two_file(include_str!("../assets/latexmkrc"), ".latexmkrc") {
-            return Ok(())
-        }
-
-        if !has_name {
-            self.docname = self.get_docname()?;
-        }
-
+    pub fn update_project(&mut self, envs: HashMap<&str, Option<String>>) -> Result<(), Error> {
         let update_files = vec!["figure/README.md", "Makefile", ".latexmkrc", ".gitignore"];
 
         for uf in update_files {
@@ -239,10 +187,10 @@ impl Doc {
     }
 
     fn check_project(&self) -> bool {
-        let latexmkrc = Path::new(".latexmkrc");
-        let makefile = Path::new("Makefile");
+        let main_md = Path::new("main.md");
+        let main_tex = Path::new("main.tex");
 
-        if latexmkrc.exists() && makefile.exists() {
+        if main_md.exists() || main_tex.exists() {
             true
         } else {
             false
@@ -291,10 +239,21 @@ impl Doc {
             }
         }
 
-        if verbose {
-            do_cmd("make", &["V=1"])?;
+        let cur_dir = env::current_dir().unwrap();
+        let tn = if self.path != PathBuf::from(".") {
+            self.path.file_name().unwrap().to_str().unwrap_or("unknown")
         } else {
-            do_cmd("make", &[])?;
+            cur_dir.file_name().unwrap().to_str().unwrap_or("unknown")
+        };
+
+        let target = format!("TARGET={}", tn);
+
+        let mut topmk = data_local_dir().unwrap();
+        topmk.push("omnidoc/tool/top.mk");
+        if verbose {
+            do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target, "V=1"])?;
+        } else {
+            do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target])?;
         }
 
         Ok(())
@@ -324,11 +283,22 @@ impl Doc {
             }
         }
 
-        if distclean {
-            do_cmd("make", &["dist-clean"])?;
+        let cur_dir = env::current_dir().unwrap();
+        let tn = if self.path != PathBuf::from(".") {
+            self.path.file_name().unwrap().to_str().unwrap_or("unknown")
         } else {
-            // ... call make clean
-            do_cmd("make", &["clean"])?;
+            cur_dir.file_name().unwrap().to_str().unwrap_or("unknown")
+        };
+
+        let target = format!("TARGET={}", tn);
+
+        let mut topmk = data_local_dir().unwrap();
+        topmk.push("omnidoc/tool/top.mk");
+
+        if distclean {
+            do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target, "dist-clean"])?;
+        } else {
+            do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target, "clean"])?;
         }
 
         Ok(())

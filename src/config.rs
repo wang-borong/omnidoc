@@ -3,9 +3,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::error::Error;
-use dirs::config_local_dir;
+use dirs::{data_local_dir, config_local_dir};
 use std::io::Write;
-use dirs::data_local_dir;
 use std::env::set_var as env_set_var;
 
 #[derive(Deserialize, Debug)]
