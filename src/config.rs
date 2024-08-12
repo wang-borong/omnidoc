@@ -219,12 +219,15 @@ impl ConfigParser {
 
     pub fn gen(&self, author: String, lib: Option<String>,
         outdir: Option<String>, texmfhome: Option<String>,
-        bibinputs: Option<String>, texinputs: Option<String>)
-        -> Result<(), Box<dyn Error>>
+        bibinputs: Option<String>, texinputs: Option<String>,
+        force: bool) -> Result<(), Box<dyn Error>>
     {
         let config = self.rander_config(author, lib, outdir, texmfhome, bibinputs, texinputs)?;
         if let Some(conf_path) = config_local_dir() {
             let omnidoc_config_file = conf_path.join("omnidoc.toml");
+            if force {
+                fs::remove_file(&omnidoc_config_file)?;
+            }
             if !omnidoc_config_file.exists() {
                 let mut ocf = fs::File::create(&omnidoc_config_file)?;
                 ocf.write_all(config.as_bytes())?;

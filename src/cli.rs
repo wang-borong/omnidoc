@@ -142,6 +142,10 @@ enum Commands {
         /// config the TEXINPUTS env (in which does the system find the tex sources)
         #[arg(short, long)]
         texinputs: Option<String>,
+
+        /// force generation
+        #[arg(short = 'F', long)]
+        force: bool,
     },
 
     /// maintain the omnidoc library
@@ -315,10 +319,10 @@ pub fn cli() {
                 Err(e) => { eprintln!("Update project failed ({})", e) },
             }
         }
-        Commands::Config {authors, lib, outdir, texmfhome, bibinputs, texinputs} => {
+        Commands::Config {authors, lib, outdir, texmfhome, bibinputs, texinputs, force} => {
             let config_parser = ConfigParser::default();
 
-            match config_parser.gen(authors, lib, outdir, texmfhome, bibinputs, texinputs) {
+            match config_parser.gen(authors, lib, outdir, texmfhome, bibinputs, texinputs, force) {
                 Ok(_) => println!("Generate configuration success"),
                 Err(e)  => eprintln!("Generate configuration failed ({})", e),
             }
