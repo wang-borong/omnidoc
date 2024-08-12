@@ -1,4 +1,5 @@
-use clap::{Parser, Subcommand};
+use clap::{Command, CommandFactory, Parser, Subcommand, ValueHint};
+use clap_complete::{generate, Generator, Shell};
 use dirs::data_local_dir;
 
 use omnidoc::doc::Doc;
@@ -47,6 +48,7 @@ enum Commands {
         doctype: String,
 
         /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
         path: String,
 
         // create makefile
@@ -80,16 +82,18 @@ enum Commands {
         doctype: String,
 
         /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
         path: String,
     },
 
     /// build the document project
     Build {
         /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
         path: Option<String>,
         /// set the output path
+        #[arg(short, long, value_hint = ValueHint::AnyPath)]
         output: Option<String>,
-
     },
 
     /// clean the document project
@@ -99,13 +103,14 @@ enum Commands {
         distclean: bool,
 
         /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
         path: Option<String>,
-
     },
 
     /// update a doc repo
     Update {
         /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
         path: Option<String>,
 
         /// set the output document file name
@@ -148,6 +153,17 @@ enum Commands {
 
     /// list current supported document types
     List,
+
+    /// generate shell completion
+    Complete {
+        /// If provided, outputs the completion file for given shell
+        #[arg(long = "generate", value_enum)]
+        generator: Option<Shell>,
+    },
+}
+
+fn print_completions<G: Generator>(gen: G, cmd: &mut Command) {
+    generate(gen, cmd, cmd.get_name().to_string(), &mut std::io::stdout());
 }
 
 pub fn cli() {
@@ -328,6 +344,13 @@ pub fn cli() {
   enote-tex (elegantnote class based latex document writing system)
   myart-tex (myart class based latex document writing system)
   mybook-tex (mybook class based latex document writing system)"#);
+        }
+        Commands::Complete { generator } => {
+            if let Some(generator) = generator {
+                let mut cmd = OmniCli::command();
+
+                print_completions(generator, &mut cmd);
+            }
         }
     }
 }
