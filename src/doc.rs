@@ -281,7 +281,6 @@ impl Doc {
             let env_val = &envs[env_key];
             match env_val {
                 Some(env_val) => {
-                    println!("Set {} = {}", env_key.to_uppercase(), &env_val);
                     env::set_var(env_key.to_uppercase(), &env_val);
                 },
                 None => { },
