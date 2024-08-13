@@ -42,9 +42,6 @@ enum Commands {
         /// set the document title
         #[arg(short = 't', long)]
         title: String,
-        /// set the output document file name
-        #[arg(short, long)]
-        name: String,
         /// select a document type
         #[arg(short = 'T', long)]
         doctype: String,
@@ -76,9 +73,6 @@ enum Commands {
         /// set the document title
         #[arg(short = 't', long)]
         title: String,
-        /// set the output document file name
-        #[arg(short, long)]
-        name: String,
         /// select a document type
         #[arg(short = 'T', long)]
         doctype: String,
@@ -176,7 +170,7 @@ pub fn cli() {
     let args = OmniCli::parse();
 
     match args.command {
-        Commands::Init { path, author, version, release, language, title, name, doctype } => {
+        Commands::Init { path, author, version, release, language, title, doctype } => {
             let mut config_parser = ConfigParser::default();
             match config_parser.parse() {
                 Ok(()) => { },
@@ -207,7 +201,7 @@ pub fn cli() {
                 None => "zh".to_string(),
             };
             let doc = Doc::new(&title, &path, &author, &version,
-                &release, &language, &doctype, &name);
+                &release, &language, &doctype, "");
             match doc.init_project(envs, false) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("Initial project failed ({})", e) },
@@ -250,7 +244,7 @@ pub fn cli() {
                 Err(e) => { eprintln!("Clean project failed ({})", e) },
             }
         },
-        Commands::New { path, author, version, release, language, title, name, doctype } => {
+        Commands::New { path, author, version, release, language, title, doctype } => {
             let mut config_parser = ConfigParser::default();
             match config_parser.parse() {
                 Ok(()) => { },
@@ -281,7 +275,7 @@ pub fn cli() {
                 None => "zh".to_string(),
             };
             let doc = Doc::new(&title, &path, &author, &version,
-                &release, &language, &doctype, &name);
+                &release, &language, &doctype, "");
             match doc.create_project(envs) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("Create project failed ({})", e) },
