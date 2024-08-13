@@ -145,7 +145,8 @@ impl Doc {
                           If you have no idea where the figures come from,\n\
                           you must not remove them.**";
         Doc::gen_file(&fig_readme, "figure/README.md")?;
-        Doc::gen_file(include_str!("../assets/gitignore"), ".gitignore")?;
+
+        fs::copy_from_lib("repo/gitignore", ".gitignore")?;
 
         // we assume the user has the document entry file when updating
         if !update {

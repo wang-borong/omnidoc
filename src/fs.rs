@@ -2,8 +2,14 @@ pub use std::fs::*;
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use dirs::data_local_dir;
 
-pub fn copy<U: AsRef<Path>, V: AsRef<Path>>(from: U, to: V) -> Result<(), std::io::Error> {
+/**
+ * copy_dir - copy directory
+ * @from: copy from directory
+ * @to:   copy to directory
+ */
+pub fn copy_dir<U: AsRef<Path>, V: AsRef<Path>>(from: U, to: V) -> Result<(), std::io::Error> {
     let mut stack = Vec::new();
     stack.push(PathBuf::from(from.as_ref()));
 
@@ -45,6 +51,25 @@ pub fn copy<U: AsRef<Path>, V: AsRef<Path>>(from: U, to: V) -> Result<(), std::i
                 }
             }
         }
+    }
+
+    Ok(())
+}
+
+/**
+ * copy_from_lib - copy a file or a directory from omnidoc lib
+ * @from: relative to omnidoc lib
+ * @to:   destination path
+ */
+pub fn copy_from_lib<U: AsRef<Path>, V:AsRef<Path>>(from: U, to: V) -> Result<(), std::io::Error> {
+    let local_data_dir = data_local_dir().unwrap();
+    let omnidoc_lib = local_data_dir.join("omnidoc");
+    let to_copy = omnidoc_lib.join(from);
+
+    if to_copy.is_dir() {
+        copy_dir(to_copy, to)?;
+    } else {
+        fs::copy(to_copy, to)?;
     }
 
     Ok(())

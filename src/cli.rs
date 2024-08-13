@@ -1,7 +1,6 @@
 use clap::{Command, CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{generate, Generator, Shell};
 use dirs::{data_local_dir, config_local_dir};
-use std::io::Write;
 
 use omnidoc::doc::Doc;
 use omnidoc::config::ConfigParser;
@@ -338,13 +337,9 @@ pub fn cli() {
 
             latexmkrc.push("latexmkrc");
             if !latexmkrc.exists() {
-                let cont = include_str!("../assets/latexmkrc");
-                if let Ok(mut fh) = fs::File::create(&latexmkrc) {
-                    match fh.write_all(cont.as_bytes()) {
-                        Ok(_) => { },
-                        Err(e) => eprintln!("Write latexmkrc failed ({})", e),
-                    }
-
+                match fs::copy_from_lib("repo/latexmkrc", &latexmkrc) {
+                    Ok(_) => { },
+                    Err(e) => eprintln!("Setup latexmkrc failed ({})", e),
                 }
             }
         }
