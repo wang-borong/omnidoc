@@ -95,6 +95,13 @@ enum Commands {
         verbose: bool,
     },
 
+    /// open the built doc
+    Open {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+    },
+
     /// clean the document project
     Clean {
         /// distclean the project
@@ -222,6 +229,24 @@ pub fn cli() {
             match doc.build_project(output, envs, verbose) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("Build project failed ({})", e) },
+            }
+        },
+        Commands::Open { path } => {
+            let mut config_parser = ConfigParser::default();
+            match config_parser.parse() {
+                Ok(()) => { },
+                Err(e) => eprintln!("Parse config failed ({})", e),
+            }
+            let envs = config_parser.get_envs().expect("Unable get envs");
+
+            let doc: Doc;
+            match path {
+                Some(path) => doc = Doc::new("", &path, "", "", "", "", "", ""),
+                None => doc = Doc::new("", ".", "", "", "", "", "", ""),
+            };
+            match doc.open_doc(envs) {
+                Ok(_) => { },
+                Err(e) => { eprintln!("Open doc failed ({})", e) },
             }
         },
         Commands::Clean { path, distclean } => {

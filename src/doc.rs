@@ -254,12 +254,10 @@ impl Doc {
         let mut topmk = data_local_dir().unwrap();
         topmk.push("omnidoc/tool/top.mk");
         if verbose {
-            do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target, "V=1"])?;
+            do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target, "V=1"], false)
         } else {
-            do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target])?;
+            do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target], false)
         }
-
-        Ok(())
     }
 
     pub fn clean_project(&self, envs: HashMap<&str, Option<String>>, distclean: bool) -> Result<(), Error> {
@@ -299,12 +297,37 @@ impl Doc {
         topmk.push("omnidoc/tool/top.mk");
 
         if distclean {
-            do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target, "dist-clean"])?;
+            do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target, "dist-clean"], false)
         } else {
-            do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target, "clean"])?;
+            do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target, "clean"], false)
+        }
+    }
+
+    pub fn open_doc(&self, envs: HashMap<&str, Option<String>>) -> Result<(), Error> {
+        let cur_dir = env::current_dir().unwrap();
+        let doc_name = if self.path != PathBuf::from(".") {
+            self.path.file_name().unwrap().to_str().unwrap_or("unknown")
+        } else {
+            cur_dir.file_name().unwrap().to_str().unwrap_or("unknown")
+        };
+
+        let outdir: &str;
+        let conf_o = &envs["outdir"];
+        match conf_o {
+            Some(conf_o) => outdir = conf_o,
+            None => outdir = "build",
         }
 
-        Ok(())
+        let doc_path_str = format!("{}/{}.pdf", outdir, doc_name);
+
+        let project_path = Path::new(&self.path);
+        let doc_path = project_path.join(&doc_path_str);
+
+        if !doc_path.exists() {
+            return Err(Error::other(format!("The '{}' do not exist", doc_path_str)));
+        }
+
+        do_cmd("xdg-open", &[&doc_path.to_str().unwrap()], true)
     }
 
     fn gen_entry_file(&self, lang: u8, title: &str, doctype: entry::DocType,
