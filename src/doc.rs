@@ -179,7 +179,9 @@ impl Doc {
         let update_files = vec!["figure/README.md", "Makefile", ".latexmkrc", ".gitignore"];
 
         for uf in update_files {
-            fs::remove_file(uf)?;
+            if Path::new(uf).exists() {
+                fs::remove_file(uf)?;
+            }
         }
 
         self.init_project(envs, true)?;
