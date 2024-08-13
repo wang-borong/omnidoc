@@ -441,11 +441,42 @@ classoption:
   - cn
   - device=normal"#;
 
+        let eheader = r#"
+    \usepackage{elegant}
+    \usepackage{bookmark}
+    \usepackage{xr}
+    \usepackage{lstlangarm}
+    \usepackage{pdfpages}
+
+    \usepackage{utils}
+
+    \usepackage{circuitikz}
+
+    \usepackage{wrapfig}
+    \usepackage{enumitem}
+    \setlist[description]{nosep,labelindent=2em,leftmargin=4em}
+
+    \usepackage{bytefield}
+    \lstset{defaultdialect=[ARM]Assembler}
+    \captionsetup{font=small}
+
+    %\cover{cover}"#;
+
         let doctype: &str;
+        let latex_header: &str;
         match dt {
-            DocType::EBOOK => doctype = ebook,
-            DocType::ENOTE => doctype = enote,
-            _ => doctype = r"",
+            DocType::EBOOK => {
+                doctype = ebook;
+                latex_header = eheader;
+            },
+            DocType::ENOTE => {
+                doctype = enote;
+                latex_header = eheader;
+            },
+            _ => {
+                doctype = r"";
+                latex_header = r"";
+            },
         }
             
         let entry_md = formatdoc!(r#"
@@ -478,24 +509,7 @@ lot: true
 header-includes:
   - |
     ```{{=latex}}
-    \usepackage{{bookmark}}
-    \usepackage{{xr}}
-    \usepackage{{lstlangarm}}
-    \usepackage{{pdfpages}}
-
-    \usepackage{{utils}}
-
-    \usepackage{{circuitikz}}
-
-    \usepackage{{wrapfig}}
-    \usepackage{{enumitem}}
-    \setlist[description]{{nosep,labelindent=2em,leftmargin=4em}}
-
-    \usepackage{{bytefield}}
-    \lstset{{defaultdialect=[ARM]Assembler}}
-    \captionsetup{{font=small}}
-
-    %\cover{{cover}}
+    {latex_header}
     ```
 
 include-before:
@@ -521,7 +535,8 @@ after-body:
 ```
 
 \newpage
-# 参考文献"#, title = title, author = author, date = date, doctype = doctype);
+# 参考文献"#, title = title, author = author,
+            date = date, doctype = doctype, latex_header = latex_header);
 
         entry_md
     }
