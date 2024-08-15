@@ -415,7 +415,8 @@ mod entry {
                 }
             },
             DocType::MYREPORT => {
-                doclass = r"\documentclass{ctrep}";
+                doclass = "\\documentclass{ctrep}\n\
+                    \\usepackage{myart}";
             },
             DocType::MYRESUME => {
                 doclass = "\\documentclass{resume-ng}\n\
