@@ -87,7 +87,7 @@ impl<'a> Doc<'a> {
         }
 
         let doctype_chk = String::from(&self.doctype);
-        let dirs = vec!["dac", "drawio", "figure", "figures", "biblio"];
+        let dirs = vec!["dac", "drawio", "figures", "biblio"];
 
         if !md.exists() && doctype_chk.ends_with("md") {
             fs::create_dir(&md)?;
@@ -100,6 +100,9 @@ impl<'a> Doc<'a> {
             if !dir_path.exists() && !doctype_chk.contains("resume") {
                 fs::create_dir(&dir_path)?;
             }
+        }
+        if !Path::new("figure").exists() {
+            fs::create_dir("figure")?;
         }
 
         // Walk through the current directory and find .md or .tex files
