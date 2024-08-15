@@ -1,6 +1,7 @@
 use clap::{Command, CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{generate, Generator, Shell};
 use dirs::{data_local_dir, config_local_dir};
+use std::env;
 
 use omnidoc::doc::Doc;
 use omnidoc::config::ConfigParser;
@@ -302,7 +303,17 @@ pub fn cli() {
                 &release, &language, &doctype, "");
             match doc.create_project(envs) {
                 Ok(_) => { },
-                Err(e) => { eprintln!("Create project failed ({})", e) },
+                Err(e) => {
+                    match env::set_current_dir("..") {
+                        Ok(_) => { },
+                        Err(e) => eprintln!("Change dir to .. failed ({})", e),
+                    }
+                    match fs::remove_dir_all(&path) {
+                        Ok(_) => { },
+                        Err(e) => eprintln!("Remove '{}' failed ({})", &path, e),
+                    }
+                    eprintln!("Create project failed ({})", e);
+                },
             }
         }
         Commands::Update { path } => {
@@ -375,7 +386,9 @@ pub fn cli() {
   ebook-tex (elegantbook class based latex document writing system)
   enote-tex (elegantnote class based latex document writing system)
   myart-tex (myart class based latex document writing system)
-  mybook-tex (mybook class based latex document writing system)"#);
+  myrep-tex (myrep class based latex document writing system)
+  mybook-tex (mybook class based latex document writing system)
+  resume-ng-tex"#);
         }
         Commands::Complete { generator } => {
             if let Some(generator) = generator {

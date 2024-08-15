@@ -91,25 +91,31 @@ impl Doc {
             }
         }
 
-        if !md.exists() {
+        // we assume the user has the document entry file when updating
+        if !update {
+            self.create_entry(&self.title, &self.doctype)?;
+        }
+
+        let doctype_chk = String::from(&self.doctype);
+        if !md.exists() && doctype_chk.ends_with("md") {
             fs::create_dir(&md)?;
         }
-        if !tex.exists() {
+        if !tex.exists() && doctype_chk.ends_with("tex") {
             fs::create_dir(&tex)?;
         }
-        if !dac.exists() {
+        if !dac.exists() && !doctype_chk.contains("resume") {
             fs::create_dir(&dac)?;
         }
-        if !drawio.exists() {
+        if !drawio.exists() && !doctype_chk.contains("resume") {
             fs::create_dir(&drawio)?;
         }
         if !figure.exists() {
             fs::create_dir(&figure)?;
         }
-        if !figures.exists() {
+        if !figures.exists() && !doctype_chk.contains("resume") {
             fs::create_dir(&figures)?;
         }
-        if !biblio.exists() {
+        if !biblio.exists() && !doctype_chk.contains("resume") {
             fs::create_dir(&biblio)?;
         }
 
@@ -148,11 +154,6 @@ impl Doc {
 
         fs::copy_from_lib("repo/gitignore", ".gitignore")?;
 
-        // we assume the user has the document entry file when updating
-        if !update {
-            self.create_entry(&self.title, &self.doctype)?;
-        }
-
         match git_add(".", &["*"], false) {
             Ok(_) => { },
             Err(e) => return Err(Error::other(format!("Git add files failed ({})", e))),
@@ -189,7 +190,7 @@ impl Doc {
         Ok(())
     }
 
-    fn check_project(&self) -> bool {
+    fn check_project() -> bool {
         let main_md = Path::new("main.md");
         let main_tex = Path::new("main.tex");
 
@@ -203,7 +204,7 @@ impl Doc {
     pub fn build_project(&self, o: Option<String>, envs: HashMap<&str, Option<String>>, 
                                 verbose: bool) -> Result<(), Error> {
         // check if the path is a valid omnify document
-        if !self.check_project() {
+        if !Doc::check_project() {
             return Err(Error::other("Not a omnified document path"));
         }
 
@@ -262,7 +263,7 @@ impl Doc {
 
     pub fn clean_project(&self, envs: HashMap<&str, Option<String>>, distclean: bool) -> Result<(), Error> {
         // check if the path is a valid omnify document
-        if !self.check_project() {
+        if !Doc::check_project() {
             return Err(Error::other("Not a omnified document path"));
         }
 
@@ -362,6 +363,8 @@ impl Doc {
             "enote-tex"     => self.gen_entry_file(2, title, entry::DocType::ENOTE, "main.tex")?,
             "mybook-tex"    => self.gen_entry_file(2, title, entry::DocType::MYBOOK, "main.tex")?,
             "myart-tex"     => self.gen_entry_file(2, title, entry::DocType::MYART, "main.tex")?,
+            "myrep-tex"     => self.gen_entry_file(2, title, entry::DocType::MYREPORT, "main.tex")?,
+            "resume-ng-tex" => self.gen_entry_file(2, "", entry::DocType::MYRESUME, "main.tex")?,
             _ => { return Err(Error::other(format!("Unsupported doctype '{}'", doctype))) },
         };
 
@@ -373,13 +376,14 @@ mod entry {
     use indoc::formatdoc;
     use chrono::prelude::*;
 
-    #[derive(PartialEq)]
+    #[derive(PartialEq, PartialOrd)]
     pub enum DocType {
         EBOOK,
         ENOTE,
         MYBOOK,
         MYART,
-        //MYREPORT,
+        MYREPORT,
+        MYRESUME,
     }
 
     pub fn make_tex(title: &str, author: &str, dt: DocType) -> String {
@@ -388,8 +392,8 @@ mod entry {
         let date = local.format("%Y/%m/%d").to_string();
 
         let doclass: &str;
-        let frontmatter: &str;
-        let mainmatter: &str;
+        let mut frontmatter: &str = r"";
+        let mut mainmatter: &str = r"";
 
         match dt {
             DocType::EBOOK | DocType::MYBOOK => {
@@ -409,9 +413,13 @@ mod entry {
                     doclass = r#"\documentclass{ctart}
 \usepackage{myart}"#;
                 }
-                frontmatter = r"";
-                mainmatter = r"";
-
+            },
+            DocType::MYREPORT => {
+                doclass = r"\documentclass{ctrep}";
+            },
+            DocType::MYRESUME => {
+                doclass = "\\documentclass{resume-ng}\n\
+                    \\usepackage{myresume-ng}";
             },
             //_ => {
             //    doclass = r"\usepackage{ctexart}";
@@ -420,7 +428,8 @@ mod entry {
             //},
         }
 
-        formatdoc!(r#"{doclass}
+        if dt < DocType::MYRESUME {
+            formatdoc!(r#"{doclass}
 
 %\addbibresource{{}}
 
@@ -444,6 +453,18 @@ mod entry {
 %\printbibliography[heading=bibintoc, title=参考文献]
 
 \end{{document}}"#, doclass = doclass, title = title, author = author, date = date)
+        } else {
+            formatdoc!(r#"{doclass}
+
+\ResumeName{{{author}}}
+
+\begin{{document}}
+
+% Input your resume tex file
+% \input{{}}
+
+\end{{document}}"#, author = author)
+        }
     }
 
     pub fn make_md(title: &str, author: &str, dt: DocType) -> String {
