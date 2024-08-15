@@ -190,7 +190,7 @@ impl Doc {
         Ok(())
     }
 
-    fn check_project() -> bool {
+    pub fn check_project() -> bool {
         let main_md = Path::new("main.md");
         let main_tex = Path::new("main.tex");
 

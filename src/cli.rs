@@ -2,6 +2,7 @@ use clap::{Command, CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{generate, Generator, Shell};
 use dirs::{data_local_dir, config_local_dir};
 use std::env;
+use std::path::Path;
 
 use omnidoc::doc::Doc;
 use omnidoc::config::ConfigParser;
@@ -79,7 +80,7 @@ enum Commands {
 
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
-        path: String,
+        path: Option<String>,
     },
 
     /// build the document project
@@ -178,6 +179,11 @@ pub fn cli() {
 
     match args.command {
         Commands::Init { path, author, version, release, language, title, doctype } => {
+            if Doc::check_project() {
+                println!("It is an omnidoc project already, no action");
+                return;
+            }
+
             let mut config_parser = ConfigParser::default();
             match config_parser.parse() {
                 Ok(()) => { },
@@ -207,8 +213,13 @@ pub fn cli() {
                 Some(language) => language,
                 None => "zh".to_string(),
             };
-            let doc = Doc::new(&title, &path, &author, &version,
-                &release, &language, &doctype, "");
+            let doc: Doc;
+            match path {
+                Some(path) => doc = Doc::new(&title, &path, &author,
+                    &version, &release, &language, &doctype, ""),
+                None => doc = Doc::new(&title, ".", &author, &version,
+                    &release, &language, &doctype, ""),
+            };
             match doc.init_project(envs, false) {
                 Ok(_) => { },
                 Err(e) => { eprintln!("Initial project failed ({})", e) },
@@ -270,6 +281,11 @@ pub fn cli() {
             }
         },
         Commands::New { path, author, version, release, language, title, doctype } => {
+            if Path::new(&path).exists() {
+                println!("The path exists already, no action");
+                return;
+            }
+
             let mut config_parser = ConfigParser::default();
             match config_parser.parse() {
                 Ok(()) => { },
