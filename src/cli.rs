@@ -5,10 +5,12 @@ use std::env;
 use std::path::Path;
 use std::process::exit;
 
+
 use omnidoc::doc::Doc;
 use omnidoc::config::ConfigParser;
 use omnidoc::git::{git_clone, git_pull};
 use omnidoc::fs;
+use omnidoc::rl::DTRL;
 
 //
 // Create a git-like cli program to manage our document project.
@@ -144,17 +146,6 @@ enum Commands {
     },
 }
 
-fn print_completions<G: Generator>(gen: G, cmd: &mut Command) {
-    generate(gen, cmd, cmd.get_name().to_string(), &mut std::io::stdout());
-}
-
-fn omnidoc_lib_exists() -> bool {
-    let local_data_dir = data_local_dir().unwrap();
-    let omnidoc_lib_dir = local_data_dir.join("omnidoc");
-
-    omnidoc_lib_dir.exists()
-}
-
 macro_rules! exit_eprintln {
     ($exit_code:expr, $($arg:tt)*) => {
         {
@@ -174,8 +165,65 @@ macro_rules! clean_exit_eprintln {
     };
 }
 
+fn print_completions<G: Generator>(gen: G, cmd: &mut Command) {
+    generate(gen, cmd, cmd.get_name().to_string(), &mut std::io::stdout());
+}
+
+fn omnidoc_lib_exists() -> bool {
+    let local_data_dir = data_local_dir().unwrap();
+    let omnidoc_lib_dir = local_data_dir.join("omnidoc");
+
+    omnidoc_lib_dir.exists()
+}
+
+fn print_doctypes() {
+    println!(r#"Current supported document types:
+✅ ebook-md  (elegantbook class based markdown document writing system)
+✅ enote-md  (elegantnote class based markdown document writing system)
+✅ ebook-tex (elegantbook class based latex document writing system)
+✅ enote-tex (elegantnote class based latex document writing system)
+✅ myart-tex (myart class based latex document writing system)
+✅ myrep-tex (myrep class based latex document writing system)
+✅ mybook-tex (mybook class based latex document writing system)
+✅ resume-ng-tex"#);
+}
+
+fn get_doctype_from_readline<O, N>(orig_path: O, path: N) -> String 
+    where O: AsRef<Path>, N: AsRef<Path> {
+    let mut dtrl = match DTRL::new() {
+        Ok(dtrl) => dtrl,
+        Err(e) => clean_exit_eprintln!(1, {
+            let _ = env::set_current_dir(&orig_path);
+            let _ = fs::remove_dir_all(&path);
+        }, "Create DTRL failed ({})", e),
+    };
+    let mut doctype: String;
+    loop {
+        let readline = dtrl.readline();
+        doctype = match readline {
+            Ok(line) => line,
+            Err(e) => {
+                clean_exit_eprintln!(1, {
+                    let _ = env::set_current_dir(&orig_path);
+                    let _ = fs::remove_dir_all(&path);
+                }, "Get the input line failed ({})", e);
+            }
+        };
+
+        if &doctype == "list" || &doctype == "ls" {
+            print_doctypes();
+        } else {
+            break
+        }
+    }
+
+    doctype
+}
+
 pub fn cli() {
     let args = OmniCli::parse();
+
+    let orig_path = env::current_dir().unwrap();
 
     match args.command {
         Commands::New { .. } | Commands::Init { .. }
@@ -207,6 +255,7 @@ pub fn cli() {
                 Ok(_) => { },
                 Err(e) => {
                     clean_exit_eprintln!(1, {
+                        let _ = env::set_current_dir(&orig_path);
                         let _ = fs::remove_dir_all(&path);
                     }, "Cannot change directory to '{}' ({})", path, e);
                 },
@@ -233,6 +282,7 @@ pub fn cli() {
                 Ok(c) => c,
                 Err(e) => {
                     clean_exit_eprintln!(1, {
+                        let _ = env::set_current_dir(&orig_path);
                         let _ = fs::remove_dir_all(&path);
                     }, "Get default config faild ({})", e);
                 },
@@ -250,28 +300,7 @@ pub fn cli() {
                 }
             };
 
-            let mut rl = match rustyline::DefaultEditor::new() {
-                Ok(rl) => rl,
-                Err(e) => {
-                    clean_exit_eprintln!(1, {
-                        let _ = fs::remove_dir_all(&path);
-                    }, "New rustlyline DefaultEditor failed ({})", e);
-                }
-            };
-            //#[cfg(feature = "with-file-history")]
-            if rl.load_history("omnidoc_history.txt").is_err() {
-                eprintln!("No previous history.");
-            }
-            let readline = rl.readline(">> ");
-            let doctype = match readline {
-                Ok(line) => line, 
-                Err(e) => {
-                    clean_exit_eprintln!(1, {
-                        let _ = fs::remove_dir_all(&path);
-                    }, "Get the input line failed ({})", e);
-                }
-            };
-            let _ = rl.save_history("omnidoc_history.txt");
+            let doctype = get_doctype_from_readline(&orig_path, &path);
 
             let doc = Doc::new(&title, &path, &author, &doctype, envs);
             match doc.create_project() {
@@ -322,19 +351,7 @@ pub fn cli() {
                 }
             };
 
-            let mut rl = match rustyline::DefaultEditor::new() {
-                Ok(rl) => rl,
-                Err(e) => {
-                    exit_eprintln!(1, "New rustlyline DefaultEditor failed ({})", e);
-                }
-            };
-            let readline = rl.readline(">> ");
-            let doctype = match readline {
-                Ok(line) => line, 
-                Err(e) => {
-                    exit_eprintln!(1, "Get the input line failed ({})", e);
-                }
-            };
+            let doctype = get_doctype_from_readline(&orig_path, &path);
 
             let doc = Doc::new(&title, &path, &author, &doctype, envs);
             if Doc::is_omnidoc_project() {
@@ -485,15 +502,7 @@ pub fn cli() {
             }
         },
         Commands::List => {
-            println!(r#"Current supported document types:
-✅ ebook-md  (elegantbook class based markdown document writing system)
-✅ enote-md  (elegantnote class based markdown document writing system)
-✅ ebook-tex (elegantbook class based latex document writing system)
-✅ enote-tex (elegantnote class based latex document writing system)
-✅ myart-tex (myart class based latex document writing system)
-✅ myrep-tex (myrep class based latex document writing system)
-✅ mybook-tex (mybook class based latex document writing system)
-✅ resume-ng-tex"#);
+            print_doctypes();
         },
         Commands::Complete { generator } => {
             if let Some(generator) = generator {
