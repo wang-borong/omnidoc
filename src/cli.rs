@@ -3,6 +3,7 @@ use clap_complete::{generate, Generator, Shell};
 use dirs::{data_local_dir, config_local_dir};
 use std::env;
 use std::path::Path;
+use std::process::exit;
 
 use omnidoc::doc::Doc;
 use omnidoc::config::ConfigParser;
@@ -30,15 +31,6 @@ enum Commands {
         /// set the author name
         #[arg(short, long)]
         author: Option<String>,
-        /// set the document version
-        #[arg(short, long)]
-        version: Option<String>,
-        /// set the release name
-        #[arg(short, long)]
-        release: Option<String>,
-        /// set the language
-        #[arg(short, long)]
-        language: Option<String>,
 
         /// set the document title
         #[arg(short = 't', long)]
@@ -61,15 +53,6 @@ enum Commands {
         /// set the author name
         #[arg(short, long)]
         author: Option<String>,
-        /// set the document version
-        #[arg(short, long)]
-        version: Option<String>,
-        /// set the release name
-        #[arg(short, long)]
-        release: Option<String>,
-        /// set the language
-        #[arg(short, long)]
-        language: Option<String>,
 
         /// set the document title
         #[arg(short = 't', long)]
@@ -88,9 +71,6 @@ enum Commands {
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
         path: Option<String>,
-        /// set the output path
-        #[arg(short, long, value_hint = ValueHint::AnyPath)]
-        output: Option<String>,
 
         /// show verbose message
         #[arg(short = 'v', long)]
@@ -165,7 +145,7 @@ enum Commands {
     /// generate shell completion
     Complete {
         /// If provided, outputs the completion file for given shell
-        #[arg(long = "generate", value_enum)]
+        #[arg(short, long = "generate", value_enum)]
         generator: Option<Shell>,
     },
 }
@@ -174,123 +154,79 @@ fn print_completions<G: Generator>(gen: G, cmd: &mut Command) {
     generate(gen, cmd, cmd.get_name().to_string(), &mut std::io::stdout());
 }
 
+fn omnidoc_lib_exists() -> bool {
+    let local_data_dir = data_local_dir().unwrap();
+    let omnidoc_lib_dir = local_data_dir.join("omnidoc");
+
+    omnidoc_lib_dir.exists()
+}
+
 pub fn cli() {
     let args = OmniCli::parse();
 
     match args.command {
-        Commands::Init { path, author, version, release, language, title, doctype } => {
-            if Doc::check_project() {
-                println!("It is an omnidoc project already, no action");
-                return;
+        Commands::New { .. } | Commands::Init { .. }
+        | Commands::Update { .. } | Commands::Build { .. }
+        | Commands::Clean { .. } => {
+            if !omnidoc_lib_exists() {
+                eprintln!("No omnidoc lib installed, please install it by \
+                    'omnidoc lib --install'");
+                exit(1);
             }
+        },
+        _ => { },
+    }
 
-            let mut config_parser = ConfigParser::default();
-            match config_parser.parse() {
-                Ok(()) => { },
-                Err(e) => eprintln!("Parse config failed ({})", e),
-            }
-            let envs = config_parser.get_envs().expect("Unable get envs");
-
-            let author_conf = config_parser.get_author_name();
-            let author = match author {
-                Some(author) => author,
-                None => {
-                    match author_conf {
-                        Ok(author) => author,
-                        Err(_) => "Someone".to_string(),
-                    }
+    match args.command {
+        // NOTE: Get into the project directory
+        Commands::New { ref path, .. } => {
+            if !Path::new(&path).exists() {
+                match fs::create_dir_all(&path) {
+                    Ok(_) => { },
+                    Err(e) => {
+                        eprintln!("Cannot create directory '{}' ({})", path, e);
+                        exit(1);
+                    },
                 }
-            };
-            let version = match version {
-                Some(version) => version,
-                None => "v0.1".to_string(),
-            };
-            let release = match release {
-                Some(release) => release,
-                None => "v1.0".to_string(),
-            };
-            let language = match language {
-                Some(language) => language,
-                None => "zh".to_string(),
-            };
-            let doc: Doc;
-            match path {
-                Some(path) => doc = Doc::new(&title, &path, &author,
-                    &version, &release, &language, &doctype, ""),
-                None => doc = Doc::new(&title, ".", &author, &version,
-                    &release, &language, &doctype, ""),
-            };
-            match doc.init_project(envs, false) {
-                Ok(_) => { },
-                Err(e) => { eprintln!("Initial project failed ({})", e) },
+                match env::set_current_dir(&path) {
+                    Ok(_) => { },
+                    Err(e) => {
+                        eprintln!("Cannot change directory to '{}' ({})", path, e);
+                        exit(1);
+                    },
+                }
             }
         },
-        Commands::Build { path, output, verbose } => {
-            let mut config_parser = ConfigParser::default();
-            match config_parser.parse() {
-                Ok(()) => { },
-                Err(e) => eprintln!("Parse config failed ({})", e),
-            }
-            let envs = config_parser.get_envs().expect("Unable get envs");
-
-            let doc: Doc;
-            match path {
-                Some(path) => doc = Doc::new("", &path, "", "", "", "", "", ""),
-                None => doc = Doc::new("", ".", "", "", "", "", "", ""),
-            };
-            match doc.build_project(output, envs, verbose) {
-                Ok(_) => { },
-                Err(e) => { eprintln!("Build project failed ({})", e) },
+        Commands::Init { ref path, .. } | Commands::Build { ref path, .. } 
+        | Commands::Open { ref path } | Commands::Clean { ref path, .. }
+        | Commands::Update { ref path } => {
+            if let Some(path) = path {
+                match env::set_current_dir(&path) {
+                    Ok(_) => { },
+                    Err(e) => {
+                        eprintln!("Cannot change directory to {} ({})", path, e);
+                        exit(1);
+                    },
+                }
             }
         },
-        Commands::Open { path } => {
-            let mut config_parser = ConfigParser::default();
-            match config_parser.parse() {
-                Ok(()) => { },
-                Err(e) => eprintln!("Parse config failed ({})", e),
-            }
-            let envs = config_parser.get_envs().expect("Unable get envs");
+        _ => { },
+    }
 
-            let doc: Doc;
-            match path {
-                Some(path) => doc = Doc::new("", &path, "", "", "", "", "", ""),
-                None => doc = Doc::new("", ".", "", "", "", "", "", ""),
-            };
-            match doc.open_doc(envs) {
-                Ok(_) => { },
-                Err(e) => { eprintln!("Open doc failed ({})", e) },
-            }
-        },
-        Commands::Clean { path, distclean } => {
-            let mut config_parser = ConfigParser::default();
-            match config_parser.parse() {
-                Ok(()) => { },
-                Err(e) => eprintln!("Parse config failed ({})", e),
-            }
-            let envs = config_parser.get_envs().expect("Unable get envs");
-
-            let doc: Doc;
-            match path {
-                Some(path) => doc = Doc::new("", &path, "", "", "", "", "", ""),
-                None => doc = Doc::new("", ".", "", "", "", "", "", ""),
-            };
-
-            match doc.clean_project(envs, distclean) {
-                Ok(_) => { },
-                Err(e) => { eprintln!("Clean project failed ({})", e) },
-            }
-        },
-        Commands::New { path, author, version, release, language, title, doctype } => {
+    match args.command {
+        Commands::New { path, author, title, doctype } => {
             if Path::new(&path).exists() {
                 println!("The path exists already, no action");
-                return;
+                exit(1);
             }
 
-            let mut config_parser = ConfigParser::default();
-            match config_parser.parse() {
-                Ok(()) => { },
-                Err(e) => eprintln!("Parse config failed ({})", e),
-            }
+            let config_parser = match ConfigParser::default() {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Get default config faild ({})", e);
+                    exit(1);
+                },
+            };
             let envs = config_parser.get_envs().expect("Unable get envs");
 
             let author_conf = config_parser.get_author_name();
@@ -303,78 +239,198 @@ pub fn cli() {
                     }
                 }
             };
-            let version = match version {
-                Some(version) => version,
-                None => "v0.1".to_string(),
-            };
-            let release = match release {
-                Some(release) => release,
-                None => "v1.0".to_string(),
-            };
-            let language = match language {
-                Some(language) => language,
-                None => "zh".to_string(),
-            };
-            let doc = Doc::new(&title, &path, &author, &version,
-                &release, &language, &doctype, "");
-            match doc.create_project(envs) {
+
+            let doc = Doc::new(&title, &path, &author, &doctype, envs);
+            match doc.create_project() {
                 Ok(_) => { },
                 Err(e) => {
                     match env::set_current_dir("..") {
                         Ok(_) => { },
-                        Err(e) => eprintln!("Change dir to .. failed ({})", e),
+                        Err(e) => {
+                            eprintln!("Change dir to .. failed ({})", e);
+                            exit(1);
+                        },
                     }
                     match fs::remove_dir_all(&path) {
                         Ok(_) => { },
-                        Err(e) => eprintln!("Remove '{}' failed ({})", &path, e),
+                        Err(e) => {
+                            eprintln!("Remove '{}' failed ({})", &path, e);
+                            exit(1);
+                        },
                     }
                     eprintln!("Create project failed ({})", e);
+                    exit(1);
+                },
+            }
+        },
+        Commands::Init { path, author, title, doctype } => {
+            let path = match path {
+                Some(path) => path,
+                None => ".".to_owned(),
+            };
+
+            if !Path::new(&path).exists() {
+                println!("The path doesn't exist, no action");
+                exit(1);
+            }
+
+            let config_parser = match ConfigParser::default() {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Get default config faild ({})", e);
+                    exit(1);
+                },
+            };
+            let envs = config_parser.get_envs().expect("Unable get envs");
+
+            let author_conf = config_parser.get_author_name();
+            let author = match author {
+                Some(author) => author,
+                None => {
+                    match author_conf {
+                        Ok(author) => author,
+                        Err(_) => "Someone".to_string(),
+                    }
+                }
+            };
+
+            let doc = Doc::new(&title, &path, &author, &doctype, envs);
+            if Doc::is_omnidoc_project() {
+                println!("It is an omnidoc project already, no action");
+                return;
+            }
+            match doc.init_project(false) {
+                Ok(_) => { },
+                Err(e) => {
+                    eprintln!("Initial project failed ({})", e);
+                    exit(1);
+                },
+            }
+        },
+        Commands::Build { path, verbose } => {
+            let config_parser = match ConfigParser::default() {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Get default config faild ({})", e);
+                    exit(1);
+                },
+            };
+            let envs = config_parser.get_envs().expect("Unable get envs");
+
+            let path = match path {
+                Some(path) => path,
+                None => ".".to_owned(),
+            };
+            let doc = Doc::new("", &path, "", "", envs);
+            match doc.build_project(verbose) {
+                Ok(_) => { },
+                Err(e) => {
+                    eprintln!("Build project failed ({})", e);
+                    exit(1);
+                },
+            }
+        },
+        Commands::Open { path } => {
+            let config_parser = match ConfigParser::default() {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Get default config faild ({})", e);
+                    exit(1);
+                },
+            };
+            let envs = config_parser.get_envs().expect("Unable get envs");
+
+            let path = match path {
+                Some(path) => path,
+                None => ".".to_owned(),
+            };
+            let doc = Doc::new("", &path, "", "", envs);
+            match doc.open_doc() {
+                Ok(_) => { },
+                Err(e) => {
+                    eprintln!("Open doc failed ({})", e);
+                    exit(1);
+                },
+            }
+        },
+        Commands::Clean { path, distclean } => {
+            let config_parser = match ConfigParser::default() {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Get default config faild ({})", e);
+                    exit(1);
+                },
+            };
+            let envs = config_parser.get_envs().expect("Unable get envs");
+
+            let path = match path {
+                Some(path) => path,
+                None => ".".to_owned(),
+            };
+            let doc: Doc = Doc::new("", &path, "", "", envs);
+
+            match doc.clean_project(distclean) {
+                Ok(_) => { },
+                Err(e) => {
+                    eprintln!("Clean project failed ({})", e);
+                    exit(1);
+                },
+            }
+        },
+        Commands::Update { path } => {
+            let config_parser = match ConfigParser::default() {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Get default config faild ({})", e);
+                    exit(1);
+                },
+            };
+            let envs = config_parser.get_envs().expect("Unable get envs");
+
+            let path = match path {
+                Some(path) => path,
+                None => ".".to_owned(),
+            };
+
+            let mut doc = Doc::new("", &path, "", "", envs);
+
+            match doc.update_project() {
+                Ok(_) => { },
+                Err(e) => {
+                    eprintln!("Update project failed ({})", e);
+                    exit(1);
                 },
             }
         }
-        Commands::Update { path } => {
-            let mut config_parser = ConfigParser::default();
-            match config_parser.parse() {
-                Ok(()) => { },
-                Err(e) => eprintln!("Parse config failed ({})", e),
-            }
-            let envs = config_parser.get_envs().expect("Unable get envs");
-
-            let mut doc: Doc;
-
-            match path {
-                Some(path) => doc = Doc::new("", &path, "", "", "", "", "", ""),
-                None => doc = Doc::new("", ".", "", "", "", "", "", ""),
-            };
-
-            match doc.update_project(envs) {
-                Ok(_) => { },
-                Err(e) => { eprintln!("Update project failed ({})", e) },
-            }
-        }
         Commands::Config {authors, lib, outdir, texmfhome, bibinputs, texinputs, force} => {
-            let config_parser = ConfigParser::default();
-
-            match config_parser.gen(authors, lib, outdir, texmfhome, bibinputs, texinputs, force) {
+            match ConfigParser::gen(authors, lib, outdir, texmfhome, bibinputs, texinputs, force) {
                 Ok(_) => println!("Generate configuration success"),
-                Err(e)  => eprintln!("Generate configuration failed ({})", e),
+                Err(e)  => {
+                    eprintln!("Generate configuration failed ({})", e);
+                    exit(1);
+                },
             }
-        }
-        Commands::Lib { install, update } => {
+        },
+        Commands::Lib { update, .. } => {
             let dld = data_local_dir().unwrap();
             let olib = dld.join("omnidoc");
 
-            if install {
-                match git_clone("https://github.com/wang-borong/omnidoc-libs", &olib, true) {
-                    Ok(_) => println!("Install '{}' success", olib.display()),
-                    Err(e) => eprintln!("Clone omnidoc-libs failed ({})", e),
-                };
-
-            } else if update {
+            if update {
                 match git_pull(&olib, "origin", "main") {
                     Ok(_) => println!("Update '{}' success", olib.display()),
-                    Err(e) => eprintln!("Update {} failed ({})", olib.display(), e),
+                    Err(e) => {
+                        eprintln!("Update {} failed ({})", olib.display(), e);
+                        exit(1);
+                    },
                 }
+            } else {
+                match git_clone("https://github.com/wang-borong/omnidoc-libs", &olib, true) {
+                    Ok(_) => println!("Install '{}' success", olib.display()),
+                    Err(e) => {
+                        eprintln!("Install omnidoc-libs failed ({})", e);
+                        exit(1);
+                    },
+                };
             }
 
             let mut latexmkrc = config_local_dir().unwrap();
@@ -383,7 +439,10 @@ pub fn cli() {
             if !latexmkrc.exists() {
                 match fs::create_dir_all(&latexmkrc) {
                     Ok(_) => { },
-                    Err(e) => eprintln!("Create latexmk config dir failed ({})", e),
+                    Err(e) => {
+                        eprintln!("Create latexmk config dir failed ({})", e);
+                        exit(1);
+                    },
                 }
             }
 
@@ -391,28 +450,31 @@ pub fn cli() {
             if !latexmkrc.exists() {
                 match fs::copy_from_lib("repo/latexmkrc", &latexmkrc) {
                     Ok(_) => { },
-                    Err(e) => eprintln!("Setup latexmkrc failed ({})", e),
+                    Err(e) => {
+                        eprintln!("Setup latexmkrc failed ({})", e);
+                        exit(1);
+                    },
                 }
             }
-        }
+        },
         Commands::List => {
-            println!(r#"Document types:
-  ebook-md  (elegantbook class based markdown document writing system)
-  enote-md  (elegantnote class based markdown document writing system)
-  ebook-tex (elegantbook class based latex document writing system)
-  enote-tex (elegantnote class based latex document writing system)
-  myart-tex (myart class based latex document writing system)
-  myrep-tex (myrep class based latex document writing system)
-  mybook-tex (mybook class based latex document writing system)
-  resume-ng-tex"#);
-        }
+            println!(r#"Current supported document types:
+✅ ebook-md  (elegantbook class based markdown document writing system)
+✅ enote-md  (elegantnote class based markdown document writing system)
+✅ ebook-tex (elegantbook class based latex document writing system)
+✅ enote-tex (elegantnote class based latex document writing system)
+✅ myart-tex (myart class based latex document writing system)
+✅ myrep-tex (myrep class based latex document writing system)
+✅ mybook-tex (mybook class based latex document writing system)
+✅ resume-ng-tex"#);
+        },
         Commands::Complete { generator } => {
             if let Some(generator) = generator {
                 let mut cmd = OmniCli::command();
 
                 print_completions(generator, &mut cmd);
             }
-        }
+        },
     }
 }
 

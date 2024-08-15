@@ -11,49 +11,44 @@ use dirs::data_local_dir;
 
 use super::fs;
 use super::cmd::do_cmd;
-use super::git::{git_init, git_add, git_commit, git_repo_check};
+use super::git::{git_init, git_add, git_commit, is_git_repo};
 
 #[derive(Debug, PartialEq)]
-pub struct Doc {
+pub struct Doc<'a> {
     title: String,
     path: PathBuf,
     author: String,
-    version: String,
-    release: String,
-    language: String,
     doctype:  String,
     docname:  String,
+    envs: HashMap<&'a str, Option<String>>,
 }
 
-impl Doc {
-    pub fn new<P>(title: &str, path: P, author: &str,
-        version: &str, release: &str, language: &str,
-        doctype: &str, docname: &str) -> Self
+impl<'a> Doc<'a> {
+    pub fn new<P>(title: &str, path: P, author: &str, doctype: &str,
+            envs: HashMap<&'a str, Option<String>>) -> Self
         where P: AsRef<Path>
     {
-        let pathbuf = PathBuf::new().join(path);
-
-        if !pathbuf.exists() {
-            let _ = fs::create_dir_all(&pathbuf);
-        }
-        // NOTE: We changed to the project directory,
-        // the all document operations are in its directory.
-        let _ = env::set_current_dir(&pathbuf);
+        let doc_path = PathBuf::new().join(path);
+        let cur_dir = env::current_dir().unwrap();
+        let doc_path_clone = doc_path.clone();
+        let docname = if doc_path != PathBuf::from(".") {
+            doc_path_clone.file_name().unwrap().to_str().unwrap_or("unknown")
+        } else {
+            cur_dir.file_name().unwrap().to_str().unwrap_or("unknown")
+        };
 
         Self {
             title: String::from(title),
-            path: pathbuf,
+            path: doc_path,
             author: String::from(author),
-            version: String::from(version),
-            release: String::from(release),
-            language: String::from(language),
             doctype:  String::from(doctype),
             docname:  String::from(docname),
+            envs,
         }
     }
 
-    pub fn create_project(&self, envs: HashMap<&str, Option<String>>) -> Result<(), Error> {
-        self.init_project(envs, false)?;
+    pub fn create_project(&self) -> Result<(), Error> {
+        self.init_project(false)?;
 
         Ok(())
     }    
@@ -68,55 +63,43 @@ impl Doc {
         Ok(())
     }
 
-    pub fn init_project(&self, envs: HashMap<&str, Option<String>>, update: bool) -> Result<(), Error> {
+    pub fn init_project(&self, update: bool) -> Result<(), Error> {
 
         let projdir = Path::new(&self.path);
         let md = Path::new("md");
         // Just use the last texinput path
-        let texinput = envs["texinputs"].clone().unwrap_or("tex".to_owned());
+        let texinput = &self.envs["texinputs"].clone().unwrap_or("tex".to_owned());
         let texinput = texinput.strip_suffix(":").unwrap_or(&texinput);
         let texinputs = texinput.split(":").collect::<Vec<&str>>();
         let last_texinput = texinputs.last().unwrap();
         let tex = Path::new(&last_texinput);
-        let dac = Path::new("dac");
-        let drawio = Path::new("drawio");
-        let figure = Path::new("figure");
-        let figures = Path::new("figures");
-        let biblio = Path::new("biblio");
-
-        if !git_repo_check(&projdir) {
-            match git_init(".", true) {
-                Ok(_) => {},
-                Err(e) => return Err(Error::other(format!("Git init project failed ({})", e))),
-            }
-        }
 
         // we assume the user has the document entry file when updating
         if !update {
             self.create_entry(&self.title, &self.doctype)?;
         }
 
+        if !is_git_repo(&projdir) {
+            match git_init(".", true) {
+                Ok(_) => {},
+                Err(e) => return Err(Error::other(format!("Git init project failed ({})", e))),
+            }
+        }
+
         let doctype_chk = String::from(&self.doctype);
+        let dirs = vec!["dac", "drawio", "figure", "figures", "biblio"];
+
         if !md.exists() && doctype_chk.ends_with("md") {
             fs::create_dir(&md)?;
         }
         if !tex.exists() && doctype_chk.ends_with("tex") {
             fs::create_dir(&tex)?;
         }
-        if !dac.exists() && !doctype_chk.contains("resume") {
-            fs::create_dir(&dac)?;
-        }
-        if !drawio.exists() && !doctype_chk.contains("resume") {
-            fs::create_dir(&drawio)?;
-        }
-        if !figure.exists() {
-            fs::create_dir(&figure)?;
-        }
-        if !figures.exists() && !doctype_chk.contains("resume") {
-            fs::create_dir(&figures)?;
-        }
-        if !biblio.exists() && !doctype_chk.contains("resume") {
-            fs::create_dir(&biblio)?;
+        for dir in dirs {
+            let dir_path = Path::new(dir);
+            if !dir_path.exists() && !doctype_chk.contains("resume") {
+                fs::create_dir(&dir_path)?;
+            }
         }
 
         // Walk through the current directory and find .md or .tex files
@@ -152,7 +135,10 @@ impl Doc {
                           you must not remove them.**";
         Doc::gen_file(&fig_readme, "figure/README.md")?;
 
-        fs::copy_from_lib("repo/gitignore", ".gitignore")?;
+        match fs::copy_from_lib("repo/gitignore", ".gitignore") {
+            Ok(_) => { },
+            Err(e) => return Err(Error::other(format!("Copy gitignore from lib failed ({})", e))),
+        }
 
         match git_add(".", &["*"], false) {
             Ok(_) => { },
@@ -176,7 +162,7 @@ impl Doc {
         Ok(())
     }
 
-    pub fn update_project(&mut self, envs: HashMap<&str, Option<String>>) -> Result<(), Error> {
+    pub fn update_project(&mut self) -> Result<(), Error> {
         let update_files = vec!["figure/README.md", "Makefile", ".latexmkrc", ".gitignore"];
 
         for uf in update_files {
@@ -185,12 +171,12 @@ impl Doc {
             }
         }
 
-        self.init_project(envs, true)?;
+        self.init_project(true)?;
 
         Ok(())
     }
 
-    pub fn check_project() -> bool {
+    pub fn is_omnidoc_project() -> bool {
         let main_md = Path::new("main.md");
         let main_tex = Path::new("main.tex");
 
@@ -201,40 +187,30 @@ impl Doc {
         }
     }
 
-    pub fn build_project(&self, o: Option<String>, envs: HashMap<&str, Option<String>>, 
-                                verbose: bool) -> Result<(), Error> {
+    pub fn build_project(&self, verbose: bool) -> Result<(), Error> {
         // check if the path is a valid omnify document
-        if !Doc::check_project() {
+        if !Doc::is_omnidoc_project() {
             return Err(Error::other("Not a omnified document path"));
         }
 
         // create build dir
-        match o {
-            Some(od) => {
-                if !Path::new(&od).exists() {
-                    fs::create_dir(&od)?;
+        let conf_o = &self.envs["outdir"];
+        match conf_o {
+            Some(conf_o) => {
+                if !Path::new(&conf_o).exists() {
+                    fs::create_dir(&conf_o)?;
                 }
-                env::set_var("OUTDIR", &od);
+                env::set_var("OUTDIR", &conf_o);
             },
-            None     => {
-                let conf_o = &envs["outdir"];
-                match conf_o {
-                    Some(conf_o) => {
-                        if !Path::new(&conf_o).exists() {
-                            fs::create_dir(&conf_o)?;
-                        }
-                        env::set_var("OUTDIR", &conf_o);
-                    },
-                    None => {
-                        if !Path::new("build").exists() {
-                            fs::create_dir("build")?;
-                        }
-                    }
+            None => {
+                if !Path::new("build").exists() {
+                    fs::create_dir("build")?;
                 }
-            },
+            }
         }
+
         for env_key in vec!["texinputs", "bibinputs", "texmfhome"] {
-            let env_val = &envs[env_key];
+            let env_val = &self.envs[env_key];
             match env_val {
                 Some(env_val) => {
                     env::set_var(env_key.to_uppercase(), &env_val);
@@ -243,14 +219,7 @@ impl Doc {
             }
         }
 
-        let cur_dir = env::current_dir().unwrap();
-        let tn = if self.path != PathBuf::from(".") {
-            self.path.file_name().unwrap().to_str().unwrap_or("unknown")
-        } else {
-            cur_dir.file_name().unwrap().to_str().unwrap_or("unknown")
-        };
-
-        let target = format!("TARGET={}", tn);
+        let target = format!("TARGET={}", &self.docname);
 
         let mut topmk = data_local_dir().unwrap();
         topmk.push("omnidoc/tool/top.mk");
@@ -261,13 +230,13 @@ impl Doc {
         }
     }
 
-    pub fn clean_project(&self, envs: HashMap<&str, Option<String>>, distclean: bool) -> Result<(), Error> {
-        // check if the path is a valid omnify document
-        if !Doc::check_project() {
+    pub fn clean_project(&self, distclean: bool) -> Result<(), Error> {
+        // check if the path is a valid omnidoc project
+        if !Doc::is_omnidoc_project() {
             return Err(Error::other("Not a omnified document path"));
         }
 
-        let conf_o = &envs["outdir"];
+        let conf_o = &self.envs["outdir"];
         match conf_o {
             Some(conf_o) => {
                 env::set_var("OUTDIR", &conf_o);
@@ -276,7 +245,7 @@ impl Doc {
         }
 
         for env_key in vec!["texinputs", "bibinputs", "texmfhome"] {
-            let env_val = &envs[env_key];
+            let env_val = &self.envs[env_key];
             match env_val {
                 Some(env_val) => {
                     env::set_var(env_key.to_uppercase(), &env_val);
@@ -285,14 +254,7 @@ impl Doc {
             }
         }
 
-        let cur_dir = env::current_dir().unwrap();
-        let tn = if self.path != PathBuf::from(".") {
-            self.path.file_name().unwrap().to_str().unwrap_or("unknown")
-        } else {
-            cur_dir.file_name().unwrap().to_str().unwrap_or("unknown")
-        };
-
-        let target = format!("TARGET={}", tn);
+        let target = format!("TARGET={}", &self.docname);
 
         let mut topmk = data_local_dir().unwrap();
         topmk.push("omnidoc/tool/top.mk");
@@ -304,22 +266,14 @@ impl Doc {
         }
     }
 
-    pub fn open_doc(&self, envs: HashMap<&str, Option<String>>) -> Result<(), Error> {
-        let cur_dir = env::current_dir().unwrap();
-        let doc_name = if self.path != PathBuf::from(".") {
-            self.path.file_name().unwrap().to_str().unwrap_or("unknown")
-        } else {
-            cur_dir.file_name().unwrap().to_str().unwrap_or("unknown")
+    pub fn open_doc(&self) -> Result<(), Error> {
+        let conf_o = &self.envs["outdir"];
+        let outdir = match conf_o {
+            Some(conf_o) => conf_o,
+            None => "build",
         };
 
-        let outdir: &str;
-        let conf_o = &envs["outdir"];
-        match conf_o {
-            Some(conf_o) => outdir = conf_o,
-            None => outdir = "build",
-        }
-
-        let doc_path_str = format!("{}/{}.pdf", outdir, doc_name);
+        let doc_path_str = format!("{}/{}.pdf", outdir, &self.docname);
 
         let project_path = Path::new(&self.path);
         let doc_path = project_path.join(&doc_path_str);
@@ -338,18 +292,13 @@ impl Doc {
             return Ok(());
         }
 
-        let cont: String;
-        match lang {
-            1 => cont = entry::make_md(title, &self.author, doctype),
-            2 => cont = entry::make_tex(title, &self.author, doctype),
+        let cont = match lang {
+            1 => entry::make_md(title, &self.author, doctype),
+            2 => entry::make_tex(title, &self.author, doctype),
             _ => return Err(Error::other("Unsupported lang")),
-        }
+        };
 
         Doc::gen_file(&cont, file)?;
-        match git_add(".", &[file], false) {
-            Ok(_) => { },
-            Err(e) => return Err(Error::other(format!("Git add files failed ({})", e))),
-        }
 
         Ok(())
     }

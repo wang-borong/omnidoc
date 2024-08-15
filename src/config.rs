@@ -1,10 +1,10 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::error::Error;
 use dirs::{data_local_dir, config_local_dir};
-use std::io::Write;
+use std::{io::Write, self};
 use std::env::set_var as env_set_var;
 
 #[derive(Deserialize, Debug)]
@@ -45,27 +45,22 @@ pub struct ConfigParser {
 }
 
 impl ConfigParser {
-
-    pub fn from<P>(config: P) -> Self
-        where P: AsRef<Path>
+    pub fn default() -> Result<Self, std::io::Error>
     {
-        let conf = PathBuf::new();
-
-        Self {
-            config: None,
-            path: conf.join(&config),
-        }
-    }
-
-    pub fn default() -> Self
-    {
-        let config_local_dir = config_local_dir().expect("No ~/.config in your system");
+        let config_local_dir = config_local_dir().expect("No '~/.config' in your system");
         let omnidoc_config_file = config_local_dir.join("omnidoc.toml");
-
-        Self {
-            config: None,
-            path: omnidoc_config_file,
+        if !omnidoc_config_file.exists() {
+            return Err(std::io::Error::other("\
+                No omnidoc config file, please create it by 'omnidoc config'"));
         }
+
+        let config_cont = fs::read_to_string(&omnidoc_config_file)?;
+        let config: Config = toml::from_str(&config_cont)?;
+
+        Ok(Self {
+            config: Some(config),
+            path: omnidoc_config_file,
+        })
     }
 
     pub fn parse(&mut self) -> Result<(), Box<dyn Error>> {
@@ -149,7 +144,7 @@ impl ConfigParser {
         Ok(envs)
     }
 
-    fn rander_config(&self, author: String, lib: Option<String>,
+    fn rander_config(author: String, lib: Option<String>,
         outdir: Option<String>, texmfhome: Option<String>,
         bibinputs: Option<String>, texinputs: Option<String>)
         -> Result<String, Box<dyn Error>>
@@ -216,12 +211,12 @@ impl ConfigParser {
         Ok(config)
     }
 
-    pub fn gen(&self, author: String, lib: Option<String>,
+    pub fn gen(author: String, lib: Option<String>,
         outdir: Option<String>, texmfhome: Option<String>,
         bibinputs: Option<String>, texinputs: Option<String>,
         force: bool) -> Result<(), Box<dyn Error>>
     {
-        let config = self.rander_config(author, lib, outdir, texmfhome, bibinputs, texinputs)?;
+        let config = ConfigParser::rander_config(author, lib, outdir, texmfhome, bibinputs, texinputs)?;
         if let Some(conf_path) = config_local_dir() {
             let omnidoc_config_file = conf_path.join("omnidoc.toml");
             if force {
@@ -266,8 +261,7 @@ mod tests {
 
     #[test]
     fn test_read_config() {
-        let conf_path = config_local_dir().unwrap().join("omnidoc.toml");
-        let mut conf_parser = ConfigParser::from(conf_path);
+        let mut conf_parser = ConfigParser::default().expect("Get default config failed");
         let _ = conf_parser.parse();
 
         let config = conf_parser.config.as_ref().unwrap();

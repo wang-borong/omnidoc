@@ -289,7 +289,7 @@ pub fn git_pull<P>(repo: P, remote: &str, branch: &str) -> Result<(), git2::Erro
     do_merge(&repo, branch, fetch_commit)
 }
 
-pub fn git_repo_check<P>(repo: P) -> bool
+pub fn is_git_repo<P>(repo: P) -> bool
     where P: AsRef<Path> {
 
     let git_repo = PathBuf::new();
