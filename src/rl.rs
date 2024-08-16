@@ -7,7 +7,7 @@ use std::borrow::Cow::{self, Borrowed, Owned};
 use rustyline::highlight::Highlighter;
 use rustyline::{
     Cmd, ConditionalEventHandler, Editor, Event, EventContext, EventHandler, KeyEvent, RepeatCount,
-    Result
+    Result, CompletionType, Config,
 };
 
 #[derive(Completer, Helper, Validator, Highlighter)]
@@ -76,7 +76,7 @@ impl Hinter for DocTypeHinter {
     }
 }
 
-fn diy_hints() -> HashSet<CommandHint> {
+fn doctype_hints() -> HashSet<CommandHint> {
     let mut set = HashSet::new();
     set.insert(CommandHint::new("ls", "ls"));
     set.insert(CommandHint::new("list", "list"));
@@ -91,8 +91,88 @@ fn diy_hints() -> HashSet<CommandHint> {
     set
 }
 
+const fn default_break_chars(c : char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '"' | '\\' | '\'' | '`' | '@' | '$' | '>' | '<' | '=' | ';' | '|' | '&' |
+        '{' | '(' | '\0')
+}
+
+use rustyline::completion::{Candidate, Completer, Pair, extract_word};
+
+struct DocTypeCompleter {
+    doctypes: Vec<String>,
+}
+
+fn doctype_match(dti: &str, doctypes: Vec<String>) -> Vec<Pair> {
+    let mut entries: Vec<Pair> = vec![];
+
+    for dt in doctypes {
+        if dt.contains(dti) {
+            entries.push(Pair {
+                display: dt,
+                replacement: String::from(dti),
+            })
+        }
+    }
+
+    entries
+}
+
+impl DocTypeCompleter {
+    /// Constructor
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            doctypes: vec![
+                "ebook-md".to_owned(),
+                "enote-md".to_owned(),
+                "ebook-tex".to_owned(),
+                "enote-tex".to_owned(),
+                "myart-tex".to_owned(),
+                "myrep-tex".to_owned(),
+                "mybook-tex".to_owned(),
+                "resume-ng-tex".to_owned(),
+            ],
+        }
+    }
+
+    pub fn complete(&self, line: &str, pos: usize) -> Result<(usize, Vec<Pair>)> {
+        let (start, mut matches) = self.complete_unsorted(line, pos)?;
+        #[allow(clippy::unnecessary_sort_by)]
+        matches.sort_by(|a, b| a.display().cmp(b.display()));
+        Ok((start, matches))
+    }
+
+    pub fn complete_unsorted(&self, line: &str, pos: usize) -> Result<(usize, Vec<Pair>)> {
+        let (start, doctype) = extract_word(line, pos, None, default_break_chars);
+
+        let matches = doctype_match(&doctype, self.doctypes.clone());
+
+        Ok((start, matches))
+    }
+}
+
+//impl Default for DocTypeCompleter {
+//    fn default() -> Self {
+//        Self::new()
+//    }
+//}
+
+impl Completer for DocTypeCompleter {
+    type Candidate = Pair;
+
+    fn complete(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> Result<(usize, Vec<Pair>)> {
+        self.complete(line, pos)
+    }
+}
+
 #[derive(Completer, Helper, Hinter, Validator)]
-struct MyHelper(#[rustyline(Hinter)] DocTypeHinter);
+struct MyHelper {
+    #[rustyline(Hinter)]
+    hinter: DocTypeHinter,
+
+    #[rustyline(Completer)]
+    completer: DocTypeCompleter,
+}
 
 impl Highlighter for MyHelper {
     fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
@@ -101,14 +181,14 @@ impl Highlighter for MyHelper {
         default: bool,
     ) -> Cow<'b, str> {
         if default {
-            Owned(format!("\x1b[1;32m{prompt}\x1b[m"))
+            Owned(format!("\x1b[32m{prompt}\x1b[m"))
         } else {
             Borrowed(prompt)
         }
     }
 
     fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
-        Owned(format!("\x1b[1m{hint}\x1b[m"))
+        Owned(format!("\x1b[37m{hint}\x1b[m"))
     }
 }
 
@@ -149,37 +229,27 @@ impl ConditionalEventHandler for CompleteHintHandler {
     }
 }
 
-struct TabEventHandler;
-impl ConditionalEventHandler for TabEventHandler {
-    fn handle(&self, _: &Event, _: RepeatCount, _: bool, ctx: &EventContext) -> Option<Cmd> {
-        if !ctx.has_hint() {
-            return None; // default
-        }
-        Some(Cmd::CompleteHint)
-    }
-}
-
 pub struct DTRL {
     rl: Editor<MyHelper, DefaultHistory>,
 }
 
 impl DTRL {
     pub fn new() -> Result<Self> {
-        let h = DocTypeHinter { hints: diy_hints() };
-        let mut rl: Editor<MyHelper, DefaultHistory> = Editor::new()?;
-        rl.set_helper(Some(MyHelper(h)));
+        let config = Config::builder()
+            .completion_type(CompletionType::List)
+            .build();
+        let hinter = DocTypeHinter { hints: doctype_hints() };
+        let mut rl: Editor<MyHelper, DefaultHistory> = Editor::with_config(config)?;
+
+        let h = MyHelper {
+            completer: DocTypeCompleter::new(),
+            hinter,
+        };
+        rl.set_helper(Some(h));
 
         let ceh = Box::new(CompleteHintHandler);
         rl.bind_sequence(KeyEvent::ctrl('E'), EventHandler::Conditional(ceh.clone()));
         rl.bind_sequence(KeyEvent::alt('f'), EventHandler::Conditional(ceh));
-        rl.bind_sequence(
-            KeyEvent::from('\t'),
-            EventHandler::Conditional(Box::new(TabEventHandler)),
-        );
-        //rl.bind_sequence(
-        //    Event::KeySeq(vec![KeyEvent::ctrl('X'), KeyEvent::ctrl('E')]),
-        //    EventHandler::Simple(Cmd::Suspend), // TODO external editor
-        //);
 
         Ok(Self {
             rl
