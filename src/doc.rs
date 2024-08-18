@@ -19,32 +19,28 @@ pub struct Doc<'a> {
     path: PathBuf,
     author: String,
     doctype:  String,
-    docname:  String,
     envs: HashMap<&'a str, Option<String>>,
 }
 
 impl<'a> Doc<'a> {
-    pub fn new<P>(title: &str, path: P, author: &str, doctype: &str,
+    pub fn new(title: &str, path: &str, author: &str, doctype: &str,
             envs: HashMap<&'a str, Option<String>>) -> Self
-        where P: AsRef<Path>
     {
-        let doc_path = PathBuf::new().join(path);
-        let cur_dir = env::current_dir().unwrap();
-        let doc_path_clone = doc_path.clone();
-        let docname = if doc_path != PathBuf::from(".") {
-            doc_path_clone.file_name().unwrap().to_str().unwrap_or("unknown")
-        } else {
-            cur_dir.file_name().unwrap().to_str().unwrap_or("unknown")
-        };
-
         Self {
             title: String::from(title),
-            path: doc_path,
+            path: PathBuf::from(path),
             author: String::from(author),
             doctype:  String::from(doctype),
-            docname:  String::from(docname),
             envs,
         }
+    }
+
+    fn get_docname(&self) -> String
+    {
+        let cur_dir = env::current_dir().unwrap();
+        let docname = cur_dir.file_name().unwrap().to_str().unwrap_or("unknown");
+
+        String::from(docname)
     }
 
     pub fn create_project(&self) -> Result<(), Error> {
@@ -64,8 +60,6 @@ impl<'a> Doc<'a> {
     }
 
     pub fn init_project(&self, update: bool) -> Result<(), Error> {
-
-        let projdir = Path::new(&self.path);
         let md = Path::new("md");
         // Just use the last texinput path
         let texinput = &self.envs["texinputs"].clone().unwrap_or("tex".to_owned());
@@ -79,7 +73,7 @@ impl<'a> Doc<'a> {
             self.create_entry(&self.title, &self.doctype)?;
         }
 
-        if !is_git_repo(&projdir) {
+        if !is_git_repo(".") {
             match git_init(".", true) {
                 Ok(_) => {},
                 Err(e) => return Err(Error::other(format!("Git init project failed ({})", e))),
@@ -160,7 +154,7 @@ impl<'a> Doc<'a> {
             Err(e) => return Err(Error::other(format!("Git commit failed ({})", e))),
         }
 
-        println!("{} '{}' success", cmsg, projdir.display());
+        println!("{} '{}' success", cmsg, &self.path.display());
 
         Ok(())
     }
@@ -222,7 +216,8 @@ impl<'a> Doc<'a> {
             }
         }
 
-        let target = format!("TARGET={}", &self.docname);
+        let docname = self.get_docname();
+        let target = format!("TARGET={}", &docname);
 
         let mut topmk = data_local_dir().unwrap();
         topmk.push("omnidoc/tool/top.mk");
@@ -257,7 +252,8 @@ impl<'a> Doc<'a> {
             }
         }
 
-        let target = format!("TARGET={}", &self.docname);
+        let docname = self.get_docname();
+        let target = format!("TARGET={}", &docname);
 
         let mut topmk = data_local_dir().unwrap();
         topmk.push("omnidoc/tool/top.mk");
@@ -276,11 +272,10 @@ impl<'a> Doc<'a> {
             None => "build",
         };
 
-        let doc_path_str = format!("{}/{}.pdf", outdir, &self.docname);
+        let docname = self.get_docname();
+        let doc_path_str = format!("{}/{}.pdf", outdir, &docname);
 
-        let project_path = Path::new(&self.path);
-        let doc_path = project_path.join(&doc_path_str);
-
+        let doc_path = Path::new(&doc_path_str);
         if !doc_path.exists() {
             return Err(Error::other(format!("The '{}' do not exist", doc_path_str)));
         }
