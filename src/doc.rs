@@ -359,7 +359,13 @@ mod entry {
         match dt {
             DocType::EBOOK | DocType::MYBOOK => {
                 if dt == DocType::EBOOK {
-                    doclass = r"\documentclass{elegantbook}";
+                    doclass = "\\documentclass[\
+                        lang=cn,\n\
+                        scheme=chinese,\n\
+                        mode=fancy,\n\
+                        device=normal,\n\
+                        ]{elegantbook}\n\
+                        \\usepackage{elegant}";
                 } else {
                     doclass = r#"\documentclass{ctbook}
 \usepackage{mybook}"#;
@@ -369,7 +375,11 @@ mod entry {
             },
             DocType::ENOTE | DocType::MYART => {
                 if dt == DocType::EBOOK {
-                    doclass = r"\documentclass{elegantnote}";
+                    doclass = "\\documentclass[\
+                        lang=cn,\n\
+                        device=normal,\n\
+                        ]{elegantnote}\n\
+                        \\usepackage{elegant}";
                 } else {
                     doclass = r#"\documentclass{ctart}
 \usepackage{myart}"#;
