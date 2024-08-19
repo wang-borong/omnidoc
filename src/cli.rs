@@ -291,6 +291,9 @@ pub fn cli() {
         | Commands::Clean { ref path, .. }
         | Commands::Update { ref path } => {
             if let Some(path) = path {
+                if !Path::new(&path).exists() {
+                    exit_eprintln!(1, "The path doesn't exist, no action");
+                }
                 match env::set_current_dir(&path) {
                     Ok(_) => {}
                     Err(e) => {
@@ -364,10 +367,6 @@ pub fn cli() {
                 Some(path) => path,
                 None => ".".to_owned(),
             };
-
-            if !Path::new(&path).exists() {
-                exit_eprintln!(1, "The path doesn't exist, no action");
-            }
 
             let config_parser = match ConfigParser::default() {
                 Ok(c) => c,
