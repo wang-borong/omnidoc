@@ -91,7 +91,8 @@ impl<'a> Doc<'a> {
         }
         for dir in dirs {
             let dir_path = Path::new(dir);
-            if !dir_path.exists() && !doctype_chk.contains("resume") {
+            if !dir_path.exists() && (!doctype_chk.contains("resume")
+                    || doctype_chk.contains("moderncv")) {
                 fs::create_dir(&dir_path)?;
             }
         }
@@ -326,6 +327,7 @@ impl<'a> Doc<'a> {
             "myart-tex"     => self.gen_entry_file(2, title, entry::DocType::MYART, "main.tex")?,
             "myrep-tex"     => self.gen_entry_file(2, title, entry::DocType::MYREPORT, "main.tex")?,
             "resume-ng-tex" => self.gen_entry_file(2, "", entry::DocType::MYRESUME, "main.tex")?,
+            "moderncv-tex"      => self.gen_entry_file(2, "", entry::DocType::MODERNCV, "main.tex")?,
             _ => { return Err(Error::other(format!("Unsupported doctype '{}'", doctype))) },
         };
 
@@ -345,6 +347,7 @@ mod entry {
         MYART,
         MYREPORT,
         MYRESUME,
+        MODERNCV,
     }
 
     pub fn make_tex(title: &str, author: &str, dt: DocType) -> String {
@@ -393,6 +396,9 @@ mod entry {
                 doclass = "\\documentclass{resume-ng}\n\
                     \\usepackage{myresume-ng}";
             },
+            DocType::MODERNCV => {
+                doclass = "";
+            }
             //_ => {
             //    doclass = r"\usepackage{ctexart}";
             //    frontmatter = r"";
@@ -400,7 +406,60 @@ mod entry {
             //},
         }
 
-        if dt < DocType::MYRESUME {
+        if dt == DocType::MODERNCV {
+formatdoc!(r#"\documentclass[11pt, a4paper]{{moderncv}}
+
+% optional argument are 'blue' (default), 'orange',
+% 'red', 'green', 'grey' and 'roman'
+% (for roman fonts, instead of sans serif fonts).
+\moderncvtheme[blue]{{classic}}
+
+\usepackage[fontset=adobe]{{moderncv}}
+
+% If you want to change the width of the column with the dates,
+% uncomment the below line.
+%\setlength{{\hintscolumnwidth}}{{3cm}}
+
+% Only for the classic theme. If you want to change the
+% width of your name placeholder (to leave more space
+% for your address details), uncomment below line.
+%\AtBeginDocument{{\setlength{{\maketitlenamewidth}}{{6cm}}}}
+
+% Required when changes are made to page layout lengths
+\AtBeginDocument{{\recomputelengths}}
+
+% personal data
+\CNname{{{author}}}
+%\title{{}} % Your applied position, like 嵌入式高级工程师
+%\address{{}}{{}} % Optional, remove the line if not wanted
+%\born{{}} % Optional, remove the line if not wanted
+%\mobile{{}} % Optional, remove the line if not wanted
+%\email{{}} % Optional, remove the line if not wanted
+%\homepage{{}} % Optional, remove the line if not wanted
+%\social[github]{{GitHub: }}
+%\extrainfo{{%
+%  微信：
+%}}
+
+% '80pt' is the height the picture must be resized to and 'picture'
+% is the name of the picture file;
+% It's optional, remove the line if not wanted.
+%\photo[80pt]{{avatar.png}}
+%\quote{{}} % Optional, remove the line if not wanted
+
+% uncomment to suppress automatic page numbering for CVs longer than one page.
+%\nopagenumbers{{}}
+
+\newcommand*{{\cvcont}}[2][.25em]{{%
+  \cvitem[#1]{{}}{{\begin{{minipage}}[t]{{\listitemcolumnwidth}}#2\end{{minipage}}}}}}
+
+\begin{{document}}
+
+% Input your resume tex file
+%\input{{}}
+
+\end{{document}}"#, author = author)
+    } else if dt < DocType::MYRESUME {
             formatdoc!(r#"{doclass}
 
 %\addbibresource{{}}

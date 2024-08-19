@@ -88,6 +88,7 @@ fn doctype_hints() -> HashSet<CommandHint> {
     set.insert(CommandHint::new("myrep-tex", "myrep-tex"));
     set.insert(CommandHint::new("mybook-tex", "mybook-tex"));
     set.insert(CommandHint::new("resume-ng-tex", "resume-ng-tex"));
+    set.insert(CommandHint::new("moderncv-tex", "moderncv-tex"));
     set
 }
 
@@ -131,6 +132,7 @@ impl DocTypeCompleter {
                 "myrep-tex".to_owned(),
                 "mybook-tex".to_owned(),
                 "resume-ng-tex".to_owned(),
+                "moderncv-tex".to_owned(),
             ],
         }
     }
