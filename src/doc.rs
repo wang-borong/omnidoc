@@ -174,14 +174,23 @@ impl<'a> Doc<'a> {
     }
 
     pub fn is_omnidoc_project() -> bool {
-        let main_md = Path::new("main.md");
-        let main_tex = Path::new("main.tex");
-
-        if main_md.exists() || main_tex.exists() {
-            true
-        } else {
-            false
+        let check_pathes = ["./main.md", "./main.tex",
+            "../main.md", "../main.tex",
+            "../../main.md", "../../main.tex"];
+        for p in check_pathes {
+            if Path::new(p).exists() {
+                match Path::new(p).parent() {
+                    Some(p) => {
+                        if p.to_str().unwrap() != "" {
+                            env::set_current_dir(p).expect("Set dir to project root {}");
+                        }
+                    },
+                    None => { },
+                }
+                return true;
+            }
         }
+        false
     }
 
     pub fn build_project(&self, verbose: bool) -> Result<(), Error> {
@@ -266,6 +275,11 @@ impl<'a> Doc<'a> {
     }
 
     pub fn open_doc(&self) -> Result<(), Error> {
+        // check if the path is a valid omnidoc project
+        if !Doc::is_omnidoc_project() {
+            return Err(Error::other("Not a omnified document path"));
+        }
+
         let conf_o = &self.envs["outdir"];
         let outdir = match conf_o {
             Some(conf_o) => conf_o,
