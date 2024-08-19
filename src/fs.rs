@@ -1,8 +1,8 @@
 pub use std::fs::*;
 
+use dirs::data_local_dir;
 use std::fs;
 use std::path::{Path, PathBuf};
-use dirs::data_local_dir;
 
 /**
  * copy_dir - copy directory
@@ -61,7 +61,7 @@ pub fn copy_dir<U: AsRef<Path>, V: AsRef<Path>>(from: U, to: V) -> Result<(), st
  * @from: relative to omnidoc lib
  * @to:   destination path
  */
-pub fn copy_from_lib<U: AsRef<Path>, V:AsRef<Path>>(from: U, to: V) -> Result<(), std::io::Error> {
+pub fn copy_from_lib<U: AsRef<Path>, V: AsRef<Path>>(from: U, to: V) -> Result<(), std::io::Error> {
     let local_data_dir = data_local_dir().unwrap();
     let omnidoc_lib = local_data_dir.join("omnidoc");
     let to_copy = omnidoc_lib.join(from);

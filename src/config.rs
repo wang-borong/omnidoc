@@ -1,15 +1,15 @@
+use dirs::{config_local_dir, data_local_dir};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::env::set_var as env_set_var;
+use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
-use std::error::Error;
-use dirs::{data_local_dir, config_local_dir};
-use std::{io::Write, self};
-use std::env::set_var as env_set_var;
+use std::{self, io::Write};
 
 #[derive(Deserialize, Debug)]
 struct DownloadConfig {
-    url:      String,
+    url: String,
     filename: String,
 }
 
@@ -25,7 +25,7 @@ struct Lib {
 
 #[derive(Deserialize, Debug)]
 struct Env {
-    outdir   : Option<String>,
+    outdir: Option<String>,
     texmfhome: Option<String>,
     bibinputs: Option<String>,
     texinputs: Option<String>,
@@ -34,24 +34,25 @@ struct Env {
 #[derive(Deserialize, Debug)]
 struct Config {
     download: Option<Vec<DownloadConfig>>,
-    author:   Author,
-    lib:      Lib,
-    env:      Env,
+    author: Author,
+    lib: Lib,
+    env: Env,
 }
 
 pub struct ConfigParser {
     config: Option<Config>,
-    path:   PathBuf,
+    path: PathBuf,
 }
 
 impl ConfigParser {
-    pub fn default() -> Result<Self, std::io::Error>
-    {
+    pub fn default() -> Result<Self, std::io::Error> {
         let config_local_dir = config_local_dir().expect("No '~/.config' in your system");
         let omnidoc_config_file = config_local_dir.join("omnidoc.toml");
         if !omnidoc_config_file.exists() {
-            return Err(std::io::Error::other("\
-                No omnidoc config file, please create it by 'omnidoc config'"));
+            return Err(std::io::Error::other(
+                "\
+                No omnidoc config file, please create it by 'omnidoc config'",
+            ));
         }
 
         let config_cont = fs::read_to_string(&omnidoc_config_file)?;
@@ -76,8 +77,7 @@ impl ConfigParser {
         Ok(())
     }
 
-    pub fn get_downloads(&self) -> Result<HashMap<String, String>, Box<dyn Error>>
-    {
+    pub fn get_downloads(&self) -> Result<HashMap<String, String>, Box<dyn Error>> {
         let config = self.config.as_ref().unwrap();
 
         // Create a HashMap to store the URLs and filenames
@@ -85,25 +85,25 @@ impl ConfigParser {
 
         // Populate the HashMap
         for download in config.download.as_ref().unwrap() {
-            downloads.insert(String::from(&download.url),
-                String::from(&download.filename));
+            downloads.insert(
+                String::from(&download.url),
+                String::from(&download.filename),
+            );
         }
 
         Ok(downloads)
     }
 
-    pub fn get_author_name(&self) -> Result<String, Box<dyn Error>>
-    {
+    pub fn get_author_name(&self) -> Result<String, Box<dyn Error>> {
         let config = self.config.as_ref().unwrap();
 
         match &config.author.name {
             Some(author) => Ok(author.to_owned()),
-            None => Err("No author name configured".into())
+            None => Err("No author name configured".into()),
         }
     }
 
-    pub fn get_omnidoc_lib(&self) -> Result<String, Box<dyn Error>>
-    {
+    pub fn get_omnidoc_lib(&self) -> Result<String, Box<dyn Error>> {
         let config = self.config.as_ref().unwrap();
 
         match &config.lib.path {
@@ -112,8 +112,7 @@ impl ConfigParser {
         }
     }
 
-    pub fn get_envs(&self) -> Result<HashMap<&str, Option<String>>, Box<dyn Error>>
-    {
+    pub fn get_envs(&self) -> Result<HashMap<&str, Option<String>>, Box<dyn Error>> {
         let mut envs: HashMap<&str, Option<String>> = HashMap::new();
         let config = self.config.as_ref().unwrap();
 
@@ -144,11 +143,14 @@ impl ConfigParser {
         Ok(envs)
     }
 
-    fn rander_config(author: String, lib: Option<String>,
-        outdir: Option<String>, texmfhome: Option<String>,
-        bibinputs: Option<String>, texinputs: Option<String>)
-        -> Result<String, Box<dyn Error>>
-    {
+    fn rander_config(
+        author: String,
+        lib: Option<String>,
+        outdir: Option<String>,
+        texmfhome: Option<String>,
+        bibinputs: Option<String>,
+        texinputs: Option<String>,
+    ) -> Result<String, Box<dyn Error>> {
         let default_envs = HashMap::from([
             ("texmfhome", r"$ENV{HOME}/.local/share/omnidoc/texmf//:"),
             ("bibinputs", r"./biblio//:"),
@@ -211,12 +213,17 @@ impl ConfigParser {
         Ok(config)
     }
 
-    pub fn gen(author: String, lib: Option<String>,
-        outdir: Option<String>, texmfhome: Option<String>,
-        bibinputs: Option<String>, texinputs: Option<String>,
-        force: bool) -> Result<(), Box<dyn Error>>
-    {
-        let config = ConfigParser::rander_config(author, lib, outdir, texmfhome, bibinputs, texinputs)?;
+    pub fn gen(
+        author: String,
+        lib: Option<String>,
+        outdir: Option<String>,
+        texmfhome: Option<String>,
+        bibinputs: Option<String>,
+        texinputs: Option<String>,
+        force: bool,
+    ) -> Result<(), Box<dyn Error>> {
+        let config =
+            ConfigParser::rander_config(author, lib, outdir, texmfhome, bibinputs, texinputs)?;
         if let Some(conf_path) = config_local_dir() {
             let omnidoc_config_file = conf_path.join("omnidoc.toml");
             if force {
@@ -240,15 +247,15 @@ impl ConfigParser {
 
         match &config.env.texmfhome {
             Some(texmfhome) => env_set_var("TEXMFHOME", texmfhome),
-            None => { },
+            None => {}
         }
         match &config.env.bibinputs {
             Some(bibinputs) => env_set_var("BIBINPUTS", bibinputs),
-            None => { },
+            None => {}
         }
         match &config.env.texinputs {
             Some(texinputs) => env_set_var("TEXINPUTS", texinputs),
-            None => { },
+            None => {}
         }
 
         Ok(())

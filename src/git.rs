@@ -1,11 +1,12 @@
 use git2::Repository;
-use std::path::{Path, PathBuf};
 use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::str;
 
 pub fn git_clone<P>(url: &str, p: P, recurse: bool) -> Result<(), git2::Error>
-    where P: AsRef<Path> {
-
+where
+    P: AsRef<Path>,
+{
     if recurse {
         Repository::clone_recurse(url, p)?;
     } else {
@@ -44,8 +45,9 @@ fn create_initial_commit(repo: &Repository) -> Result<(), git2::Error> {
     Ok(())
 }
 
-pub fn git_init<P>(p: P, commit: bool) -> Result<(), git2::Error> 
-    where P: AsRef<Path>
+pub fn git_init<P>(p: P, commit: bool) -> Result<(), git2::Error>
+where
+    P: AsRef<Path>,
 {
     let repo = Repository::init(p)?;
 
@@ -57,7 +59,9 @@ pub fn git_init<P>(p: P, commit: bool) -> Result<(), git2::Error>
 }
 
 pub fn git_add<P>(repo: P, files: &[&str], update: bool) -> Result<(), git2::Error>
-    where P: AsRef<Path> {
+where
+    P: AsRef<Path>,
+{
     let repo = Repository::open(&repo)?;
     let mut index = repo.index()?;
 
@@ -93,7 +97,9 @@ pub fn git_add<P>(repo: P, files: &[&str], update: bool) -> Result<(), git2::Err
 }
 
 pub fn git_commit<P>(repo: P, msg: &str) -> Result<(), git2::Error>
-    where P: AsRef<Path> {
+where
+    P: AsRef<Path>,
+{
     let repo = Repository::open(&repo)?;
 
     let mut index = repo.index()?;
@@ -282,7 +288,9 @@ fn do_merge<'a>(
 }
 
 pub fn git_pull<P>(repo: P, remote: &str, branch: &str) -> Result<(), git2::Error>
-    where P: AsRef<Path> {
+where
+    P: AsRef<Path>,
+{
     let repo = Repository::open(repo)?;
     let mut remote = repo.find_remote(remote)?;
     let fetch_commit = do_fetch(&repo, &[branch], &mut remote)?;
@@ -290,8 +298,9 @@ pub fn git_pull<P>(repo: P, remote: &str, branch: &str) -> Result<(), git2::Erro
 }
 
 pub fn is_git_repo<P>(repo: P) -> bool
-    where P: AsRef<Path> {
-
+where
+    P: AsRef<Path>,
+{
     let git_repo = PathBuf::new();
     let dot_git = git_repo.join(repo).join(".git");
 
@@ -308,7 +317,11 @@ mod tests {
 
     #[test]
     fn test_git_clone() {
-        let _ = git_clone("https://github.com/wang-borong/embedded-knowledge", "embedded-knowledge", false);
+        let _ = git_clone(
+            "https://github.com/wang-borong/embedded-knowledge",
+            "embedded-knowledge",
+            false,
+        );
         assert_eq!(Path::new("embedded-knowledge").exists(), true);
     }
 

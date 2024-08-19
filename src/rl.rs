@@ -1,14 +1,14 @@
-use std::collections::HashSet;
+use rustyline::highlight::Highlighter;
 use rustyline::hint::{Hint, Hinter};
 use rustyline::history::DefaultHistory;
 use rustyline::Context;
+use rustyline::{
+    Cmd, CompletionType, ConditionalEventHandler, Config, Editor, Event, EventContext,
+    EventHandler, KeyEvent, RepeatCount, Result,
+};
 use rustyline::{Completer, Helper, Highlighter, Hinter, Validator};
 use std::borrow::Cow::{self, Borrowed, Owned};
-use rustyline::highlight::Highlighter;
-use rustyline::{
-    Cmd, ConditionalEventHandler, Editor, Event, EventContext, EventHandler, KeyEvent, RepeatCount,
-    Result, CompletionType, Config,
-};
+use std::collections::HashSet;
 
 #[derive(Completer, Helper, Validator, Highlighter)]
 struct DocTypeHinter {
@@ -92,12 +92,30 @@ fn doctype_hints() -> HashSet<CommandHint> {
     set
 }
 
-const fn default_break_chars(c : char) -> bool {
-    matches!(c, ' ' | '\t' | '\n' | '"' | '\\' | '\'' | '`' | '@' | '$' | '>' | '<' | '=' | ';' | '|' | '&' |
-        '{' | '(' | '\0')
+const fn default_break_chars(c: char) -> bool {
+    matches!(
+        c,
+        ' ' | '\t'
+            | '\n'
+            | '"'
+            | '\\'
+            | '\''
+            | '`'
+            | '@'
+            | '$'
+            | '>'
+            | '<'
+            | '='
+            | ';'
+            | '|'
+            | '&'
+            | '{'
+            | '('
+            | '\0'
+    )
 }
 
-use rustyline::completion::{Candidate, Completer, Pair, extract_word};
+use rustyline::completion::{extract_word, Candidate, Completer, Pair};
 
 struct DocTypeCompleter {
     doctypes: Vec<String>,
@@ -240,7 +258,9 @@ impl DTRL {
         let config = Config::builder()
             .completion_type(CompletionType::List)
             .build();
-        let hinter = DocTypeHinter { hints: doctype_hints() };
+        let hinter = DocTypeHinter {
+            hints: doctype_hints(),
+        };
         let mut rl: Editor<MyHelper, DefaultHistory> = Editor::with_config(config)?;
 
         let h = MyHelper {
@@ -253,16 +273,12 @@ impl DTRL {
         rl.bind_sequence(KeyEvent::ctrl('E'), EventHandler::Conditional(ceh.clone()));
         rl.bind_sequence(KeyEvent::alt('f'), EventHandler::Conditional(ceh));
 
-        Ok(Self {
-            rl
-        })
+        Ok(Self { rl })
     }
 
     pub fn readline(&mut self) -> Result<String> {
-
         let readline = &self.rl.readline("doctype> ")?;
 
         Ok(readline.to_string())
     }
 }
-

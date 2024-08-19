@@ -1,8 +1,7 @@
-use std::process::Command;
 use std::io::{self, Write};
+use std::process::Command;
 
-pub fn do_cmd(cmd: &str, args: &[&str], nw: bool) -> io::Result<()>
-{
+pub fn do_cmd(cmd: &str, args: &[&str], nw: bool) -> io::Result<()> {
     if nw {
         Command::new(cmd).args(args).spawn()?;
     } else {

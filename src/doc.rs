@@ -1,42 +1,45 @@
 // File and directory operation
 
+use dirs::data_local_dir;
+use std::collections::HashMap;
+use std::env;
+use std::io::Error;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::string::String;
 use walkdir::WalkDir;
-use std::env;
-use std::io::Error;
-use std::collections::HashMap;
-use dirs::data_local_dir;
 
-use super::fs;
 use super::cmd::do_cmd;
-use super::git::{git_init, git_add, git_commit, is_git_repo};
+use super::fs;
+use super::git::{git_add, git_commit, git_init, is_git_repo};
 
 #[derive(Debug, PartialEq)]
 pub struct Doc<'a> {
     title: String,
     path: PathBuf,
     author: String,
-    doctype:  String,
+    doctype: String,
     envs: HashMap<&'a str, Option<String>>,
 }
 
 impl<'a> Doc<'a> {
-    pub fn new(title: &str, path: &str, author: &str, doctype: &str,
-            envs: HashMap<&'a str, Option<String>>) -> Self
-    {
+    pub fn new(
+        title: &str,
+        path: &str,
+        author: &str,
+        doctype: &str,
+        envs: HashMap<&'a str, Option<String>>,
+    ) -> Self {
         Self {
             title: String::from(title),
             path: PathBuf::from(path),
             author: String::from(author),
-            doctype:  String::from(doctype),
+            doctype: String::from(doctype),
             envs,
         }
     }
 
-    fn get_docname(&self) -> String
-    {
+    fn get_docname(&self) -> String {
         let cur_dir = env::current_dir().unwrap();
         let docname = cur_dir.file_name().unwrap().to_str().unwrap_or("unknown");
 
@@ -47,10 +50,9 @@ impl<'a> Doc<'a> {
         self.init_project(false)?;
 
         Ok(())
-    }    
+    }
 
-    fn gen_file(cont: &str, target: &str) -> Result<(), Error>
-    {
+    fn gen_file(cont: &str, target: &str) -> Result<(), Error> {
         let target_file = PathBuf::from(target);
 
         let mut target_fh = fs::File::create(&target_file)?;
@@ -75,7 +77,7 @@ impl<'a> Doc<'a> {
 
         if !is_git_repo(".") {
             match git_init(".", true) {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(e) => return Err(Error::other(format!("Git init project failed ({})", e))),
             }
         }
@@ -91,8 +93,9 @@ impl<'a> Doc<'a> {
         }
         for dir in dirs {
             let dir_path = Path::new(dir);
-            if !dir_path.exists() && (!doctype_chk.contains("resume")
-                    || doctype_chk.contains("moderncv")) {
+            if !dir_path.exists()
+                && (!doctype_chk.contains("resume") || doctype_chk.contains("moderncv"))
+            {
                 fs::create_dir(&dir_path)?;
             }
         }
@@ -106,8 +109,9 @@ impl<'a> Doc<'a> {
             let fext = path.extension().and_then(|s| s.to_str());
             let fstem = path.file_stem().and_then(|s| s.to_str());
             if path.is_file()
-                    && (fext == Some("md") || fext == Some("tex"))
-                    && path.parent() == Some(Path::new(".")) {
+                && (fext == Some("md") || fext == Some("tex"))
+                && path.parent() == Some(Path::new("."))
+            {
                 let file_name = path.file_name().unwrap();
                 let destination;
 
@@ -134,12 +138,17 @@ impl<'a> Doc<'a> {
         Doc::gen_file(&fig_readme, "figure/README.md")?;
 
         match fs::copy_from_lib("repo/gitignore", ".gitignore") {
-            Ok(_) => { },
-            Err(e) => return Err(Error::other(format!("Copy gitignore from lib failed ({})", e))),
+            Ok(_) => {}
+            Err(e) => {
+                return Err(Error::other(format!(
+                    "Copy gitignore from lib failed ({})",
+                    e
+                )))
+            }
         }
 
         match git_add(".", &["*"], false) {
-            Ok(_) => { },
+            Ok(_) => {}
             Err(e) => return Err(Error::other(format!("Git add files failed ({})", e))),
         }
 
@@ -151,7 +160,7 @@ impl<'a> Doc<'a> {
             cmsg = "Create project";
         }
         match git_commit(".", cmsg) {
-            Ok(_) => { },
+            Ok(_) => {}
             Err(e) => return Err(Error::other(format!("Git commit failed ({})", e))),
         }
 
@@ -175,9 +184,14 @@ impl<'a> Doc<'a> {
     }
 
     pub fn is_omnidoc_project() -> bool {
-        let check_pathes = ["./main.md", "./main.tex",
-            "../main.md", "../main.tex",
-            "../../main.md", "../../main.tex"];
+        let check_pathes = [
+            "./main.md",
+            "./main.tex",
+            "../main.md",
+            "../main.tex",
+            "../../main.md",
+            "../../main.tex",
+        ];
         for p in check_pathes {
             if Path::new(p).exists() {
                 match Path::new(p).parent() {
@@ -185,8 +199,8 @@ impl<'a> Doc<'a> {
                         if p.to_str().unwrap() != "" {
                             env::set_current_dir(p).expect("Set dir to project root {}");
                         }
-                    },
-                    None => { },
+                    }
+                    None => {}
                 }
                 return true;
             }
@@ -208,7 +222,7 @@ impl<'a> Doc<'a> {
                     fs::create_dir(&conf_o)?;
                 }
                 env::set_var("OUTDIR", &conf_o);
-            },
+            }
             None => {
                 if !Path::new("build").exists() {
                     fs::create_dir("build")?;
@@ -221,8 +235,8 @@ impl<'a> Doc<'a> {
             match env_val {
                 Some(env_val) => {
                     env::set_var(env_key.to_uppercase(), &env_val);
-                },
-                None => { },
+                }
+                None => {}
             }
         }
 
@@ -232,7 +246,11 @@ impl<'a> Doc<'a> {
         let mut topmk = data_local_dir().unwrap();
         topmk.push("omnidoc/tool/top.mk");
         if verbose {
-            do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target, "V=1"], false)
+            do_cmd(
+                "make",
+                &["-f", &topmk.to_str().unwrap(), &target, "V=1"],
+                false,
+            )
         } else {
             do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target], false)
         }
@@ -248,8 +266,8 @@ impl<'a> Doc<'a> {
         match conf_o {
             Some(conf_o) => {
                 env::set_var("OUTDIR", &conf_o);
-            },
-            None => { },
+            }
+            None => {}
         }
 
         for env_key in vec!["texinputs", "bibinputs", "texmfhome"] {
@@ -257,8 +275,8 @@ impl<'a> Doc<'a> {
             match env_val {
                 Some(env_val) => {
                     env::set_var(env_key.to_uppercase(), &env_val);
-                },
-                None => { },
+                }
+                None => {}
             }
         }
 
@@ -269,9 +287,17 @@ impl<'a> Doc<'a> {
         topmk.push("omnidoc/tool/top.mk");
 
         if distclean {
-            do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target, "dist-clean"], false)
+            do_cmd(
+                "make",
+                &["-f", &topmk.to_str().unwrap(), &target, "dist-clean"],
+                false,
+            )
         } else {
-            do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target, "clean"], false)
+            do_cmd(
+                "make",
+                &["-f", &topmk.to_str().unwrap(), &target, "clean"],
+                false,
+            )
         }
     }
 
@@ -298,8 +324,13 @@ impl<'a> Doc<'a> {
         do_cmd("xdg-open", &[&doc_path.to_str().unwrap()], true)
     }
 
-    fn gen_entry_file(&self, lang: u8, title: &str, doctype: entry::DocType,
-        file: &str) -> Result<(), Error> {
+    fn gen_entry_file(
+        &self,
+        lang: u8,
+        title: &str,
+        doctype: entry::DocType,
+        file: &str,
+    ) -> Result<(), Error> {
         // if the entry file already exists, skip to generate a new one.
         if Path::new(file).exists() {
             return Ok(());
@@ -317,18 +348,17 @@ impl<'a> Doc<'a> {
     }
 
     fn create_entry(&self, title: &str, doctype: &str) -> Result<(), Error> {
-
         match doctype {
-            "ebook-md"      => self.gen_entry_file(1, title, entry::DocType::EBOOK, "main.md")?,
-            "enote-md"      => self.gen_entry_file(1, title, entry::DocType::ENOTE, "main.md")?,
-            "ebook-tex"     => self.gen_entry_file(2, title, entry::DocType::EBOOK, "main.tex")?,
-            "enote-tex"     => self.gen_entry_file(2, title, entry::DocType::ENOTE, "main.tex")?,
-            "mybook-tex"    => self.gen_entry_file(2, title, entry::DocType::MYBOOK, "main.tex")?,
-            "myart-tex"     => self.gen_entry_file(2, title, entry::DocType::MYART, "main.tex")?,
-            "myrep-tex"     => self.gen_entry_file(2, title, entry::DocType::MYREPORT, "main.tex")?,
+            "ebook-md" => self.gen_entry_file(1, title, entry::DocType::EBOOK, "main.md")?,
+            "enote-md" => self.gen_entry_file(1, title, entry::DocType::ENOTE, "main.md")?,
+            "ebook-tex" => self.gen_entry_file(2, title, entry::DocType::EBOOK, "main.tex")?,
+            "enote-tex" => self.gen_entry_file(2, title, entry::DocType::ENOTE, "main.tex")?,
+            "mybook-tex" => self.gen_entry_file(2, title, entry::DocType::MYBOOK, "main.tex")?,
+            "myart-tex" => self.gen_entry_file(2, title, entry::DocType::MYART, "main.tex")?,
+            "myrep-tex" => self.gen_entry_file(2, title, entry::DocType::MYREPORT, "main.tex")?,
             "resume-ng-tex" => self.gen_entry_file(2, "", entry::DocType::MYRESUME, "main.tex")?,
-            "moderncv-tex"      => self.gen_entry_file(2, "", entry::DocType::MODERNCV, "main.tex")?,
-            _ => { return Err(Error::other(format!("Unsupported doctype '{}'", doctype))) },
+            "moderncv-tex" => self.gen_entry_file(2, "", entry::DocType::MODERNCV, "main.tex")?,
+            _ => return Err(Error::other(format!("Unsupported doctype '{}'", doctype))),
         };
 
         Ok(())
@@ -336,8 +366,8 @@ impl<'a> Doc<'a> {
 }
 
 mod entry {
-    use indoc::formatdoc;
     use chrono::prelude::*;
+    use indoc::formatdoc;
 
     #[derive(PartialEq, PartialOrd)]
     pub enum DocType {
@@ -351,7 +381,6 @@ mod entry {
     }
 
     pub fn make_tex(title: &str, author: &str, dt: DocType) -> String {
-
         let local: DateTime<Local> = Local::now();
         let date = local.format("%Y/%m/%d").to_string();
 
@@ -375,7 +404,7 @@ mod entry {
                 }
                 frontmatter = r"\frontmatter % only for book";
                 mainmatter = r"\mainmatter % only for book";
-            },
+            }
             DocType::ENOTE | DocType::MYART => {
                 if dt == DocType::EBOOK {
                     doclass = "\\documentclass[\
@@ -387,27 +416,27 @@ mod entry {
                     doclass = r#"\documentclass{ctart}
 \usepackage{myart}"#;
                 }
-            },
+            }
             DocType::MYREPORT => {
                 doclass = "\\documentclass{ctrep}\n\
                     \\usepackage{myart}";
-            },
+            }
             DocType::MYRESUME => {
                 doclass = "\\documentclass{resume-ng}\n\
                     \\usepackage{myresume-ng}";
-            },
+            }
             DocType::MODERNCV => {
                 doclass = "";
-            }
-            //_ => {
-            //    doclass = r"\usepackage{ctexart}";
-            //    frontmatter = r"";
-            //    mainmatter = r"";
-            //},
+            } //_ => {
+              //    doclass = r"\usepackage{ctexart}";
+              //    frontmatter = r"";
+              //    mainmatter = r"";
+              //},
         }
 
         if dt == DocType::MODERNCV {
-formatdoc!(r#"\documentclass[11pt, a4paper]{{moderncv}}
+            formatdoc!(
+                r#"\documentclass[11pt, a4paper]{{moderncv}}
 
 % optional argument are 'blue' (default), 'orange',
 % 'red', 'green', 'grey' and 'roman'
@@ -458,9 +487,12 @@ formatdoc!(r#"\documentclass[11pt, a4paper]{{moderncv}}
 % Input your resume tex file
 %\input{{}}
 
-\end{{document}}"#, author = author)
-    } else if dt < DocType::MYRESUME {
-            formatdoc!(r#"{doclass}
+\end{{document}}"#,
+                author = author
+            )
+        } else if dt < DocType::MYRESUME {
+            formatdoc!(
+                r#"{doclass}
 
 %\addbibresource{{}}
 
@@ -483,9 +515,15 @@ formatdoc!(r#"\documentclass[11pt, a4paper]{{moderncv}}
 \clearpage
 %\printbibliography[heading=bibintoc, title=参考文献]
 
-\end{{document}}"#, doclass = doclass, title = title, author = author, date = date)
+\end{{document}}"#,
+                doclass = doclass,
+                title = title,
+                author = author,
+                date = date
+            )
         } else {
-            formatdoc!(r#"{doclass}
+            formatdoc!(
+                r#"{doclass}
 
 \ResumeName{{{author}}}
 
@@ -494,12 +532,13 @@ formatdoc!(r#"\documentclass[11pt, a4paper]{{moderncv}}
 % Input your resume tex file
 % \input{{}}
 
-\end{{document}}"#, author = author)
+\end{{document}}"#,
+                author = author
+            )
         }
     }
 
     pub fn make_md(title: &str, author: &str, dt: DocType) -> String {
-
         let local: DateTime<Local> = Local::now();
         let date = local.format("%Y/%m/%d").to_string();
 
@@ -545,18 +584,19 @@ classoption:
             DocType::EBOOK => {
                 doctype = ebook;
                 latex_header = eheader;
-            },
+            }
             DocType::ENOTE => {
                 doctype = enote;
                 latex_header = eheader;
-            },
+            }
             _ => {
                 doctype = r"";
                 latex_header = r"";
-            },
+            }
         }
-            
-        let entry_md = formatdoc!(r#"
+
+        let entry_md = formatdoc!(
+            r#"
 ---
 title: {title}
 author:
@@ -612,14 +652,17 @@ after-body:
 ```
 
 \newpage
-# 参考文献"#, title = title, author = author,
-            date = date, doctype = doctype, latex_header = latex_header);
+# 参考文献"#,
+            title = title,
+            author = author,
+            date = date,
+            doctype = doctype,
+            latex_header = latex_header
+        );
 
         entry_md
     }
 }
 
 #[cfg(test)]
-mod tests {
-}
-
+mod tests {}
