@@ -2,6 +2,10 @@
 name = "omnidoc"
 version = "0.3.0"
 edition = "2021"
+authors = ["Jason Wang <wang_borong@163.com>"]
+homepage = "https://github.com/wang-borong/omnidoc"
+license = "MIT"
+rust-version = "1.78"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
