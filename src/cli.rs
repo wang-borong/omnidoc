@@ -181,10 +181,11 @@ fn print_doctypes() {
 ✅ enote-md  (elegantnote class based markdown document writing system)
 ✅ ebook-tex (elegantbook class based latex document writing system)
 ✅ enote-tex (elegantnote class based latex document writing system)
-✅ myart-tex (myart class based latex document writing system)
-✅ myrep-tex (myrep class based latex document writing system)
-✅ mybook-tex (mybook class based latex document writing system)
-✅ resume-ng-tex"#
+✅ ctart-tex (ctart class based latex document writing system)
+✅ ctrep-tex (ctrep class based latex document writing system)
+✅ ctbook-tex (ctbook class based latex document writing system)
+✅ resume-ng-tex
+✅ moderncv-tex"#
     );
 }
 
@@ -256,7 +257,7 @@ pub fn cli() {
     }
 
     match args.command {
-        // NOTE: Get into the project directory
+        // NOTE: Enter into the project directory
         Commands::New { ref path, .. } => {
             if Path::new(&path).exists() {
                 exit_eprintln!(1, "The path already exists, no action");

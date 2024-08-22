@@ -353,10 +353,10 @@ impl<'a> Doc<'a> {
             "enote-md" => self.gen_entry_file(1, title, entry::DocType::ENOTE, "main.md")?,
             "ebook-tex" => self.gen_entry_file(2, title, entry::DocType::EBOOK, "main.tex")?,
             "enote-tex" => self.gen_entry_file(2, title, entry::DocType::ENOTE, "main.tex")?,
-            "mybook-tex" => self.gen_entry_file(2, title, entry::DocType::MYBOOK, "main.tex")?,
-            "myart-tex" => self.gen_entry_file(2, title, entry::DocType::MYART, "main.tex")?,
-            "myrep-tex" => self.gen_entry_file(2, title, entry::DocType::MYREPORT, "main.tex")?,
-            "resume-ng-tex" => self.gen_entry_file(2, "", entry::DocType::MYRESUME, "main.tex")?,
+            "ctbook-tex" => self.gen_entry_file(2, title, entry::DocType::CTBOOK, "main.tex")?,
+            "ctart-tex" => self.gen_entry_file(2, title, entry::DocType::CTART, "main.tex")?,
+            "ctrep-tex" => self.gen_entry_file(2, title, entry::DocType::CTREP, "main.tex")?,
+            "resume-ng-tex" => self.gen_entry_file(2, "", entry::DocType::RESUMENG, "main.tex")?,
             "moderncv-tex" => self.gen_entry_file(2, "", entry::DocType::MODERNCV, "main.tex")?,
             _ => return Err(Error::other(format!("Unsupported doctype '{}'", doctype))),
         };
@@ -373,10 +373,10 @@ mod entry {
     pub enum DocType {
         EBOOK,
         ENOTE,
-        MYBOOK,
-        MYART,
-        MYREPORT,
-        MYRESUME,
+        CTBOOK,
+        CTART,
+        CTREP,
+        RESUMENG,
         MODERNCV,
     }
 
@@ -389,7 +389,7 @@ mod entry {
         let mut mainmatter: &str = r"";
 
         match dt {
-            DocType::EBOOK | DocType::MYBOOK => {
+            DocType::EBOOK | DocType::CTBOOK => {
                 if dt == DocType::EBOOK {
                     doclass = "\\documentclass[\
                         lang=cn,\n\
@@ -400,12 +400,12 @@ mod entry {
                         \\usepackage{elegant}";
                 } else {
                     doclass = r#"\documentclass{ctbook}
-\usepackage{mybook}"#;
+\usepackage{ctbook}"#;
                 }
                 frontmatter = r"\frontmatter % only for book";
                 mainmatter = r"\mainmatter % only for book";
             }
-            DocType::ENOTE | DocType::MYART => {
+            DocType::ENOTE | DocType::CTART => {
                 if dt == DocType::EBOOK {
                     doclass = "\\documentclass[\
                         lang=cn,\n\
@@ -414,16 +414,16 @@ mod entry {
                         \\usepackage{elegant}";
                 } else {
                     doclass = r#"\documentclass{ctart}
-\usepackage{myart}"#;
+\usepackage{ctart}"#;
                 }
             }
-            DocType::MYREPORT => {
+            DocType::CTREP => {
                 doclass = "\\documentclass{ctrep}\n\
-                    \\usepackage{myart}";
+                    \\usepackage{ctart}";
             }
-            DocType::MYRESUME => {
+            DocType::RESUMENG => {
                 doclass = "\\documentclass{resume-ng}\n\
-                    \\usepackage{myresume-ng}";
+                    \\usepackage{resume-ng}";
             }
             DocType::MODERNCV => {
                 doclass = "";
@@ -490,7 +490,7 @@ mod entry {
 \end{{document}}"#,
                 author = author
             )
-        } else if dt < DocType::MYRESUME {
+        } else if dt < DocType::RESUMENG {
             formatdoc!(
                 r#"{doclass}
 

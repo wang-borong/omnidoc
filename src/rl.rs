@@ -84,9 +84,9 @@ fn doctype_hints() -> HashSet<CommandHint> {
     set.insert(CommandHint::new("enote-md", "enote-md"));
     set.insert(CommandHint::new("ebook-tex", "ebook-tex"));
     set.insert(CommandHint::new("enote-tex", "enote-tex"));
-    set.insert(CommandHint::new("myart-tex", "myart-tex"));
-    set.insert(CommandHint::new("myrep-tex", "myrep-tex"));
-    set.insert(CommandHint::new("mybook-tex", "mybook-tex"));
+    set.insert(CommandHint::new("ctart-tex", "ctart-tex"));
+    set.insert(CommandHint::new("ctrep-tex", "ctrep-tex"));
+    set.insert(CommandHint::new("ctbook-tex", "ctbook-tex"));
     set.insert(CommandHint::new("resume-ng-tex", "resume-ng-tex"));
     set.insert(CommandHint::new("moderncv-tex", "moderncv-tex"));
     set
@@ -146,9 +146,9 @@ impl DocTypeCompleter {
                 "enote-md".to_owned(),
                 "ebook-tex".to_owned(),
                 "enote-tex".to_owned(),
-                "myart-tex".to_owned(),
-                "myrep-tex".to_owned(),
-                "mybook-tex".to_owned(),
+                "ctart-tex".to_owned(),
+                "ctrep-tex".to_owned(),
+                "ctbook-tex".to_owned(),
                 "resume-ng-tex".to_owned(),
                 "moderncv-tex".to_owned(),
             ],
