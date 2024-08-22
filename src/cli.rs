@@ -179,6 +179,9 @@ fn print_doctypes() {
         r#"Current supported document types:
 ✅ ebook-md  (elegantbook class based markdown document writing system)
 ✅ enote-md  (elegantnote class based markdown document writing system)
+✅ ctexart-tex (raw ctexart document type)
+✅ ctexrep-tex (raw ctexrep document type)
+✅ ctexbook-tex (raw ctexbook document type)
 ✅ ebook-tex (elegantbook class based latex document writing system)
 ✅ enote-tex (elegantnote class based latex document writing system)
 ✅ ctart-tex (ctart class based latex document writing system)

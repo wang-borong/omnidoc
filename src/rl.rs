@@ -82,6 +82,9 @@ fn doctype_hints() -> HashSet<CommandHint> {
     set.insert(CommandHint::new("list", "list"));
     set.insert(CommandHint::new("ebook-md", "ebook-md"));
     set.insert(CommandHint::new("enote-md", "enote-md"));
+    set.insert(CommandHint::new("ctexart-tex", "ctexart-tex"));
+    set.insert(CommandHint::new("ctexrep-tex", "ctexrep-tex"));
+    set.insert(CommandHint::new("ctexbook-tex", "ctexbook-tex"));
     set.insert(CommandHint::new("ebook-tex", "ebook-tex"));
     set.insert(CommandHint::new("enote-tex", "enote-tex"));
     set.insert(CommandHint::new("ctart-tex", "ctart-tex"));
@@ -144,6 +147,9 @@ impl DocTypeCompleter {
             doctypes: vec![
                 "ebook-md".to_owned(),
                 "enote-md".to_owned(),
+                "ctexart-tex".to_owned(),
+                "ctexrep-tex".to_owned(),
+                "ctexbook-tex".to_owned(),
                 "ebook-tex".to_owned(),
                 "enote-tex".to_owned(),
                 "ctart-tex".to_owned(),

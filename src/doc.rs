@@ -351,6 +351,11 @@ impl<'a> Doc<'a> {
         match doctype {
             "ebook-md" => self.gen_entry_file(1, title, entry::DocType::EBOOK, "main.md")?,
             "enote-md" => self.gen_entry_file(1, title, entry::DocType::ENOTE, "main.md")?,
+            "ctexart-tex" => self.gen_entry_file(2, title, entry::DocType::CTEXART, "main.tex")?,
+            "ctexrep-tex" => self.gen_entry_file(2, title, entry::DocType::CTEXREP, "main.tex")?,
+            "ctexbook-tex" => {
+                self.gen_entry_file(2, title, entry::DocType::CTEXBOOK, "main.tex")?
+            }
             "ebook-tex" => self.gen_entry_file(2, title, entry::DocType::EBOOK, "main.tex")?,
             "enote-tex" => self.gen_entry_file(2, title, entry::DocType::ENOTE, "main.tex")?,
             "ctbook-tex" => self.gen_entry_file(2, title, entry::DocType::CTBOOK, "main.tex")?,
@@ -373,6 +378,9 @@ mod entry {
     pub enum DocType {
         EBOOK,
         ENOTE,
+        CTEXART,
+        CTEXREP,
+        CTEXBOOK,
         CTBOOK,
         CTART,
         CTREP,
@@ -389,7 +397,7 @@ mod entry {
         let mut mainmatter: &str = r"";
 
         match dt {
-            DocType::EBOOK | DocType::CTBOOK => {
+            DocType::CTEXBOOK | DocType::EBOOK | DocType::CTBOOK => {
                 if dt == DocType::EBOOK {
                     doclass = "\\documentclass[\
                         lang=cn,\n\
@@ -398,28 +406,36 @@ mod entry {
                         device=normal,\n\
                         ]{elegantbook}\n\
                         \\usepackage{elegant}";
-                } else {
+                } else if dt == DocType::CTBOOK {
                     doclass = r#"\documentclass{ctbook}
 \usepackage{ctbook}"#;
+                } else {
+                    doclass = r"\documentclass{ctexbook}";
                 }
                 frontmatter = r"\frontmatter % only for book";
                 mainmatter = r"\mainmatter % only for book";
             }
-            DocType::ENOTE | DocType::CTART => {
+            DocType::CTEXART | DocType::ENOTE | DocType::CTART => {
                 if dt == DocType::EBOOK {
                     doclass = "\\documentclass[\
                         lang=cn,\n\
                         device=normal,\n\
                         ]{elegantnote}\n\
                         \\usepackage{elegant}";
-                } else {
+                } else if dt == DocType::CTART {
                     doclass = r#"\documentclass{ctart}
 \usepackage{ctart}"#;
+                } else {
+                    doclass = r"\documentclass{ctexart}";
                 }
             }
-            DocType::CTREP => {
-                doclass = "\\documentclass{ctrep}\n\
-                    \\usepackage{ctart}";
+            DocType::CTREP | DocType::CTEXREP => {
+                if dt == DocType::CTREP {
+                    doclass = "\\documentclass{ctrep}\n\
+                        \\usepackage{ctrep}";
+                } else {
+                    doclass = "\\documentclass{ctexrep}";
+                }
             }
             DocType::RESUMENG => {
                 doclass = "\\documentclass{resume-ng}\n\
@@ -427,11 +443,7 @@ mod entry {
             }
             DocType::MODERNCV => {
                 doclass = "";
-            } //_ => {
-              //    doclass = r"\usepackage{ctexart}";
-              //    frontmatter = r"";
-              //    mainmatter = r"";
-              //},
+            }
         }
 
         if dt == DocType::MODERNCV {
