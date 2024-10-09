@@ -508,7 +508,6 @@ mod entry {
 
 %\addbibresource{{}}
 
-% 设置标题，作者与时间
 \title{{{title}}}
 \author{{{author}}}
 \date{{{date}}}
@@ -623,9 +622,17 @@ listings: true
 numbersections:
   - sectiondepth: 5
 
-#bibliography: cs.bib
-#nocite: |
-#  @*
+#biblatex: true
+#biblatexoptions:
+#  - backend=biber
+#  - citestyle=numeric-comp
+#  - bibstyle=numeric
+#bibliography:
+#  - biblio/cseebook.bib
+#nocite-ids:
+#  - \*
+#biblio-title: 参考文献
+#csl: computer.csl
 
 csl: computer.csl
 #colorlinks: true
@@ -662,9 +669,7 @@ after-body:
 ```{{.include}}
 
 ```
-
-\newpage
-# 参考文献"#,
+"#,
             title = title,
             author = author,
             date = date,
