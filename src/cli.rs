@@ -242,15 +242,22 @@ pub fn cli() {
 
     let orig_path = env::current_dir().unwrap();
 
-    if !omnidoc_lib_exists() {
-        let dld = data_local_dir().unwrap();
-        let olib = dld.join("omnidoc");
-        match git_clone("https://github.com/wang-borong/omnidoc-libs", &olib, true) {
-            Ok(_) => { },
-            Err(e) => {
-                exit_eprintln!(1, "Install omnidoc-libs failed ({})", e);
+    match args.command {
+        Commands::New { .. }
+        | Commands::Init { .. }
+        | Commands::Build { .. } 
+        => {
+            if !omnidoc_lib_exists() {
+                let dld = data_local_dir().unwrap();
+                let olib = dld.join("omnidoc");
+                let _ = git_clone("https://github.com/wang-borong/omnidoc-libs", &olib, true);
+            } else {
+                let dld = data_local_dir().unwrap();
+                let olib = dld.join("omnidoc");
+                let _ = git_pull(&olib, "origin", "main");
             }
-        };
+        }
+        _ => { }
     }
 
     match args.command {
