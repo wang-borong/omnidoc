@@ -60,6 +60,13 @@ impl ConfigParser {
         };
 
         let omnidoc_config_file = config_local_dir.join("omnidoc.toml");
+        if !omnidoc_config_file.exists() {
+            let _ = ConfigParser::gen("unknown".to_string(), None, None, None, None, None, false);
+            println!("The 'omnidoc.toml' configuration file was created in '{}'.\n\
+                You can modify it to change the author to yours.",
+                config_local_dir.display())
+        }
+
         let config_cont = fs::read_to_string(&omnidoc_config_file)?;
         let config: Config = toml::from_str(&config_cont)?;
 
@@ -67,13 +74,6 @@ impl ConfigParser {
             config: Some(config),
             path: omnidoc_config_file.clone(),
         };
-
-        if !omnidoc_config_file.exists() {
-            let _ = ConfigParser::gen("unknown".to_string(), None, None, None, None, None, false);
-            println!("The 'omnidoc.toml' configuration file was created in '{}'. \
-                You can modify it to change the author to yours.",
-                config_local_dir.display())
-        }
 
         Ok(config_parser)
     }
