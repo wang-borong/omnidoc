@@ -87,3 +87,9 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    ```bash
    omnidoc clean [--distclean]
    ```
+
+5. Open the built PDF document
+
+   ```bash
+   omnidoc open
+   ```
