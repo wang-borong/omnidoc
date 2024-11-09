@@ -2,6 +2,7 @@ use dirs::{config_local_dir, data_local_dir};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env::set_var as env_set_var;
+use std::env::var;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
@@ -46,22 +47,35 @@ pub struct ConfigParser {
 
 impl ConfigParser {
     pub fn default() -> Result<Self, std::io::Error> {
-        let config_local_dir = config_local_dir().expect("No '~/.config' in your system");
-        let omnidoc_config_file = config_local_dir.join("omnidoc.toml");
-        if !omnidoc_config_file.exists() {
-            return Err(std::io::Error::other(
-                "\
-                No omnidoc config file, please create it by 'omnidoc config'",
-            ));
-        }
+        // If the system don't have a config dir, then we create it
+        let config_local_dir = match config_local_dir() {
+            None => {
+                let home_path = var("HOME").unwrap();
+                let mut _conf_dir = PathBuf::from(home_path);
+                _conf_dir.push(".config");
+                let _ = fs::create_dir_all(&_conf_dir);
+                _conf_dir
+            },
+            Some(cld) => cld,
+        };
 
+        let omnidoc_config_file = config_local_dir.join("omnidoc.toml");
         let config_cont = fs::read_to_string(&omnidoc_config_file)?;
         let config: Config = toml::from_str(&config_cont)?;
 
-        Ok(Self {
+        let config_parser = Self {
             config: Some(config),
-            path: omnidoc_config_file,
-        })
+            path: omnidoc_config_file.clone(),
+        };
+
+        if !omnidoc_config_file.exists() {
+            let _ = ConfigParser::gen("unknown".to_string(), None, None, None, None, None, false);
+            println!("The 'omnidoc.toml' configuration file was created in '{}'. \
+                You can modify it to change the author to yours.",
+                config_local_dir.display())
+        }
+
+        Ok(config_parser)
     }
 
     pub fn parse(&mut self) -> Result<(), Box<dyn Error>> {
