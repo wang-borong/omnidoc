@@ -1,6 +1,6 @@
 [package]
 name = "omnidoc"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 authors = ["Jason Wang <wang_borong@163.com>"]
 homepage = "https://github.com/wang-borong/omnidoc"
