@@ -237,10 +237,10 @@ where
     doctype
 }
 
-pub fn cli() {
+pub fn cli() -> Result<(), Box<dyn std::error::Error>> {
     let args = OmniCli::parse();
 
-    let orig_path = env::current_dir().unwrap();
+    let orig_path = env::current_dir()?;
 
     match args.command {
         Commands::New { .. }
@@ -248,11 +248,11 @@ pub fn cli() {
         | Commands::Build { .. } 
         => {
             if !omnidoc_lib_exists() {
-                let dld = data_local_dir().unwrap();
+                let dld = data_local_dir().ok_or("data_local_dir not found")?;
                 let olib = dld.join("omnidoc");
                 let _ = git_clone("https://github.com/wang-borong/omnidoc-libs", &olib, true);
             } else {
-                let dld = data_local_dir().unwrap();
+                let dld = data_local_dir().ok_or("data_local_dir not found")?;
                 let olib = dld.join("omnidoc");
                 let _ = git_pull(&olib, "origin", "main");
             }
@@ -330,7 +330,7 @@ pub fn cli() {
                     );
                 }
             };
-            let envs = config_parser.get_envs().expect("Unable get envs");
+            let envs = config_parser.get_envs()?;
 
             let author_conf = config_parser.get_author_name();
             let author = match author {
@@ -507,7 +507,7 @@ pub fn cli() {
             }
         }
         Commands::Lib { update, .. } => {
-            let dld = data_local_dir().unwrap();
+            let dld = data_local_dir().ok_or("data_local_dir not found")?;
             let olib = dld.join("omnidoc");
 
             if update {
@@ -526,7 +526,7 @@ pub fn cli() {
                 };
             }
 
-            let mut latexmkrc = config_local_dir().unwrap();
+            let mut latexmkrc = config_local_dir().ok_or("config_local_dir not found")?;
 
             latexmkrc.push("latexmk");
             if !latexmkrc.exists() {
@@ -559,4 +559,5 @@ pub fn cli() {
             }
         }
     }
+    Ok(())
 }

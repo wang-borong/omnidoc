@@ -40,9 +40,14 @@ impl<'a> Doc<'a> {
     }
 
     fn get_docname(&self) -> String {
-        let cur_dir = env::current_dir().unwrap();
-        let docname = cur_dir.file_name().unwrap().to_str().unwrap_or("unknown");
-
+        let cur_dir = match env::current_dir() {
+            Ok(dir) => dir,
+            Err(_) => return "unknown".to_string(),
+        };
+        let docname = match cur_dir.file_name().and_then(|n| n.to_str()) {
+            Some(name) => name,
+            None => "unknown",
+        };
         String::from(docname)
     }
 
@@ -64,10 +69,13 @@ impl<'a> Doc<'a> {
     pub fn init_project(&self, update: bool) -> Result<(), Error> {
         let md = Path::new("md");
         // Just use the last texinput path
-        let texinput = &self.envs["texinputs"].clone().unwrap_or("tex".to_owned());
+        let texinput = self.envs["texinputs"].clone().unwrap_or("tex".to_owned());
         let texinput = texinput.strip_suffix(":").unwrap_or(&texinput);
         let texinputs = texinput.split(":").collect::<Vec<&str>>();
-        let last_texinput = texinputs.last().unwrap();
+        let last_texinput = match texinputs.last() {
+            Some(t) => t,
+            None => "tex",
+        };
         let tex = Path::new(&last_texinput);
 
         // we assume the user has the document entry file when updating
@@ -112,7 +120,10 @@ impl<'a> Doc<'a> {
                 && (fext == Some("md") || fext == Some("tex"))
                 && path.parent() == Some(Path::new("."))
             {
-                let file_name = path.file_name().unwrap();
+                let file_name = match path.file_name() {
+                    Some(f) => f,
+                    None => return Err(Error::other("file_name not found")),
+                };
                 let destination;
 
                 if fstem == Some("main") || fstem == Some("README") {
@@ -196,8 +207,8 @@ impl<'a> Doc<'a> {
             if Path::new(p).exists() {
                 match Path::new(p).parent() {
                     Some(p) => {
-                        if p.to_str().unwrap() != "" {
-                            env::set_current_dir(p).expect("Set dir to project root {}");
+                        if p.to_str().unwrap_or("") != "" {
+                            let _ = env::set_current_dir(p);
                         }
                     }
                     None => {}
@@ -243,16 +254,29 @@ impl<'a> Doc<'a> {
         let docname = self.get_docname();
         let target = format!("TARGET={}", &docname);
 
-        let mut topmk = data_local_dir().unwrap();
+        let mut topmk = data_local_dir().ok_or_else(|| Error::other("data_local_dir not found"))?;
         topmk.push("omnidoc/tool/top.mk");
         if verbose {
             do_cmd(
                 "make",
-                &["-f", &topmk.to_str().unwrap(), &target, "V=1"],
+                &[
+                    "-f",
+                    topmk.to_str().unwrap_or("topmk not found"),
+                    &target,
+                    "V=1",
+                ],
                 false,
             )
         } else {
-            do_cmd("make", &["-f", &topmk.to_str().unwrap(), &target], false)
+            do_cmd(
+                "make",
+                &[
+                    "-f",
+                    topmk.to_str().unwrap_or("topmk not found"),
+                    &target,
+                ],
+                false,
+            )
         }
     }
 
@@ -283,19 +307,29 @@ impl<'a> Doc<'a> {
         let docname = self.get_docname();
         let target = format!("TARGET={}", &docname);
 
-        let mut topmk = data_local_dir().unwrap();
+        let mut topmk = data_local_dir().ok_or_else(|| Error::other("data_local_dir not found"))?;
         topmk.push("omnidoc/tool/top.mk");
 
         if distclean {
             do_cmd(
                 "make",
-                &["-f", &topmk.to_str().unwrap(), &target, "dist-clean"],
+                &[
+                    "-f",
+                    topmk.to_str().unwrap_or("topmk not found"),
+                    &target,
+                    "dist-clean",
+                ],
                 false,
             )
         } else {
             do_cmd(
                 "make",
-                &["-f", &topmk.to_str().unwrap(), &target, "clean"],
+                &[
+                    "-f",
+                    topmk.to_str().unwrap_or("topmk not found"),
+                    &target,
+                    "clean",
+                ],
                 false,
             )
         }
@@ -321,7 +355,11 @@ impl<'a> Doc<'a> {
             return Err(Error::other(format!("The '{}' do not exist", doc_path_str)));
         }
 
-        do_cmd("xdg-open", &[&doc_path.to_str().unwrap()], true)
+        do_cmd(
+            "xdg-open",
+            &[doc_path.to_str().unwrap_or("doc_path not found")],
+            true,
+        )
     }
 
     fn gen_entry_file(

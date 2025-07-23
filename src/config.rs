@@ -50,7 +50,7 @@ impl ConfigParser {
         // If the system don't have a config dir, then we create it
         let config_local_dir = match config_local_dir() {
             None => {
-                let home_path = var("HOME").unwrap();
+                let home_path = var("HOME").map_err(|_| std::io::Error::new(std::io::ErrorKind::NotFound, "HOME env not found"))?;
                 let mut _conf_dir = PathBuf::from(home_path);
                 _conf_dir.push(".config");
                 let _ = fs::create_dir_all(&_conf_dir);
@@ -84,7 +84,7 @@ impl ConfigParser {
         }
 
         let config_cont = fs::read_to_string(&self.path).unwrap_or("".to_string());
-        let config: Config = toml::from_str(&config_cont).expect("can not parse configs");
+        let config: Config = toml::from_str(&config_cont)?;
 
         self.config = Some(config);
 
@@ -92,24 +92,26 @@ impl ConfigParser {
     }
 
     pub fn get_downloads(&self) -> Result<HashMap<String, String>, Box<dyn Error>> {
-        let config = self.config.as_ref().unwrap();
+        let config = self.config.as_ref().ok_or("Config not loaded")?;
 
         // Create a HashMap to store the URLs and filenames
         let mut downloads = HashMap::new();
 
         // Populate the HashMap
-        for download in config.download.as_ref().unwrap() {
-            downloads.insert(
-                String::from(&download.url),
-                String::from(&download.filename),
-            );
+        if let Some(download_list) = &config.download {
+            for download in download_list {
+                downloads.insert(
+                    download.url.clone(),
+                    download.filename.clone(),
+                );
+            }
         }
 
         Ok(downloads)
     }
 
     pub fn get_author_name(&self) -> Result<String, Box<dyn Error>> {
-        let config = self.config.as_ref().unwrap();
+        let config = self.config.as_ref().ok_or("Config not loaded")?;
 
         match &config.author.name {
             Some(author) => Ok(author.to_owned()),
@@ -118,7 +120,7 @@ impl ConfigParser {
     }
 
     pub fn get_omnidoc_lib(&self) -> Result<String, Box<dyn Error>> {
-        let config = self.config.as_ref().unwrap();
+        let config = self.config.as_ref().ok_or("Config not loaded")?;
 
         match &config.lib.path {
             Some(lib_path) => Ok(lib_path.to_owned()),
@@ -128,7 +130,7 @@ impl ConfigParser {
 
     pub fn get_envs(&self) -> Result<HashMap<&str, Option<String>>, Box<dyn Error>> {
         let mut envs: HashMap<&str, Option<String>> = HashMap::new();
-        let config = self.config.as_ref().unwrap();
+        let config = self.config.as_ref().ok_or("Config not loaded")?;
 
         if let Some(outdir) = &config.env.outdir {
             envs.insert("outdir", Some(outdir.to_owned()));
@@ -179,9 +181,9 @@ impl ConfigParser {
         if let Some(lib) = lib {
             config.push_str(&format!("[lib]\npath = \"{}\"\n", lib));
         } else {
-            let dld = data_local_dir().unwrap();
+            let dld = data_local_dir().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "data_local_dir not found"))?;
             let olib = dld.join("omnidoc");
-            config.push_str(&format!("[lib]\npath = \"{}\"\n", olib.to_str().unwrap()))
+            config.push_str(&format!("[lib]\npath = \"{}\"\n", olib.to_str().unwrap_or("lib path not found")))
         }
 
         config.push_str("[env]\n");
@@ -257,7 +259,7 @@ impl ConfigParser {
     }
 
     pub fn setup_env(&self) -> Result<(), Box<dyn Error>> {
-        let config = self.config.as_ref().unwrap();
+        let config = self.config.as_ref().ok_or("Config not loaded")?;
 
         match &config.env.texmfhome {
             Some(texmfhome) => env_set_var("TEXMFHOME", texmfhome),
@@ -285,7 +287,7 @@ mod tests {
         let mut conf_parser = ConfigParser::default().expect("Get default config failed");
         let _ = conf_parser.parse();
 
-        let config = conf_parser.config.as_ref().unwrap();
+        let config = conf_parser.config.as_ref().expect("Config not loaded");
         println!("show conf: {:?}", config);
 
         assert!(true);

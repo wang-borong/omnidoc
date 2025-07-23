@@ -7,8 +7,7 @@ pub fn do_cmd(cmd: &str, args: &[&str], nw: bool) -> io::Result<()> {
     } else {
         let output = Command::new(cmd)
             .args(args)
-            .output()
-            .expect(&format!("Failed to execute '{}'", cmd));
+            .output()?;
         io::stdout().write_all(&output.stdout)?;
         io::stderr().write_all(&output.stderr)?;
     }

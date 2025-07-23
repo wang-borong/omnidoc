@@ -66,7 +66,10 @@ where
     let mut index = repo.index()?;
 
     let cb = &mut |path: &Path, _matched_spec: &[u8]| -> i32 {
-        let status = repo.status_file(path).unwrap();
+        let status = match repo.status_file(path) {
+            Ok(s) => s,
+            Err(_) => return 1,
+        };
 
         let ret = if status.contains(git2::Status::WT_MODIFIED)
             || status.contains(git2::Status::WT_NEW)
@@ -143,7 +146,7 @@ fn do_fetch<'a>(
             //    stats.received_bytes()
             //);
         }
-        io::stdout().flush().unwrap();
+        let _ = io::stdout().flush();
         true
     });
 
