@@ -25,7 +25,8 @@ pub fn cli() -> Result<()> {
 
     let orig_path = env::current_dir().map_err(|e| OmniDocError::Io(e))?;
 
-    // Ensure omnidoc lib exists for commands that need it
+    // Ensure omnidoc lib exists for commands that need it.
+    // Only perform a one-time install (clone) if missing; do not auto update.
     match args.command {
         Commands::New { .. } | Commands::Init { .. } | Commands::Build { .. } => {
             if !omnidoc_lib_exists() {
@@ -33,11 +34,6 @@ pub fn cli() -> Result<()> {
                     .ok_or_else(|| OmniDocError::Other("data_local_dir not found".to_string()))?;
                 let olib = dld.join("omnidoc");
                 let _ = git_clone("https://github.com/wang-borong/omnidoc-libs", &olib, true);
-            } else {
-                let dld = data_local_dir()
-                    .ok_or_else(|| OmniDocError::Other("data_local_dir not found".to_string()))?;
-                let olib = dld.join("omnidoc");
-                let _ = git_pull(&olib, git_refs::ORIGIN, git_refs::MAIN_BRANCH);
             }
         }
         _ => {}
