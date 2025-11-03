@@ -1,8 +1,8 @@
-use crate::doc::templates::generator::list_external_templates;
 use crate::doctype::DocumentTypeRegistry;
 use crate::error::{OmniDocError, Result};
 use console::style;
 use inquire::Select;
+use crate::doc::templates::generator::list_external_templates;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -45,6 +45,17 @@ where
         .into_iter()
         .map(|dt| format!("{} — {}", dt.as_str(), dt.description()))
         .collect();
+
+    // Append external templates (dynamic plugins)
+    let externals = list_external_templates();
+    for t in externals {
+        let name = t.name.clone().unwrap_or_else(|| t.key.clone());
+        if let Some(desc) = t.description.clone() {
+            items.push(format!("{} — {}", t.key, desc));
+        } else {
+            items.push(format!("{} — {}", t.key, name));
+        }
+    }
     items.push("[Cancel] 取消".to_string());
 
     let selection = Select::new("请选择文档类型:", items)
