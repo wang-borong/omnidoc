@@ -6,6 +6,7 @@ use crate::fs;
 use dirs::data_local_dir;
 use std::env;
 use std::path::Path;
+use std::process::Command;
 
 impl<'a> Doc<'a> {
     /// Build the project
@@ -16,6 +17,43 @@ impl<'a> Doc<'a> {
             return Err(OmniDocError::NotOmniDocProject(
                 "Current directory is not an omnidoc project".to_string(),
             ));
+        }
+
+        // Preflight: check required external tools
+        // We check a minimal set that our build pipeline depends on.
+        // If any are missing, log helpful messages and exit gracefully.
+        fn command_exists(command_name: &str) -> bool {
+            Command::new(command_name).arg("--version").output().is_ok()
+        }
+
+        let required_tools = ["make", "pandoc", "pandoc-crossref", "xelatex"];
+        let missing: Vec<&str> = required_tools
+            .iter()
+            .copied()
+            .filter(|tool| !command_exists(tool))
+            .collect();
+
+        if !missing.is_empty() {
+            use console::style;
+            eprintln!(
+                "{} Missing required external tools:",
+                style("✖").red().bold()
+            );
+            for tool in &missing {
+                eprintln!(
+                    "  - {} is not installed. Please install '{}' and try again.",
+                    style(tool).yellow(),
+                    tool
+                );
+            }
+            eprintln!(
+                "{} Some templates require pandoc, pandoc-crossref, and a LaTeX engine (xelatex).",
+                style("ℹ").blue()
+            );
+            return Err(OmniDocError::Other(format!(
+                "Missing external tools: {}",
+                missing.join(", ")
+            )));
         }
 
         // Create build directory

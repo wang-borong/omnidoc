@@ -1,6 +1,7 @@
 use super::types::TemplateDocType;
 use crate::config::ConfigParser;
 use chrono::prelude::*;
+use dirs::config_local_dir;
 use serde::Deserialize;
 use std::env;
 use std::fs;
@@ -63,9 +64,30 @@ fn resolve_template_root() -> Option<PathBuf> {
     if let Ok(dir) = env::var("OMNIDOC_TEMPLATE_DIR") {
         return Some(PathBuf::from(dir));
     }
+    // Try strict config parser first
     if let Ok(cp) = ConfigParser::default() {
         if let Some(dir) = cp.get_template_dir() {
             return Some(PathBuf::from(dir));
+        }
+    }
+    // Fallback: read template_dir only from ~/.config/omnidoc.toml without requiring full schema
+    if let Some(cfg_dir) = config_local_dir() {
+        let p = cfg_dir.join(crate::constants::config::OMNIDOC_CONFIG_FILE);
+        if p.exists() {
+            if let Ok(s) = fs::read_to_string(&p) {
+                if let Ok(val) = s.parse::<toml::Value>() {
+                    // 1) top-level template_dir
+                    if let Some(tdir) = val.get("template_dir").and_then(|v| v.as_str()) {
+                        return Some(PathBuf::from(tdir));
+                    }
+                    // 2) allow under [env].template_dir for backward/alternate config
+                    if let Some(env_tbl) = val.get("env").and_then(|v| v.as_table()) {
+                        if let Some(tdirv) = env_tbl.get("template_dir").and_then(|v| v.as_str()) {
+                            return Some(PathBuf::from(tdirv));
+                        }
+                    }
+                }
+            }
         }
     }
     None
