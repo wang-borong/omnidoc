@@ -2,6 +2,7 @@ use crate::constants::git_refs;
 use crate::error::{OmniDocError, Result};
 use crate::fs;
 use crate::git::{git_clone, git_pull};
+use console::style;
 use dirs::{config_local_dir, data_local_dir};
 
 /// Handle the 'lib' command
@@ -13,11 +14,21 @@ pub fn handle_lib(update: bool) -> Result<()> {
     if update {
         git_pull(&olib, git_refs::ORIGIN, git_refs::MAIN_BRANCH)
             .map_err(|e| OmniDocError::Git(e))?;
-        println!("Update '{}' success", olib.display());
+        println!(
+            "{} {} '{}'",
+            style("✔").green().bold(),
+            style("Updated omnidoc library at").green().bold(),
+            olib.display()
+        );
     } else {
         git_clone("https://github.com/wang-borong/omnidoc-libs", &olib, true)
             .map_err(|e| OmniDocError::Git(e))?;
-        println!("Install '{}' success", olib.display());
+        println!(
+            "{} {} '{}'",
+            style("✔").green().bold(),
+            style("Installed omnidoc library to").green().bold(),
+            olib.display()
+        );
     }
 
     let mut latexmkrc = config_local_dir()

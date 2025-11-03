@@ -1,5 +1,6 @@
 pub use std::fs::*;
 
+use console::style;
 use dirs::data_local_dir;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -46,7 +47,11 @@ pub fn copy_dir<U: AsRef<Path>, V: AsRef<Path>>(from: U, to: V) -> Result<(), st
                         fs::copy(&path, &dest_path)?;
                     }
                     None => {
-                        eprintln!("No such file '{}'", path.display());
+                        eprintln!(
+                            "{} No such file '{}'",
+                            style("✖").red().bold(),
+                            path.display()
+                        );
                     }
                 }
             }

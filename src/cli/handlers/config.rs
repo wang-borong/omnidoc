@@ -1,5 +1,6 @@
 use crate::config::ConfigParser;
 use crate::error::{OmniDocError, Result};
+use console::style;
 
 /// Handle the 'config' command
 pub fn handle_config(
@@ -13,6 +14,9 @@ pub fn handle_config(
 ) -> Result<()> {
     ConfigParser::gen(authors, lib, outdir, texmfhome, bibinputs, texinputs, force)
         .map_err(|e| OmniDocError::Config(format!("Generate configuration failed: {}", e)))?;
-    println!("Generate configuration success");
+    println!(
+        "{} Generate configuration success",
+        style("✔").green().bold()
+    );
     Ok(())
 }

@@ -1,5 +1,6 @@
 use crate::constants::config as config_consts;
 use crate::error::{OmniDocError, Result};
+use console::style;
 use dirs::{config_local_dir, data_local_dir};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -74,8 +75,8 @@ impl ConfigParser {
                 false,
             );
             println!(
-                "The '{}' configuration file was created in '{}'.\n\
-                You can modify it to change the author to yours.",
+                "{} The '{}' configuration file was created in '{}'.\n    You can modify it to change the author to yours.",
+                style("ℹ").cyan().bold(),
                 config_consts::OMNIDOC_CONFIG_FILE,
                 config_local_dir.display()
             )

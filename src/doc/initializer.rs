@@ -7,6 +7,7 @@ use crate::doctype::DocumentTypeRegistry;
 use crate::error::{OmniDocError, Result};
 use crate::fs;
 use crate::git::{git_add, git_commit, git_init, is_git_repo};
+use console::style;
 use std::path::Path;
 use walkdir::WalkDir;
 
@@ -119,7 +120,21 @@ impl<'a> Doc<'a> {
         };
         git_commit(".", cmsg).map_err(|e| OmniDocError::Git(e))?;
 
-        println!("{} '{}' success", cmsg, &self.path.display());
+        if update {
+            println!(
+                "{} {} '{}'",
+                style("✔").green().bold(),
+                style("Project files updated at").green().bold(),
+                &self.path.display()
+            );
+        } else {
+            println!(
+                "{} {} '{}'",
+                style("✔").green().bold(),
+                style("Project initialized at").green().bold(),
+                &self.path.display()
+            );
+        }
         Ok(())
     }
 

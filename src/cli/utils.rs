@@ -1,5 +1,6 @@
 use crate::doctype::DocumentTypeRegistry;
 use crate::error::{OmniDocError, Result};
+use console::style;
 use inquire::Select;
 use std::env;
 use std::fs;
@@ -7,8 +8,20 @@ use std::path::Path;
 
 /// Print all supported document types
 pub fn print_doctypes() {
-    println!("Current supported document types:");
+    let all = DocumentTypeRegistry::all();
+    println!(
+        "{} ({} types)",
+        style("Current supported document types:")
+            .bold()
+            .underlined(),
+        all.len()
+    );
     println!("{}", DocumentTypeRegistry::list_display());
+    println!(
+        "{} {}",
+        style("ℹ").cyan().bold(),
+        style("Use arrow keys to navigate, Enter to select").cyan()
+    );
 }
 
 /// Get document type from readline with cleanup on error
