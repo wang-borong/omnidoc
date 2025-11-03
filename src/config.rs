@@ -40,6 +40,7 @@ struct Config {
     author: Author,
     lib: Lib,
     env: Env,
+    template_dir: Option<String>,
 }
 
 pub struct ConfigParser {
@@ -158,6 +159,10 @@ impl ConfigParser {
                 "No omnidoc lib configured".to_string(),
             )),
         }
+    }
+
+    pub fn get_template_dir(&self) -> Option<String> {
+        self.config.as_ref().and_then(|c| c.template_dir.clone())
     }
 
     pub fn get_envs(&self) -> Result<HashMap<&'static str, Option<String>>> {
