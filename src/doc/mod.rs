@@ -4,7 +4,7 @@ mod cleaner;
 mod initializer;
 mod opener;
 mod project;
-mod templates;
+pub mod templates;
 mod utils;
 
 pub use builder::*;

@@ -1,7 +1,10 @@
 use super::types::TemplateDocType;
 use crate::config::ConfigParser;
 use chrono::prelude::*;
+use serde::Deserialize;
 use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
 use tera::{Context, Tera};
 
 fn build_builtin_tera() -> Tera {
@@ -44,6 +47,208 @@ fn build_external_tera() -> Option<Tera> {
         }
         None
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct TemplateManifest {
+    key: String,
+    name: Option<String>,
+    description: Option<String>,
+    language: String,
+    template_file: String,
+    file_name: Option<String>,
+}
+
+fn resolve_template_root() -> Option<PathBuf> {
+    if let Ok(dir) = env::var("OMNIDOC_TEMPLATE_DIR") {
+        return Some(PathBuf::from(dir));
+    }
+    if let Ok(cp) = ConfigParser::default() {
+        if let Some(dir) = cp.get_template_dir() {
+            return Some(PathBuf::from(dir));
+        }
+    }
+    None
+}
+
+fn load_manifest_for_key(key: &str) -> Option<(TemplateManifest, PathBuf)> {
+    let root = resolve_template_root()?;
+    let p1 = root.join("manifests").join(format!("{}.toml", key));
+    if p1.exists() {
+        if let Ok(s) = fs::read_to_string(&p1) {
+            if let Ok(m) = toml::from_str::<TemplateManifest>(&s) {
+                return Some((m, p1.parent()?.to_path_buf()));
+            }
+        }
+    }
+    let p2 = root.join(key).join("manifest.toml");
+    if p2.exists() {
+        if let Ok(s) = fs::read_to_string(&p2) {
+            if let Ok(m) = toml::from_str::<TemplateManifest>(&s) {
+                return Some((m, p2.parent()?.to_path_buf()));
+            }
+        }
+    }
+    None
+}
+
+pub fn try_generate_dynamic(
+    key: &str,
+    title: &str,
+    author: &str,
+) -> Option<(String, bool, String)> {
+    let (manifest, base_dir) = load_manifest_for_key(key)?;
+    let template_path = base_dir.join(&manifest.template_file);
+    let template_str = fs::read_to_string(&template_path).ok()?;
+
+    let local: DateTime<Local> = Local::now();
+    let date = local.format("%Y/%m/%d").to_string();
+
+    let mut ctx = Context::new();
+    ctx.insert("title", title);
+    ctx.insert("author", author);
+    ctx.insert("date", &date);
+
+    let rendered = Tera::one_off(&template_str, &ctx, false).ok()?;
+    let is_markdown = manifest.language.to_lowercase() == "markdown";
+    let file_name = manifest.file_name.unwrap_or_else(|| {
+        if is_markdown {
+            "main.md".to_string()
+        } else {
+            "main.tex".to_string()
+        }
+    });
+
+    Some((rendered, is_markdown, file_name))
+}
+
+#[derive(Debug, Clone)]
+pub struct ExternalTemplateInfo {
+    pub key: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+}
+
+pub fn list_external_templates() -> Vec<ExternalTemplateInfo> {
+    let mut infos: Vec<ExternalTemplateInfo> = Vec::new();
+    let Some(root) = resolve_template_root() else {
+        return infos;
+    };
+
+    // manifests/*.toml
+    let manifests_dir = root.join("manifests");
+    if manifests_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&manifests_dir) {
+            for e in entries.flatten() {
+                let path = e.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("toml") {
+                    if let Ok(s) = fs::read_to_string(&path) {
+                        if let Ok(m) = toml::from_str::<TemplateManifest>(&s) {
+                            infos.push(ExternalTemplateInfo {
+                                key: m.key,
+                                name: m.name,
+                                description: m.description,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // */manifest.toml one-level children
+    if let Ok(entries) = fs::read_dir(&root) {
+        for e in entries.flatten() {
+            let child = e.path();
+            if child.is_dir() {
+                let mpath = child.join("manifest.toml");
+                if mpath.exists() {
+                    if let Ok(s) = fs::read_to_string(&mpath) {
+                        if let Ok(m) = toml::from_str::<TemplateManifest>(&s) {
+                            // avoid duplicates with same key
+                            if !infos.iter().any(|i| i.key == m.key) {
+                                infos.push(ExternalTemplateInfo {
+                                    key: m.key,
+                                    name: m.name,
+                                    description: m.description,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    infos.sort_by(|a, b| a.key.cmp(&b.key));
+    infos
+}
+
+pub fn validate_external_templates() -> Vec<(String, Result<(), String>)> {
+    let mut results: Vec<(String, Result<(), String>)> = Vec::new();
+    let Some(root) = resolve_template_root() else {
+        return results;
+    };
+
+    let mut try_validate_manifest = |manifest_path: &Path| {
+        if let Ok(s) = fs::read_to_string(manifest_path) {
+            if let Ok(m) = toml::from_str::<TemplateManifest>(&s) {
+                let base_dir = manifest_path.parent().unwrap_or(&root);
+                let template_path = base_dir.join(&m.template_file);
+                if !template_path.exists() {
+                    results.push((
+                        m.key.clone(),
+                        Err(format!(
+                            "template file not found: {}",
+                            template_path.display()
+                        )),
+                    ));
+                    return;
+                }
+                // Try render with minimal context
+                let mut ctx = Context::new();
+                ctx.insert("title", "Sample Title");
+                ctx.insert("author", "Sample Author");
+                ctx.insert("date", "1970/01/01");
+                match fs::read_to_string(&template_path)
+                    .ok()
+                    .and_then(|tpl| Tera::one_off(&tpl, &ctx, false).ok())
+                {
+                    Some(_) => results.push((m.key.clone(), Ok(()))),
+                    None => results.push((m.key.clone(), Err("render failed".to_string()))),
+                }
+            }
+        }
+    };
+
+    // manifests/*.toml
+    let manifests_dir = root.join("manifests");
+    if manifests_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&manifests_dir) {
+            for e in entries.flatten() {
+                let path = e.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("toml") {
+                    try_validate_manifest(&path);
+                }
+            }
+        }
+    }
+
+    // */manifest.toml one-level children
+    if let Ok(entries) = fs::read_dir(&root) {
+        for e in entries.flatten() {
+            let child = e.path();
+            if child.is_dir() {
+                let mpath = child.join("manifest.toml");
+                if mpath.exists() {
+                    try_validate_manifest(&mpath);
+                }
+            }
+        }
+    }
+
+    results.sort_by(|a, b| a.0.cmp(&b.0));
+    results
 }
 /// Generate LaTeX template content
 pub fn generate_latex_template(title: &str, author: &str, dt: TemplateDocType) -> String {

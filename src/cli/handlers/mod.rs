@@ -5,6 +5,7 @@ pub mod init;
 pub mod lib;
 pub mod new;
 pub mod open;
+pub mod template;
 pub mod update;
 
 pub use build::handle_build;
@@ -14,4 +15,5 @@ pub use init::handle_init;
 pub use lib::handle_lib;
 pub use new::handle_new;
 pub use open::handle_open;
+pub use template::handle_template_validate;
 pub use update::handle_update;

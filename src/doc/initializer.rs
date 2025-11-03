@@ -2,6 +2,7 @@ use super::project::Doc;
 use super::templates::{generate_template, TemplateDocType};
 use crate::constants::git as git_constants;
 use crate::constants::{dirs, lang, paths, paths_internal};
+use crate::doc::templates::generator::try_generate_dynamic;
 use crate::doctype::DocumentType;
 use crate::doctype::DocumentTypeRegistry;
 use crate::error::{OmniDocError, Result};
@@ -157,6 +158,17 @@ impl<'a> Doc<'a> {
     }
 
     fn create_entry(&self, title: &str, doctype_str: &str) -> Result<()> {
+        // First try dynamic template by key
+        if let Some((content, is_markdown, file_name)) =
+            try_generate_dynamic(doctype_str, title, &self.author)
+        {
+            if Path::new(&file_name).exists() {
+                return Ok(());
+            }
+            Doc::gen_file(&content, &file_name)?;
+            return Ok(());
+        }
+
         let doctype = DocumentTypeRegistry::from_str(doctype_str)?;
 
         let template_type = map_document_type_to_template(&doctype)?;

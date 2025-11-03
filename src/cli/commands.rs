@@ -118,6 +118,13 @@ pub enum Commands {
     /// list current supported document types
     List,
 
+    /// template toolkit
+    Template {
+        /// validate external template manifests & files
+        #[arg(long)]
+        validate: bool,
+    },
+
     /// generate shell completion
     Complete {
         /// If provided, outputs the completion file for given shell

@@ -1,3 +1,4 @@
+use crate::doc::templates::generator::list_external_templates;
 use crate::doctype::DocumentTypeRegistry;
 use crate::error::{OmniDocError, Result};
 use console::style;
@@ -17,6 +18,21 @@ pub fn print_doctypes() {
         all.len()
     );
     println!("{}", DocumentTypeRegistry::list_display());
+    let externals = list_external_templates();
+    if !externals.is_empty() {
+        println!(
+            "\n{} ({} templates)",
+            style("External templates:").bold().underlined(),
+            externals.len()
+        );
+        for t in externals {
+            let name = t.name.clone().unwrap_or_else(|| t.key.clone());
+            match t.description {
+                Some(desc) if !desc.is_empty() => println!("- {} — {} ({})", t.key, name, desc),
+                _ => println!("- {} — {}", t.key, name),
+            }
+        }
+    }
     println!(
         "{} {}",
         style("ℹ").cyan().bold(),

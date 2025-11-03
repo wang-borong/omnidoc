@@ -114,6 +114,11 @@ pub fn cli() -> Result<()> {
                 print_completions(generator, &mut cmd);
             }
         }
+        Commands::Template { validate } => {
+            if validate {
+                handle_template_validate();
+            }
+        }
     }
 
     Ok(())
