@@ -33,11 +33,6 @@ pub fn print_doctypes() {
             }
         }
     }
-    println!(
-        "{} {}",
-        style("ℹ").cyan().bold(),
-        style("Use arrow keys to navigate, Enter to select").cyan()
-    );
 }
 
 /// Get document type from readline with cleanup on error
