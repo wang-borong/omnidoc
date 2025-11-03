@@ -30,7 +30,10 @@ pub fn generate_latex_template(title: &str, author: &str, dt: TemplateDocType) -
             frontmatter = r"\frontmatter % only for book";
             mainmatter = r"\mainmatter % only for book";
         }
-        TemplateDocType::CTEXART | TemplateDocType::ENOTE | TemplateDocType::CTART | TemplateDocType::CTEXMD => {
+        TemplateDocType::CTEXART
+        | TemplateDocType::ENOTE
+        | TemplateDocType::CTART
+        | TemplateDocType::CTEXMD => {
             if dt == TemplateDocType::ENOTE {
                 doclass = "\\documentclass[\
                     lang=cn,\n\

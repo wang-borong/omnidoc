@@ -1,6 +1,6 @@
 use crate::doctype::DocumentTypeRegistry;
 use crate::error::{OmniDocError, Result};
-use crate::rl::DTRL;
+use inquire::Select;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -17,25 +17,43 @@ where
     O: AsRef<Path>,
     N: AsRef<Path>,
 {
-    let mut dtrl = DTRL::new().map_err(|e| {
-        let _ = env::set_current_dir(orig_path.as_ref());
-        let _ = fs::remove_dir_all(path.as_ref());
-        OmniDocError::Other(format!("Create DTRL failed ({})", e))
-    })?;
+    let mut items: Vec<String> = DocumentTypeRegistry::all()
+        .into_iter()
+        .map(|dt| format!("{} — {}", dt.as_str(), dt.description()))
+        .collect();
+    items.push("[Cancel] 取消".to_string());
 
-    loop {
-        let doctype = dtrl.readline().map_err(|e| {
+    let selection = Select::new("请选择文档类型:", items)
+        .with_page_size(10)
+        .with_help_message("上下键选择，Enter 确认，Esc/Ctrl+C 取消")
+        .prompt();
+
+    let selection = match selection {
+        Ok(sel) => sel,
+        Err(
+            inquire::InquireError::OperationCanceled | inquire::InquireError::OperationInterrupted,
+        ) => {
             let _ = env::set_current_dir(orig_path.as_ref());
             let _ = fs::remove_dir_all(path.as_ref());
-            OmniDocError::Other(format!("Get the input line failed ({})", e))
-        })?;
-
-        if &doctype == "list" || &doctype == "ls" {
-            print_doctypes();
-        } else {
-            return Ok(doctype);
+            return Err(OmniDocError::Other("操作已取消".to_string()));
         }
+        Err(e) => {
+            let _ = env::set_current_dir(orig_path.as_ref());
+            let _ = fs::remove_dir_all(path.as_ref());
+            return Err(OmniDocError::Other(format!("Prompt failed ({})", e)));
+        }
+    };
+
+    if selection.starts_with("[Cancel]") {
+        let _ = env::set_current_dir(orig_path.as_ref());
+        let _ = fs::remove_dir_all(path.as_ref());
+        return Err(OmniDocError::Other("操作已取消".to_string()));
     }
+
+    // selection is in the form "key — desc"; split to return the key
+    let key = selection.split(' ').next().unwrap_or("").to_string();
+
+    Ok(key)
 }
 
 /// Check if omnidoc library exists
