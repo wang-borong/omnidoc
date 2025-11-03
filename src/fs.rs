@@ -62,7 +62,9 @@ pub fn copy_dir<U: AsRef<Path>, V: AsRef<Path>>(from: U, to: V) -> Result<(), st
  * @to:   destination path
  */
 pub fn copy_from_lib<U: AsRef<Path>, V: AsRef<Path>>(from: U, to: V) -> Result<(), std::io::Error> {
-    let local_data_dir = data_local_dir().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "data_local_dir not found"))?;
+    let local_data_dir = data_local_dir().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "data_local_dir not found")
+    })?;
     let omnidoc_lib = local_data_dir.join("omnidoc");
     let to_copy = omnidoc_lib.join(from);
 

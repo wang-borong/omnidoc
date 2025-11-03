@@ -1,3 +1,5 @@
+use crate::constants::git_commits;
+use crate::constants::git_refs;
 use git2::Repository;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -40,7 +42,14 @@ fn create_initial_commit(repo: &Repository) -> Result<(), git2::Error> {
     // Normally creating a commit would involve looking up the current HEAD
     // commit and making that be the parent of the initial commit, but here this
     // is the first commit so there will be no parent.
-    repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])?;
+    repo.commit(
+        Some(git_refs::HEAD),
+        &sig,
+        &sig,
+        git_commits::INITIAL_COMMIT_MSG,
+        &tree,
+        &[],
+    )?;
 
     Ok(())
 }
@@ -111,7 +120,7 @@ where
     let parent_commit = repo.head()?.peel_to_commit()?;
     let tree = repo.find_tree(oid)?;
     repo.commit(
-        Some("HEAD"),
+        Some(git_refs::HEAD),
         &signature,
         &signature,
         msg,
@@ -179,7 +188,7 @@ fn do_fetch<'a>(
         //);
     }
 
-    let fetch_head = repo.find_reference("FETCH_HEAD")?;
+    let fetch_head = repo.find_reference(git_refs::FETCH_HEAD)?;
     Ok(repo.reference_to_annotated_commit(&fetch_head)?)
 }
 
@@ -231,7 +240,7 @@ fn normal_merge(
     let remote_commit = repo.find_commit(remote.id())?;
     // Do our merge commit and set current branch head to that commit.
     let _merge_commit = repo.commit(
-        Some("HEAD"),
+        Some(git_refs::HEAD),
         &sig,
         &sig,
         &msg,
@@ -255,7 +264,7 @@ fn do_merge<'a>(
     if analysis.0.is_fast_forward() {
         //println!("Doing a fast forward");
         // do a fast forward
-        let refname = format!("refs/heads/{}", remote_branch);
+        let refname = format!("{}{}", git_refs::REFS_HEADS_PREFIX, remote_branch);
         match repo.find_reference(&refname) {
             Ok(mut r) => {
                 fast_forward(repo, &mut r, &fetch_commit)?;

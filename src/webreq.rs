@@ -1,25 +1,34 @@
+use crate::error::{OmniDocError, Result};
 use reqwest::blocking::get;
 use std::fs::File;
 use std::io::copy;
 use std::io::Cursor;
 use std::path::Path;
 
-pub fn https_download<P>(url: &str, file: P) -> Result<(), Box<dyn std::error::Error>>
+pub fn https_download<P>(url: &str, file: P) -> Result<()>
 where
     P: AsRef<Path>,
 {
-    // Send the GET request and download the file content
-    let response = get(url)?;
+    let response = get(url).map_err(|e| OmniDocError::HttpError {
+        status: 0,
+        url: url.to_string(),
+    })?;
 
-    // Ensure the request was successful
-    if response.status().is_success() {
-        // Create a new file to save the downloaded content
-        let mut file = File::create(file)?;
-        let mut content = Cursor::new(response.bytes()?);
-
-        // Copy the content to the file
-        copy(&mut content, &mut file)?;
+    if !response.status().is_success() {
+        return Err(OmniDocError::HttpError {
+            status: response.status().as_u16(),
+            url: url.to_string(),
+        });
     }
+
+    let mut file = File::create(file).map_err(|e| OmniDocError::Io(e))?;
+    let mut content = Cursor::new(response.bytes().map_err(|e| OmniDocError::HttpError {
+        status: 0,
+        url: url.to_string(),
+    })?);
+
+    copy(&mut content, &mut file).map_err(|e| OmniDocError::Io(e))?;
+
     Ok(())
 }
 

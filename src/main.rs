@@ -1,4 +1,4 @@
-mod cli;
+use omnidoc::cli;
 
 fn main() {
     if let Err(e) = cli::cli() {

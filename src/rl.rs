@@ -1,3 +1,4 @@
+use crate::doctype::{DocumentType, DocumentTypeRegistry};
 use rustyline::highlight::Highlighter;
 use rustyline::hint::{Hint, Hinter};
 use rustyline::history::DefaultHistory;
@@ -80,18 +81,12 @@ fn doctype_hints() -> HashSet<CommandHint> {
     let mut set = HashSet::new();
     set.insert(CommandHint::new("ls", "ls"));
     set.insert(CommandHint::new("list", "list"));
-    set.insert(CommandHint::new("ebook-md", "ebook-md"));
-    set.insert(CommandHint::new("enote-md", "enote-md"));
-    set.insert(CommandHint::new("ctexart-tex", "ctexart-tex"));
-    set.insert(CommandHint::new("ctexrep-tex", "ctexrep-tex"));
-    set.insert(CommandHint::new("ctexbook-tex", "ctexbook-tex"));
-    set.insert(CommandHint::new("ebook-tex", "ebook-tex"));
-    set.insert(CommandHint::new("enote-tex", "enote-tex"));
-    set.insert(CommandHint::new("ctart-tex", "ctart-tex"));
-    set.insert(CommandHint::new("ctrep-tex", "ctrep-tex"));
-    set.insert(CommandHint::new("ctbook-tex", "ctbook-tex"));
-    set.insert(CommandHint::new("resume-ng-tex", "resume-ng-tex"));
-    set.insert(CommandHint::new("moderncv-tex", "moderncv-tex"));
+
+    // Use DocumentTypeRegistry to get all document types dynamically
+    for doctype in DocumentTypeRegistry::all() {
+        set.insert(CommandHint::new(doctype.as_str(), doctype.as_str()));
+    }
+
     set
 }
 
@@ -143,22 +138,13 @@ impl DocTypeCompleter {
     /// Constructor
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            doctypes: vec![
-                "ebook-md".to_owned(),
-                "enote-md".to_owned(),
-                "ctexart-tex".to_owned(),
-                "ctexrep-tex".to_owned(),
-                "ctexbook-tex".to_owned(),
-                "ebook-tex".to_owned(),
-                "enote-tex".to_owned(),
-                "ctart-tex".to_owned(),
-                "ctrep-tex".to_owned(),
-                "ctbook-tex".to_owned(),
-                "resume-ng-tex".to_owned(),
-                "moderncv-tex".to_owned(),
-            ],
-        }
+        // Use DocumentTypeRegistry to get all document types dynamically
+        let doctypes: Vec<String> = DocumentTypeRegistry::all()
+            .into_iter()
+            .map(|dt| dt.as_str().to_string())
+            .collect();
+
+        Self { doctypes }
     }
 
     pub fn complete(&self, line: &str, pos: usize) -> Result<(usize, Vec<Pair>)> {
