@@ -1,7 +1,9 @@
 use super::project::Doc;
-use crate::cmd::do_cmd;
+use crate::build::executor::BuildExecutor;
 use crate::constants::{commands, file_names, paths};
 use crate::error::{OmniDocError, Result};
+use crate::utils::fs;
+use std::collections::HashMap;
 use std::path::Path;
 
 impl<'a> Doc<'a> {
@@ -25,7 +27,7 @@ impl<'a> Doc<'a> {
         let doc_path_str = format!("{}/{}.{}", outdir, &docname, file_names::PDF_EXTENSION);
         let doc_path = Path::new(&doc_path_str);
 
-        if !doc_path.exists() {
+        if !fs::exists(doc_path) {
             return Err(OmniDocError::Project(format!(
                 "Document '{}' does not exist",
                 doc_path_str
@@ -36,6 +38,8 @@ impl<'a> Doc<'a> {
             .to_str()
             .ok_or_else(|| OmniDocError::Other("Failed to convert path to string".to_string()))?;
 
-        do_cmd(commands::XDG_OPEN, &[doc_path_str_for_cmd], true)
+        // Use BuildExecutor for command execution
+        let executor = BuildExecutor::new(HashMap::new());
+        executor.spawn_system_cmd(commands::XDG_OPEN, &[doc_path_str_for_cmd])
     }
 }

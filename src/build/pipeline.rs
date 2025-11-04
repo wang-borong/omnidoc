@@ -1,12 +1,12 @@
 use crate::error::Result;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// 构建管道 trait
 /// 定义构建流程的通用接口
 pub trait BuildPipeline {
     /// 执行构建
     fn build(&self, project_path: &Path, verbose: bool) -> Result<()>;
-    
+
     /// 检测项目类型
     fn detect_project_type(&self, project_path: &Path) -> Result<ProjectType>;
 }
@@ -33,4 +33,3 @@ impl ProjectType {
         }
     }
 }
-

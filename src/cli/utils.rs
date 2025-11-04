@@ -1,10 +1,10 @@
 use crate::doc::templates::generator::list_external_templates;
 use crate::doctype::DocumentTypeRegistry;
 use crate::error::{OmniDocError, Result};
+use crate::utils::fs;
 use console::style;
 use inquire::Select;
 use std::env;
-use std::fs;
 use std::path::Path;
 
 /// Print all supported document types

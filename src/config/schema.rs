@@ -48,6 +48,8 @@ pub struct LibConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LibSection {
     pub path: Option<String>,
+    /// OmniDoc library repository URL (全局配置)
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -279,4 +281,3 @@ impl PathConfig {
         }
     }
 }
-

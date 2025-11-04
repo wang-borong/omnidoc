@@ -7,7 +7,6 @@ pub mod paths {
     pub const MD_DIR: &str = "md";
     pub const GITIGNORE: &str = ".gitignore";
     pub const LATEXMKRC: &str = ".latexmkrc";
-    pub const MAKEFILE: &str = "Makefile";
 }
 
 pub mod dirs {
@@ -27,17 +26,7 @@ pub mod lang {
     pub const LATEX: &str = "tex";
 }
 
-pub mod build {
-    pub const TARGET_PREFIX: &str = "TARGET=";
-    pub const MAKE_VERBOSE_FLAG: &str = "V=1";
-    pub const CLEAN_TARGET: &str = "clean";
-    pub const DISTCLEAN_TARGET: &str = "dist-clean";
-}
-
 pub mod paths_internal {
-    pub const OMNIDOC_TOOL_TOP_MK: &str = "omnidoc/tool/top.mk";
-    pub const REPO_GITIGNORE: &str = "repo/gitignore";
-    pub const REPO_LATEXMKRC: &str = "repo/latexmkrc";
     pub const CURRENT_DIR: &str = ".";
     pub const PARENT_DIR: &str = "..";
     pub const PARENT_PARENT_DIR: &str = "../..";
@@ -47,11 +36,11 @@ pub mod file_names {
     pub const MAIN: &str = "main";
     pub const README: &str = "README";
     pub const PDF_EXTENSION: &str = "pdf";
+    pub const HTML_EXTENSION: &str = "html";
 }
 
 pub mod commands {
     pub const XDG_OPEN: &str = "xdg-open";
-    pub const MAKE: &str = "make";
 }
 
 pub mod git_refs {
@@ -81,4 +70,49 @@ pub mod config {
     pub const OMNIDOC_CONFIG_FILE: &str = "omnidoc.toml";
     pub const CONFIG_DIR: &str = ".config";
     pub const UNKNOWN_AUTHOR: &str = "unknown";
+}
+
+pub mod pandoc {
+    // Command
+    pub const CMD: &str = "pandoc";
+
+    // Common flags
+    pub const FLAG_FROM: &str = "-f";
+    pub const FLAG_TO: &str = "-t";
+    pub const FLAG_FILTER: &str = "-F";
+    pub const FLAG_METADATA: &str = "--metadata";
+    pub const FLAG_DATA_DIR: &str = "--data-dir";
+    pub const FLAG_RESOURCE_PATH: &str = "--resource-path";
+    pub const FLAG_STANDALONE: &str = "--standalone";
+    pub const FLAG_EMBED_RESOURCES: &str = "--embed-resources";
+    pub const FLAG_OUTPUT: &str = "-o";
+    pub const FLAG_META_SHORT: &str = "-M";
+
+    // PDF-specific
+    pub const FLAG_PDF_ENGINE: &str = "--pdf-engine";
+    pub const FLAG_SYNTAX_HIGHLIGHTING: &str = "--syntax-highlighting";
+    pub const FLAG_TEMPLATE: &str = "--template";
+    pub const FLAG_CSS: &str = "--css";
+
+    // Defaults
+    pub const DEFAULT_FROM_PDF: &str = "markdown+east_asian_line_breaks+footnotes";
+    pub const DEFAULT_FROM_HTML: &str = "markdown";
+    pub const DEFAULT_TO_HTML: &str = "html";
+    pub const DEFAULT_ENGINE_LATEX: &str = "xelatex";
+    pub const DEFAULT_SYNTAX: &str = "idiomatic";
+    pub const DEFAULT_TEMPLATE_LATEX: &str = "pantext.latex";
+    pub const DEFAULT_PYTHON: &str = "python3";
+    pub const DEFAULT_PLUGIN_CROSSREF: &str = "pandoc-crossref";
+
+    // Library paths (relative under omnidoc lib)
+    pub const LIB_PANDOC_DATA: &str = "pandoc/data";
+    pub const LIB_PANDOC_FILTERS: &str = "pandoc/data/filters";
+    pub const LIB_PANDOC_HEADERS: &str = "pandoc/headers";
+    pub const LIB_PANDOC_CSL: &str = "pandoc/csl";
+    pub const LIB_PANDOC_CROSSREF_YAML: &str = "pandoc/crossref.yaml"; // PDF fallback
+    pub const LIB_PANDOC_CROSSREF_YAML_HTML: &str = "pandoc/data/crossref.yaml"; // HTML fallback
+    pub const LIB_PANDOC_CSS_DEFAULT: &str = "pandoc/css/advance-editor.css";
+
+    // Resource path defaults
+    pub const RESOURCE_PATH_COMMON_SUFFIX: &str = ":image:images:figure:figures:biblio";
 }

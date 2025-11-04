@@ -1,6 +1,6 @@
 use crate::config::schema::ConfigSchema;
 use crate::error::{OmniDocError, Result};
-use std::fs;
+use crate::utils::fs;
 use std::path::{Path, PathBuf};
 
 const PROJECT_CONFIG_FILE: &str = ".omnidoc.toml";
@@ -19,9 +19,8 @@ impl ProjectConfig {
         } else {
             // 从当前目录向上查找
             let mut paths = Vec::new();
-            let mut current = std::env::current_dir()
-                .map_err(|e| OmniDocError::Io(e))?;
-            
+            let mut current = std::env::current_dir().map_err(|e| OmniDocError::Io(e))?;
+
             for _ in 0..10 {
                 // 限制搜索深度
                 paths.push(current.clone());
@@ -44,9 +43,9 @@ impl ProjectConfig {
 
     /// 从文件加载配置
     pub fn from_file(path: &Path) -> Result<Self> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| OmniDocError::Config(format!("Failed to read project config: {}", e)))?;
-        
+        use crate::utils::fs;
+        let content = fs::read_to_string(path)?;
+
         let config: ConfigSchema = toml::from_str(&content)
             .map_err(|e| OmniDocError::Config(format!("Failed to parse project config: {}", e)))?;
 
@@ -64,10 +63,13 @@ impl ProjectConfig {
         to: Option<&str>,
         target: Option<&str>,
     ) -> Result<Self> {
-        use crate::config::schema::{BuildConfig, BuildSection, ConfigSchema, FigureConfig, FigureSection, ProjectConfig as ProjectConfigSchema, ProjectSection};
-        
+        use crate::config::schema::{
+            BuildConfig, BuildSection, ConfigSchema, FigureConfig, FigureSection,
+            ProjectConfig as ProjectConfigSchema, ProjectSection,
+        };
+
         let mut config = ConfigSchema::default();
-        
+
         // 设置项目配置
         let project_section = ProjectSection {
             entry: entry.map(|s| s.to_string()),
@@ -99,9 +101,9 @@ impl ProjectConfig {
         let config_path = path.join(PROJECT_CONFIG_FILE);
         let toml_content = toml::to_string_pretty(&config)
             .map_err(|e| OmniDocError::Config(format!("Failed to serialize config: {}", e)))?;
-        
-        fs::write(&config_path, toml_content)
-            .map_err(|e| OmniDocError::Io(e))?;
+
+        use crate::utils::fs;
+        fs::write(&config_path, toml_content.as_bytes())?;
 
         Ok(Self {
             path: config_path,
@@ -124,4 +126,3 @@ impl ProjectConfig {
         path.join(PROJECT_CONFIG_FILE).exists()
     }
 }
-

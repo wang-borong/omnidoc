@@ -1,5 +1,5 @@
 use crate::error::{OmniDocError, Result};
-use crate::fs;
+use crate::utils::fs;
 use std::collections::HashMap;
 use std::env;
 use std::io::Write;
@@ -45,11 +45,7 @@ impl<'a> Doc<'a> {
     }
 
     pub(super) fn gen_file(cont: &str, target: &str) -> Result<()> {
-        let target_file = PathBuf::from(target);
-        let mut target_fh = fs::File::create(&target_file).map_err(|e| OmniDocError::Io(e))?;
-        target_fh
-            .write_all(cont.as_bytes())
-            .map_err(|e| OmniDocError::Io(e))?;
+        fs::write(target, cont.as_bytes())?;
         Ok(())
     }
 }

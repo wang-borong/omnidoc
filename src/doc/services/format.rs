@@ -1,8 +1,9 @@
 use crate::error::{OmniDocError, Result};
+use crate::utils::fs;
 use regex::Regex;
-use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 /// 格式化服务
 /// 提供中英文文档排版优化功能
@@ -11,6 +12,87 @@ pub struct FormatService {
     semantic: bool,
     symbol: bool,
     markdown: bool,
+}
+
+// 正则表达式缓存
+struct RegexCache {
+    // 通用格式化
+    han_to_ascii: Regex,
+    ascii_to_han: Regex,
+    punct_pattern: Regex,
+    digit_hyphen: Regex,
+    date_format: Regex,
+
+    // Markdown 格式化
+    ref_pattern: Regex,
+    verb_pattern: Regex,
+    citation_label_long: Regex,
+    citation_label_short: Regex,
+    header_bracket: Regex,
+    period_end: Regex,
+
+    // 语义格式化
+    indent_pattern: Regex,
+    sentence_break: Regex,
+    indent_simple: Regex,
+
+    // 符号格式化
+    has_chinese: Regex,
+    is_image: Regex,
+    is_numbered_list: Regex,
+    is_code_block: Regex,
+    is_comment: Regex,
+    is_header: Regex,
+    chinese_comma: Regex,
+    chinese_period: Regex,
+    fix_period_c: Regex,
+    fix_hash_colon: Regex,
+    fix_digit_period: Regex,
+}
+
+static REGEX_CACHE: OnceLock<RegexCache> = OnceLock::new();
+
+fn get_regex_cache() -> &'static RegexCache {
+    REGEX_CACHE.get_or_init(|| {
+        RegexCache {
+            // 通用格式化
+            han_to_ascii: Regex::new(r"([\p{Han}])([0-9a-zA-Z_/\\-])").unwrap(),
+            ascii_to_han: Regex::new(r"([0-9a-zA-Z_)\\/\\-])([\p{Han}])").unwrap(),
+            punct_pattern: Regex::new(
+                r#"[ \t]*([，。？！：、；…．～￥""（）「」《》——【】〈〉〔〕''])[ \t]*"#,
+            )
+            .unwrap(),
+            digit_hyphen: Regex::new(r"(\d) *- *(\d)").unwrap(),
+            date_format: Regex::new(r"([12][90]\d\d) *- *([01]\d)").unwrap(),
+
+            // Markdown 格式化
+            ref_pattern: Regex::new(r"[ \t~]{0,5}\\ref\{([^}]{5,50})\}[ \t]*").unwrap(),
+            verb_pattern: Regex::new(r"[ \t~]*\\verb[!|]([ 0-9a-zA-Z_/\\\-<>,.]+)[!|][ \t]*")
+                .unwrap(),
+            citation_label_long: Regex::new(r" *(\[@\w{2,4}:[\w\\-]+\]) *").unwrap(),
+            citation_label_short: Regex::new(r" *(\[@[\w\\-]+\]) *").unwrap(),
+            header_bracket: Regex::new(r"^ *\[").unwrap(),
+            period_end: Regex::new(r"。$").unwrap(),
+
+            // 语义格式化
+            indent_pattern: Regex::new(r"^(\s*)([0-9]+\.|[\*\#\@]+|/\*+|--+)?(\s*)").unwrap(),
+            sentence_break: Regex::new(r"([。；])([^\n\\\*）])").unwrap(),
+            indent_simple: Regex::new(r"^(\s*)(.*)").unwrap(),
+
+            // 符号格式化
+            has_chinese: Regex::new(r"[\p{Han}]").unwrap(),
+            is_image: Regex::new(r"^\s*!\[").unwrap(),
+            is_numbered_list: Regex::new(r"^\s*\d{1,}\.").unwrap(),
+            is_code_block: Regex::new(r"^\s*```").unwrap(),
+            is_comment: Regex::new(r"^\s*(/\*|\*|--|\@)").unwrap(),
+            is_header: Regex::new(r"^\s*\#").unwrap(),
+            chinese_comma: Regex::new(r"([\p{Han} \w\d\\\]]{3,}), ?").unwrap(),
+            chinese_period: Regex::new(r"([\p{Han} \w\d\\\]]{3,})\. ?").unwrap(),
+            fix_period_c: Regex::new(r"(\w{2,})。c").unwrap(),
+            fix_hash_colon: Regex::new(r"([\#\@]\w{3})：").unwrap(),
+            fix_digit_period: Regex::new(r"([0-9])。([0-9])").unwrap(),
+        }
+    })
 }
 
 impl FormatService {
@@ -25,7 +107,7 @@ impl FormatService {
 
     /// 格式化文件
     pub fn format_file(&self, file_path: &Path) -> Result<()> {
-        if !file_path.exists() {
+        if !fs::exists(file_path) {
             return Err(OmniDocError::Project(format!(
                 "File not found: {}",
                 file_path.display()
@@ -37,10 +119,8 @@ impl FormatService {
         let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
 
         // 格式化每一行
-        let formatted_lines: Vec<String> = lines
-            .iter()
-            .map(|line| self.format_line(line))
-            .collect();
+        let formatted_lines: Vec<String> =
+            lines.iter().map(|line| self.format_line(line)).collect();
 
         // 备份文件（如果需要）
         if self.backup {
@@ -49,10 +129,8 @@ impl FormatService {
         }
 
         // 写入格式化后的内容
-        let mut output = fs::File::create(file_path)?;
-        for line in formatted_lines {
-            writeln!(output, "{}", line)?;
-        }
+        let formatted_content = formatted_lines.join("\n");
+        fs::write(file_path, formatted_content.as_bytes())?;
 
         Ok(())
     }
@@ -65,7 +143,7 @@ impl FormatService {
             let entry = entry?;
             let path = entry.path();
 
-            if path.is_file() {
+            if fs::is_file(path) {
                 if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
                     if extensions.contains(&ext) {
                         if let Err(e) = self.format_file(path) {
@@ -107,32 +185,26 @@ impl FormatService {
     /// 通用格式化
     fn common_format(&self, line: &str) -> String {
         let mut result = line.to_string();
+        let cache = get_regex_cache();
 
         // 替换 tab 为空格
         result = result.replace('\t', "  ");
 
         // 中英文字符之间添加空格
-        // 使用正则表达式匹配中文字符和英文字符/数字
-        let re = Regex::new(r"([\p{Han}])([0-9a-zA-Z_/\\-])").unwrap();
-        result = re.replace_all(&result, "$1 $2").to_string();
-
-        let re = Regex::new(r"([0-9a-zA-Z_)\\/\\-])([\p{Han}])").unwrap();
-        result = re.replace_all(&result, "$1 $2").to_string();
+        result = cache.han_to_ascii.replace_all(&result, "$1 $2").to_string();
+        result = cache.ascii_to_han.replace_all(&result, "$1 $2").to_string();
 
         // 移除中文标点符号前后的空格
-        // 使用 Unicode 字符类匹配中文标点
-        // 注意：正则表达式中的引号需要转义
-        let punct_pattern = r#"[ \t]*([，。？！：、；…．～￥""（）「」《》——【】〈〉〔〕''])[ \t]*"#;
-        let re = Regex::new(punct_pattern).unwrap();
-        result = re.replace_all(&result, "$1").to_string();
+        result = cache.punct_pattern.replace_all(&result, "$1").to_string();
 
         // 数字之间的连字符
-        let re = Regex::new(r"(\d) *- *(\d)").unwrap();
-        result = re.replace_all(&result, "$1 - $2").to_string();
+        result = cache
+            .digit_hyphen
+            .replace_all(&result, "$1 - $2")
+            .to_string();
 
         // 日期格式（YYYY-MM-DD）
-        let re = Regex::new(r"([12][90]\d\d) *- *([01]\d)").unwrap();
-        result = re.replace_all(&result, "$1-$2").to_string();
+        result = cache.date_format.replace_all(&result, "$1-$2").to_string();
 
         result
     }
@@ -140,30 +212,33 @@ impl FormatService {
     /// Markdown 格式化
     fn md_format(&self, line: &str) -> String {
         let mut result = line.to_string();
+        let cache = get_regex_cache();
 
         // \ref 前后添加空格
-        let re = Regex::new(r"[ \t~]{0,5}\\ref\{([^}]{5,50})\}[ \t]*").unwrap();
-        result = re.replace_all(&result, "~\\ref{$1} ").to_string();
+        result = cache
+            .ref_pattern
+            .replace_all(&result, "~\\ref{$1} ")
+            .to_string();
 
         // \verb 处理
-        let re = Regex::new(r"[ \t~]*\\verb[!|]([ 0-9a-zA-Z_/\\\-<>,.]+)[!|][ \t]*").unwrap();
-        result = re.replace_all(&result, " $1 ").to_string();
+        result = cache.verb_pattern.replace_all(&result, " $1 ").to_string();
 
         // 引用标签处理
-        let re = Regex::new(r" *(\[@\w{2,4}:[\w\\-]+\]) *").unwrap();
-        result = re.replace_all(&result, " $1 ").to_string();
-
-        let re = Regex::new(r" *(\[@[\w\\-]+\]) *").unwrap();
-        result = re.replace_all(&result, " $1 ").to_string();
+        result = cache
+            .citation_label_long
+            .replace_all(&result, " $1 ")
+            .to_string();
+        result = cache
+            .citation_label_short
+            .replace_all(&result, " $1 ")
+            .to_string();
 
         // 移除行首空格（在 [ 之前）
-        let re = Regex::new(r"^ *\[").unwrap();
-        result = re.replace_all(&result, "[").to_string();
+        result = cache.header_bracket.replace_all(&result, "[").to_string();
 
         // ltbr div 结尾处理
         if result.contains('&') {
-            let re = Regex::new(r"。$").unwrap();
-            result = re.replace_all(&result, "。  ").to_string();
+            result = cache.period_end.replace_all(&result, "。  ").to_string();
         }
 
         result
@@ -172,17 +247,15 @@ impl FormatService {
     /// 语义格式化（单句换行）
     fn semantic_format(&self, line: &str) -> String {
         let mut result = line.to_string();
+        let cache = get_regex_cache();
 
         // 查找行首缩进和标记
-        let indent_re = Regex::new(r"^(\s*)([0-9]+\.|[\*\#\@]+|/\*+|--+)?(\s*)").unwrap();
-
-        if let Some(caps) = indent_re.captures(&result) {
+        if let Some(caps) = cache.indent_pattern.captures(&result) {
             let indent = caps.get(1).map(|m| m.as_str()).unwrap_or("");
             let marker = caps.get(2).map(|m| m.as_str()).unwrap_or("");
             let after_marker = caps.get(3).map(|m| m.as_str()).unwrap_or("");
 
             // 在句号和分号后换行（如果后面有非换行、非反斜杠、非星号、非右括号的字符）
-            let re = Regex::new(r"([。；])([^\n\\\*）])").unwrap();
             let replacement = if marker.chars().any(|c| c.is_ascii_digit()) {
                 // 对于编号列表，使用空格对齐而不是重复编号
                 let marker_len = marker.len();
@@ -191,14 +264,18 @@ impl FormatService {
             } else {
                 format!("$1\n{}{}$2", indent, marker)
             };
-            result = re.replace_all(&result, &replacement).to_string();
+            result = cache
+                .sentence_break
+                .replace_all(&result, &replacement)
+                .to_string();
         } else {
             // 没有标记，使用缩进
-            let indent_re = Regex::new(r"^(\s*)(.*)").unwrap();
-            if let Some(caps) = indent_re.captures(&result) {
+            if let Some(caps) = cache.indent_simple.captures(&result) {
                 let indent = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                let re = Regex::new(r"([。；])([^\n\\\*）])").unwrap();
-                result = re.replace_all(&result, &format!("$1\n{}$2", indent)).to_string();
+                result = cache
+                    .sentence_break
+                    .replace_all(&result, &format!("$1\n{}$2", indent))
+                    .to_string();
             }
         }
 
@@ -208,22 +285,29 @@ impl FormatService {
     /// 符号格式化（中文标点符号）
     fn symbol_format(&self, line: &str) -> String {
         let mut result = line.to_string();
+        let cache = get_regex_cache();
 
         // 检查是否包含中文，且不是图片、数字列表、代码块等
-        let has_chinese = Regex::new(r"[\p{Han}]").unwrap().is_match(&result);
-        let is_image = Regex::new(r"^\s*!\[").unwrap().is_match(&result);
-        let is_numbered_list = Regex::new(r"^\s*\d{1,}\.").unwrap().is_match(&result);
-        let is_code_block = Regex::new(r"^\s*```").unwrap().is_match(&result);
-        let is_comment = Regex::new(r"^\s*(/\*|\*|--|\@)").unwrap().is_match(&result);
-        let is_header = Regex::new(r"^\s*\#").unwrap().is_match(&result);
+        let has_chinese = cache.has_chinese.is_match(&result);
+        let is_image = cache.is_image.is_match(&result);
+        let is_numbered_list = cache.is_numbered_list.is_match(&result);
+        let is_code_block = cache.is_code_block.is_match(&result);
+        let is_comment = cache.is_comment.is_match(&result);
+        let is_header = cache.is_header.is_match(&result);
 
-        if has_chinese && !is_image && !is_numbered_list && !is_code_block && !is_comment && !is_header {
+        if has_chinese
+            && !is_image
+            && !is_numbered_list
+            && !is_code_block
+            && !is_comment
+            && !is_header
+        {
             // 替换英文标点为中文标点
-            let re = Regex::new(r"([\p{Han} \w\d\\\]]{3,}), ?").unwrap();
-            result = re.replace_all(&result, "$1，").to_string();
-
-            let re = Regex::new(r"([\p{Han} \w\d\\\]]{3,})\. ?").unwrap();
-            result = re.replace_all(&result, "$1。").to_string();
+            result = cache.chinese_comma.replace_all(&result, "$1，").to_string();
+            result = cache
+                .chinese_period
+                .replace_all(&result, "$1。")
+                .to_string();
 
             result = result.replace("? ", "？");
             result = result.replace("! ", "！");
@@ -231,17 +315,14 @@ impl FormatService {
             result = result.replace("; ", "；");
 
             // 修复误替换
-            let re = Regex::new(r"(\w{2,})。c").unwrap();
-            result = re.replace_all(&result, "$1.c").to_string();
-
-            let re = Regex::new(r"([\#\@]\w{3})：").unwrap();
-            result = re.replace_all(&result, "$1:").to_string();
-
-            let re = Regex::new(r"([0-9])。([0-9])").unwrap();
-            result = re.replace_all(&result, "$1.$2").to_string();
+            result = cache.fix_period_c.replace_all(&result, "$1.c").to_string();
+            result = cache.fix_hash_colon.replace_all(&result, "$1:").to_string();
+            result = cache
+                .fix_digit_period
+                .replace_all(&result, "$1.$2")
+                .to_string();
         }
 
         result
     }
 }
-

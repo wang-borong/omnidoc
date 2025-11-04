@@ -1,5 +1,6 @@
+use crate::cli::handlers::common::{create_config_manager_default, merged_config_to_envs};
 use crate::cli::utils::get_doctype_from_readline;
-use crate::config::{ConfigParser, ProjectConfig};
+use crate::config::ProjectConfig;
 use crate::constants::paths_internal;
 use crate::doc::Doc;
 use crate::doctype::DocumentTypeRegistry;
@@ -16,14 +17,12 @@ pub fn handle_init(
     let path = path.unwrap_or_else(|| paths_internal::CURRENT_DIR.to_string());
 
     // Load config and get envs
-    let config_parser = ConfigParser::default()
-        .map_err(|e| OmniDocError::Config(format!("Failed to load config: {}", e)))?;
-    let envs = config_parser.get_envs().map_err(|e| {
-        OmniDocError::Config(format!("Failed to retrieve environment variables: {}", e))
-    })?;
+    let config_manager = create_config_manager_default(None)?;
+    let merged_config = config_manager.get_merged();
+    let envs = merged_config_to_envs(merged_config);
 
     let author = author
-        .or_else(|| config_parser.get_author_name().ok())
+        .or_else(|| merged_config.author.clone())
         .unwrap_or_else(|| "Someone".to_string());
 
     // Get document type from user
@@ -44,7 +43,7 @@ pub fn handle_init(
     if !ProjectConfig::exists(project_path) {
         let doctype = DocumentTypeRegistry::from_str(&doctype_str)
             .map_err(|e| OmniDocError::Project(format!("Invalid document type: {}", e)))?;
-        
+
         let entry = Some(doctype.file_name());
         let from = if doctype.file_extension() == "md" {
             Some("markdown")
@@ -56,12 +55,13 @@ pub fn handle_init(
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("document");
-        
-        ProjectConfig::create_default(project_path, entry, from, to, Some(target_name))
-            .map_err(|e| {
+
+        ProjectConfig::create_default(project_path, entry, from, to, Some(target_name)).map_err(
+            |e| {
                 eprintln!("Warning: Failed to create project config: {}", e);
                 e
-            })?;
+            },
+        )?;
 
         println!("✓ Created project configuration file: .omnidoc.toml");
     }

@@ -134,6 +134,9 @@ pub enum Commands {
 
     /// convert markdown files to PDF
     Md2pdf {
+        /// language (cn or en)
+        #[arg(short, long)]
+        lang: Option<String>,
         /// output file path
         #[arg(short, long)]
         output: Option<String>,

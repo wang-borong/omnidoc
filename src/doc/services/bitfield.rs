@@ -13,7 +13,7 @@ pub struct BitfieldEntry {
     pub rotate: Option<f64>,
     #[serde(default)]
     pub overline: Option<bool>,
-    
+
     // 计算字段（渲染时填充）
     #[serde(skip)]
     pub lsb: u32,
@@ -133,7 +133,8 @@ impl BitfieldRenderer {
         }
 
         // 计算最大属性数量
-        let max_attr_count = desc.iter()
+        let max_attr_count = desc
+            .iter()
             .filter_map(|e| {
                 e.attr.as_ref().and_then(|a| {
                     if let Some(arr) = a.as_array() {
@@ -175,11 +176,7 @@ impl BitfieldRenderer {
 
         // 添加每个 lane
         for i in 0..self.lanes {
-            let lane_index = if self.hflip {
-                i
-            } else {
-                self.lanes - i - 1
-            };
+            let lane_index = if self.hflip { i } else { self.lanes - i - 1 };
             self.render_lane(&mut svg, desc, i, lane_index, mod_bits, vlane)?;
         }
 
@@ -240,7 +237,11 @@ impl BitfieldRenderer {
         svg.set_text_anchor("middle");
 
         // bits 组：translate(step/2, fontsize)
-        svg.start_group(format!("translate({}, {})", step / 2.0, self.fontsize as f64));
+        svg.start_group(format!(
+            "translate({}, {})",
+            step / 2.0,
+            self.fontsize as f64
+        ));
 
         // 只在非 compact 或第一个 lane 时显示位号
         if !self.compact || index == 0 {
@@ -249,7 +250,7 @@ impl BitfieldRenderer {
                 let mut msbm = mod_bits - 1;
                 let mut lsb = lane_index * mod_bits;
                 let mut msb = (lane_index + 1) * mod_bits - 1;
-                
+
                 // 检查entry是否在当前lane中
                 if e.lsb / mod_bits == lane_index {
                     lsbm = e.lsbm;
@@ -266,7 +267,7 @@ impl BitfieldRenderer {
                         continue;
                     }
                 }
-                
+
                 let msb_pos = if self.vflip {
                     msbm as f64
                 } else {
@@ -277,7 +278,7 @@ impl BitfieldRenderer {
                 } else {
                     (mod_bits - lsbm - 1) as f64
                 };
-                
+
                 if !self.compact {
                     svg.add_text(step * lsb_pos, 0.0, &lsb.to_string(), self);
                     if lsbm != msbm {
@@ -289,11 +290,7 @@ impl BitfieldRenderer {
             // Compact 模式下的位号显示
             if self.compact && index == 0 {
                 for i in 0..mod_bits {
-                    let bit_num = if self.vflip {
-                        i
-                    } else {
-                        mod_bits - i - 1
-                    };
+                    let bit_num = if self.vflip { i } else { mod_bits - i - 1 };
                     svg.add_text(step * i as f64, 0.0, &bit_num.to_string(), self);
                 }
             }
@@ -312,7 +309,7 @@ impl BitfieldRenderer {
                 let mut msbm = mod_bits - 1;
                 let lsb = lane_index * mod_bits;
                 let msb = (lane_index + 1) * mod_bits - 1;
-                
+
                 if e.lsb / mod_bits == lane_index {
                     lsbm = e.lsbm;
                     if e.msb / mod_bits == lane_index {
@@ -325,7 +322,7 @@ impl BitfieldRenderer {
                         continue;
                     }
                 }
-                
+
                 let msb_pos = if self.vflip {
                     msbm as f64
                 } else {
@@ -349,13 +346,17 @@ impl BitfieldRenderer {
             svg.end_group(); // blanks组结束
 
             // names 组：translate(step/2, vlane/2 + fontsize/2)
-            svg.start_group(format!("translate({}, {})", step / 2.0, vlane / 2.0 + self.fontsize as f64 / 2.0));
+            svg.start_group(format!(
+                "translate({}, {})",
+                step / 2.0,
+                vlane / 2.0 + self.fontsize as f64 / 2.0
+            ));
             for e in desc {
                 let mut lsbm = 0;
                 let mut msbm = mod_bits - 1;
                 let lsb = lane_index * mod_bits;
                 let msb = (lane_index + 1) * mod_bits - 1;
-                
+
                 if e.lsb / mod_bits == lane_index {
                     lsbm = e.lsbm;
                     if e.msb / mod_bits == lane_index {
@@ -368,7 +369,7 @@ impl BitfieldRenderer {
                         continue;
                     }
                 }
-                
+
                 let msb_pos = if self.vflip {
                     msbm as f64
                 } else {
@@ -409,13 +410,17 @@ impl BitfieldRenderer {
 
             // attrs 组：translate(step/2, vlane + fontsize)
             if !self.compact {
-                svg.start_group(format!("translate({}, {})", step / 2.0, vlane + self.fontsize as f64));
+                svg.start_group(format!(
+                    "translate({}, {})",
+                    step / 2.0,
+                    vlane + self.fontsize as f64
+                ));
                 for e in desc {
                     let mut lsbm = 0;
                     let mut msbm = mod_bits - 1;
                     let lsb = lane_index * mod_bits;
                     let msb = (lane_index + 1) * mod_bits - 1;
-                    
+
                     if e.lsb / mod_bits == lane_index {
                         lsbm = e.lsbm;
                         if e.msb / mod_bits == lane_index {
@@ -428,7 +433,7 @@ impl BitfieldRenderer {
                             continue;
                         }
                     }
-                    
+
                     let msb_pos = if self.vflip {
                         msbm as f64
                     } else {
@@ -442,17 +447,16 @@ impl BitfieldRenderer {
 
                     if let Some(ref attr) = e.attr {
                         let attr_list: Vec<serde_json::Value> = if attr.is_array() {
-                            attr.as_array()
-                                .unwrap()
-                                .iter()
-                                .cloned()
-                                .collect()
+                            attr.as_array().unwrap().iter().cloned().collect()
                         } else {
                             vec![attr.clone()]
                         };
 
                         for (i, attr_value) in attr_list.iter().enumerate() {
-                            svg.start_group(format!("translate(0, {})", i as f64 * self.fontsize as f64));
+                            svg.start_group(format!(
+                                "translate(0, {})",
+                                i as f64 * self.fontsize as f64
+                            ));
 
                             if let Some(num) = attr_value.as_u64() {
                                 // 整数：显示为二进制
@@ -479,7 +483,7 @@ impl BitfieldRenderer {
                                 let x = step * (msb_pos + lsb_pos) / 2.0;
                                 svg.add_text(x, 0.0, &attr_str, self);
                             }
-                            
+
                             svg.end_group();
                         }
                     }
@@ -499,7 +503,7 @@ impl BitfieldRenderer {
                 let mut msbm = mod_bits - 1;
                 let lsb = lane_index * mod_bits;
                 let msb = (lane_index + 1) * mod_bits - 1;
-                
+
                 if e.lsb / mod_bits == lane_index {
                     lsbm = e.lsbm;
                     if e.msb / mod_bits == lane_index {
@@ -512,7 +516,7 @@ impl BitfieldRenderer {
                         continue;
                     }
                 }
-                
+
                 let msb_pos = if self.vflip {
                     msbm as f64
                 } else {
@@ -535,13 +539,17 @@ impl BitfieldRenderer {
             svg.end_group();
 
             // names
-            svg.start_group(format!("translate({}, {})", step / 2.0, vlane / 2.0 + self.fontsize as f64 / 2.0));
+            svg.start_group(format!(
+                "translate({}, {})",
+                step / 2.0,
+                vlane / 2.0 + self.fontsize as f64 / 2.0
+            ));
             for e in desc {
                 let mut lsbm = 0;
                 let mut msbm = mod_bits - 1;
                 let lsb = lane_index * mod_bits;
                 let msb = (lane_index + 1) * mod_bits - 1;
-                
+
                 if e.lsb / mod_bits == lane_index {
                     lsbm = e.lsbm;
                     if e.msb / mod_bits == lane_index {
@@ -554,7 +562,7 @@ impl BitfieldRenderer {
                         continue;
                     }
                 }
-                
+
                 let msb_pos = if self.vflip {
                     msbm as f64
                 } else {
@@ -660,16 +668,8 @@ impl BitfieldRenderer {
                 continue;
             }
 
-            let rpos = if self.vflip {
-                bit_pos + 1
-            } else {
-                bit_pos
-            };
-            let lpos = if self.vflip {
-                bit_pos
-            } else {
-                bit_pos + 1
-            };
+            let rpos = if self.vflip { bit_pos + 1 } else { bit_pos };
+            let lpos = if self.vflip { bit_pos } else { bit_pos + 1 };
 
             if bitm + 1 == mod_bits - skip_count {
                 let x = rpos as f64 * hbit + self.stroke_width / 2.0;
@@ -737,7 +737,8 @@ impl SvgBuilder {
             stroke_linecap: None,
         };
 
-        svg.content.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        svg.content
+            .push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         svg.content.push_str(&format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\">\n",
             width, height, width, height
@@ -762,7 +763,8 @@ impl SvgBuilder {
 
     fn end_group(&mut self) {
         self.indent -= 1;
-        self.content.push_str(&format!("{}</g>\n", self.indent_str()));
+        self.content
+            .push_str(&format!("{}</g>\n", self.indent_str()));
     }
 
     fn set_text_anchor(&mut self, anchor: &str) {
@@ -796,7 +798,13 @@ impl SvgBuilder {
         self.add_text_with_attrs(x, y, text, &attrs);
     }
 
-    fn add_text_with_attrs(&mut self, _x: f64, _y: f64, text: &str, attrs: &HashMap<String, String>) {
+    fn add_text_with_attrs(
+        &mut self,
+        _x: f64,
+        _y: f64,
+        text: &str,
+        attrs: &HashMap<String, String>,
+    ) {
         let attr_str = attrs
             .iter()
             .map(|(k, v)| format!("{}=\"{}\"", k, v))
@@ -861,19 +869,14 @@ impl SvgBuilder {
         let name_padding = 64.0;
         let square_padding = 20.0;
         let legend_count = legend.len() as f64;
-        let mut x = renderer.hspace as f64 / 2.0
-            - legend_count / 2.0 * (square_padding + name_padding);
+        let mut x =
+            renderer.hspace as f64 / 2.0 - legend_count / 2.0 * (square_padding + name_padding);
 
         for (key, value) in legend {
             let color = type_color(Some(value));
             self.add_rect(x, 0.0, 12.0, 12.0, color.clone());
             x += square_padding;
-            self.add_text(
-                x,
-                renderer.fontsize as f64 / 1.2,
-                key,
-                renderer,
-            );
+            self.add_text(x, renderer.fontsize as f64 / 1.2, key, renderer);
             x += name_padding;
         }
 
@@ -945,7 +948,7 @@ fn format_tspan(text: &str) -> String {
     // 简单的文本格式化实现
     // 支持 <b>, <i>, <u>, <s>, <sub>, <sup>, <tt>, <o> 等标签
     let mut result = text.to_string();
-    
+
     // 替换标签为 SVG tspan
     result = result.replace("<b>", "<tspan font-weight=\"bold\">");
     result = result.replace("</b>", "</tspan>");
@@ -957,13 +960,19 @@ fn format_tspan(text: &str) -> String {
     result = result.replace("</s>", "</tspan>");
     result = result.replace("<o>", "<tspan text-decoration=\"overline\">");
     result = result.replace("</o>", "</tspan>");
-    result = result.replace("<sub>", "<tspan baseline-shift=\"sub\" font-size=\"0.7em\">");
+    result = result.replace(
+        "<sub>",
+        "<tspan baseline-shift=\"sub\" font-size=\"0.7em\">",
+    );
     result = result.replace("</sub>", "</tspan>");
-    result = result.replace("<sup>", "<tspan baseline-shift=\"super\" font-size=\"0.7em\">");
+    result = result.replace(
+        "<sup>",
+        "<tspan baseline-shift=\"super\" font-size=\"0.7em\">",
+    );
     result = result.replace("</sup>", "</tspan>");
     result = result.replace("<tt>", "<tspan font-family=\"monospace\">");
     result = result.replace("</tt>", "</tspan>");
-    
+
     result
 }
 
@@ -974,19 +983,22 @@ fn beautify_svg(svg: &str) -> String {
     let mut result = String::new();
     let mut indent: usize = 0;
     let lines: Vec<&str> = svg.lines().collect();
-    
+
     for line in lines {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        
+
         if trimmed.starts_with("</") {
             indent = indent.saturating_sub(1);
             result.push_str(&"  ".repeat(indent));
             result.push_str(trimmed);
             result.push('\n');
-        } else if trimmed.ends_with("/>") || trimmed.starts_with("<?") || trimmed.starts_with("<!--") {
+        } else if trimmed.ends_with("/>")
+            || trimmed.starts_with("<?")
+            || trimmed.starts_with("<!--")
+        {
             result.push_str(&"  ".repeat(indent));
             result.push_str(trimmed);
             result.push('\n');
@@ -1003,7 +1015,7 @@ fn beautify_svg(svg: &str) -> String {
             result.push('\n');
         }
     }
-    
+
     result
 }
 
@@ -1012,17 +1024,16 @@ pub fn render_bitfield_from_json(
     json_path: &std::path::Path,
     options: &crate::cli::handlers::BitfieldOptions,
 ) -> Result<String, String> {
-    let json_content = std::fs::read_to_string(json_path)
-        .map_err(|e| format!("Failed to read JSON file: {}", e))?;
+    use crate::utils::fs;
+    let json_content =
+        fs::read_to_string(json_path).map_err(|e| format!("Failed to read JSON file: {}", e))?;
 
     // 尝试解析 JSON5 或普通 JSON
     let entries: Vec<BitfieldEntry> = if options.json5 {
         // 如果要求使用 json5，但 Rust 没有原生支持，先尝试普通 JSON
-        serde_json::from_str(&json_content)
-            .map_err(|e| format!("Failed to parse JSON: {}", e))?
+        serde_json::from_str(&json_content).map_err(|e| format!("Failed to parse JSON: {}", e))?
     } else if options.no_json5 {
-        serde_json::from_str(&json_content)
-            .map_err(|e| format!("Failed to parse JSON: {}", e))?
+        serde_json::from_str(&json_content).map_err(|e| format!("Failed to parse JSON: {}", e))?
     } else {
         // 默认尝试普通 JSON，如果失败可以考虑提示用户
         serde_json::from_str(&json_content)
@@ -1032,12 +1043,11 @@ pub fn render_bitfield_from_json(
     let mut renderer = BitfieldRenderer::new(options)?;
     let mut entries = entries;
     let mut svg = renderer.render(&mut entries)?;
-    
+
     // 如果启用了 beautify，格式化 SVG
     if options.beautify {
         svg = beautify_svg(&svg);
     }
-    
+
     Ok(svg)
 }
-

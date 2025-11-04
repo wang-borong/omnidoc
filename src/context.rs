@@ -1,12 +1,23 @@
-use crate::config::ConfigParser;
+use crate::config::{CliOverrides, ConfigManager, MergedConfig};
 use crate::error::{OmniDocError, Result};
+use crate::utils::{error, path};
 use std::collections::HashMap;
-use std::env;
 use std::path::PathBuf;
+
+/// Convert MergedConfig to Doc's envs HashMap format
+fn merged_config_to_envs(merged_config: &MergedConfig) -> HashMap<&'static str, Option<String>> {
+    let mut envs = HashMap::new();
+    envs.insert("outdir", merged_config.outdir.clone());
+    envs.insert("texmfhome", merged_config.texmfhome.clone());
+    envs.insert("texinputs", merged_config.texinputs.clone());
+    envs.insert("bibinputs", merged_config.bibinputs.clone());
+    envs
+}
 
 /// Unified context for command execution, managing configuration and environment
 pub struct CommandContext {
-    pub config: ConfigParser,
+    pub config_manager: ConfigManager,
+    pub merged_config: MergedConfig,
     pub envs: HashMap<&'static str, Option<String>>,
     pub original_dir: PathBuf,
     pub project_dir: Option<PathBuf>,
@@ -15,17 +26,19 @@ pub struct CommandContext {
 impl CommandContext {
     /// Create a new CommandContext with default configuration
     pub fn new() -> Result<Self> {
-        let config = ConfigParser::default()
-            .map_err(|e| OmniDocError::Config(format!("Failed to load config: {}", e)))?;
+        let config_manager = error::config_err(
+            ConfigManager::new(None, CliOverrides::new()),
+            "Failed to load config",
+        )?;
 
-        let envs = config.get_envs().map_err(|e| {
-            OmniDocError::Config(format!("Failed to retrieve environment variables: {}", e))
-        })?;
+        let merged_config = config_manager.get_merged().clone();
+        let envs = merged_config_to_envs(&merged_config);
 
-        let original_dir = env::current_dir().map_err(|e| OmniDocError::Io(e))?;
+        let original_dir = path::current_dir()?;
 
         Ok(Self {
-            config,
+            config_manager,
+            merged_config,
             envs,
             original_dir,
             project_dir: None,
@@ -35,13 +48,18 @@ impl CommandContext {
     /// Set the project path for this context
     pub fn with_project_path(mut self, path: Option<String>) -> Result<Self> {
         if let Some(path_str) = path {
-            let project_path = PathBuf::from(&path_str);
-            if !project_path.exists() {
-                return Err(OmniDocError::Project(format!(
-                    "Path does not exist: {}",
-                    path_str
-                )));
-            }
+            let project_path = path::from_str(&path_str);
+            path::validate_project_path(&project_path)?;
+
+            // Reload config with project path
+            let project_path_ref = Some(project_path.as_path());
+            self.config_manager = error::config_err(
+                ConfigManager::new(project_path_ref, CliOverrides::new()),
+                "Failed to load config",
+            )?;
+            self.merged_config = self.config_manager.get_merged().clone();
+            self.envs = merged_config_to_envs(&self.merged_config);
+
             self.project_dir = Some(project_path);
         }
         Ok(self)
@@ -50,23 +68,24 @@ impl CommandContext {
     /// Enter the project directory
     pub fn enter_project(&mut self) -> Result<()> {
         if let Some(ref project_dir) = self.project_dir {
-            env::set_current_dir(project_dir).map_err(|e| OmniDocError::Io(e))?;
+            path::set_current_dir(project_dir)?;
         }
         Ok(())
     }
 
     /// Restore the original directory
     pub fn restore(&mut self) -> Result<()> {
-        env::set_current_dir(&self.original_dir).map_err(|e| OmniDocError::Io(e))?;
+        path::set_current_dir(&self.original_dir)?;
         Ok(())
     }
 
     /// Get the author name from config, with fallback
     pub fn get_author(&self, override_author: Option<String>) -> String {
         override_author.unwrap_or_else(|| {
-            self.config
-                .get_author_name()
-                .unwrap_or_else(|_| "Someone".to_string())
+            self.merged_config
+                .author
+                .clone()
+                .unwrap_or_else(|| "Someone".to_string())
         })
     }
 }
@@ -80,14 +99,12 @@ pub struct ProjectPathManager {
 impl ProjectPathManager {
     /// Create a new ProjectPathManager
     pub fn new(path: Option<String>) -> Result<Self> {
-        let original_dir = env::current_dir().map_err(|e| OmniDocError::Io(e))?;
+        let original_dir = path::current_dir()?;
 
         let project_dir = match path {
             Some(ref p) => {
-                let pb = PathBuf::from(p);
-                if !pb.exists() {
-                    return Err(OmniDocError::Project(format!("Path does not exist: {}", p)));
-                }
+                let pb = path::from_str(p);
+                path::validate_project_path(&pb)?;
                 pb
             }
             None => original_dir.clone(),
@@ -101,13 +118,13 @@ impl ProjectPathManager {
 
     /// Enter the project directory
     pub fn enter_project(&mut self) -> Result<()> {
-        env::set_current_dir(&self.project_dir).map_err(|e| OmniDocError::Io(e))?;
+        path::set_current_dir(&self.project_dir)?;
         Ok(())
     }
 
     /// Restore the original directory
     pub fn restore(&mut self) -> Result<()> {
-        env::set_current_dir(&self.original_dir).map_err(|e| OmniDocError::Io(e))?;
+        path::set_current_dir(&self.original_dir)?;
         Ok(())
     }
 

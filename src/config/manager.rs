@@ -21,6 +21,7 @@ pub struct ConfigManager {
 pub struct MergedConfig {
     pub author: Option<String>,
     pub lib_path: Option<String>,
+    pub lib_url: Option<String>,
     pub outdir: Option<String>,
     pub texmfhome: Option<String>,
     pub bibinputs: Option<String>,
@@ -57,7 +58,7 @@ impl ConfigManager {
     pub fn new(project_path: Option<&Path>, cli_overrides: CliOverrides) -> Result<Self> {
         let global = GlobalConfig::load()?;
         let project = ProjectConfig::load_from_path(project_path)?;
-        
+
         let merged = Self::merge_configs(&global, project.as_ref(), &cli_overrides)?;
 
         Ok(Self {
@@ -78,7 +79,9 @@ impl ConfigManager {
         let project_config = project.and_then(|p| p.get_config());
 
         // 合并作者
-        let author = cli.author.clone()
+        let author = cli
+            .author
+            .clone()
             .or_else(|| {
                 project_config
                     .and_then(|c| c.author.author.as_ref())
@@ -95,8 +98,20 @@ impl ConfigManager {
             .and_then(|c| c.lib.lib.as_ref())
             .and_then(|l| l.path.clone());
 
+        // 合并库 URL（项目配置可以覆盖全局配置）
+        let lib_url = project_config
+            .and_then(|c| c.lib.lib.as_ref())
+            .and_then(|l| l.url.clone())
+            .or_else(|| {
+                global_config
+                    .and_then(|c| c.lib.lib.as_ref())
+                    .and_then(|l| l.url.clone())
+            });
+
         // 合并环境变量
-        let outdir = cli.outdir.clone()
+        let outdir = cli
+            .outdir
+            .clone()
             .or_else(|| {
                 project_config
                     .and_then(|c| c.build.as_ref())
@@ -122,37 +137,33 @@ impl ConfigManager {
             .and_then(|e| e.texinputs.clone());
 
         // 合并项目配置
-        let entry = cli.entry.clone()
-            .or_else(|| {
-                project_config
-                    .and_then(|c| c.project.as_ref())
-                    .and_then(|p| p.project.as_ref())
-                    .and_then(|p| p.entry.clone())
-            });
+        let entry = cli.entry.clone().or_else(|| {
+            project_config
+                .and_then(|c| c.project.as_ref())
+                .and_then(|p| p.project.as_ref())
+                .and_then(|p| p.entry.clone())
+        });
 
-        let from = cli.from.clone()
-            .or_else(|| {
-                project_config
-                    .and_then(|c| c.project.as_ref())
-                    .and_then(|p| p.project.as_ref())
-                    .and_then(|p| p.from.clone())
-            });
+        let from = cli.from.clone().or_else(|| {
+            project_config
+                .and_then(|c| c.project.as_ref())
+                .and_then(|p| p.project.as_ref())
+                .and_then(|p| p.from.clone())
+        });
 
-        let to = cli.to.clone()
-            .or_else(|| {
-                project_config
-                    .and_then(|c| c.project.as_ref())
-                    .and_then(|p| p.project.as_ref())
-                    .and_then(|p| p.to.clone())
-            });
+        let to = cli.to.clone().or_else(|| {
+            project_config
+                .and_then(|c| c.project.as_ref())
+                .and_then(|p| p.project.as_ref())
+                .and_then(|p| p.to.clone())
+        });
 
-        let target = cli.target.clone()
-            .or_else(|| {
-                project_config
-                    .and_then(|c| c.project.as_ref())
-                    .and_then(|p| p.project.as_ref())
-                    .and_then(|p| p.target.clone())
-            });
+        let target = cli.target.clone().or_else(|| {
+            project_config
+                .and_then(|c| c.project.as_ref())
+                .and_then(|p| p.project.as_ref())
+                .and_then(|p| p.target.clone())
+        });
 
         // 合并构建配置
         let metadata_file = project_config
@@ -160,7 +171,8 @@ impl ConfigManager {
             .and_then(|b| b.build.as_ref())
             .and_then(|b| b.metadata_file.clone());
 
-        let verbose = cli.verbose
+        let verbose = cli
+            .verbose
             .or_else(|| {
                 project_config
                     .and_then(|c| c.build.as_ref())
@@ -206,7 +218,9 @@ impl ConfigManager {
         let pandoc_crossref_yaml = pandoc_config.and_then(|p| p.crossref_yaml.clone());
         let pandoc_python_path = pandoc_config.and_then(|p| p.python_path.clone());
         let pandoc_standalone = pandoc_config.and_then(|p| p.standalone).unwrap_or(true);
-        let pandoc_embed_resources = pandoc_config.and_then(|p| p.embed_resources).unwrap_or(true);
+        let pandoc_embed_resources = pandoc_config
+            .and_then(|p| p.embed_resources)
+            .unwrap_or(true);
         let pandoc_lang = pandoc_config.and_then(|p| p.lang.clone());
 
         // 合并工具路径
@@ -276,6 +290,7 @@ impl ConfigManager {
         Ok(MergedConfig {
             author,
             lib_path,
+            lib_url,
             outdir,
             texmfhome,
             bibinputs,
@@ -317,20 +332,68 @@ impl ConfigManager {
     pub fn setup_env(&self) -> Result<()> {
         let merged = &self.merged;
 
+        fn expand_home_placeholders(input: &str) -> String {
+            let mut s = input.to_string();
+            let home = std::env::var("HOME")
+                .ok()
+                .or_else(|| dirs::home_dir().map(|p| p.to_string_lossy().to_string()))
+                .unwrap_or_default();
+            if !home.is_empty() {
+                s = s.replace("$ENV{HOME}", &home);
+                s = s.replace("$HOME", &home);
+                if s.starts_with('~') {
+                    s = s.replacen('~', &home, 1);
+                }
+            }
+            s
+        }
+
         if let Some(outdir) = &merged.outdir {
             env::set_var("OUTDIR", outdir);
         }
 
+        // TEXMFHOME: 优先使用配置；若未配置，则使用默认 omnidoc 路径
         if let Some(texmfhome) = &merged.texmfhome {
-            env::set_var("TEXMFHOME", texmfhome);
+            let expanded = expand_home_placeholders(texmfhome);
+            env::set_var("TEXMFHOME", expanded);
+        } else {
+            // 默认值基于 lib_path 或 XDG 数据目录：~/.local/share/omnidoc/texmf
+            let default_texmf = self
+                .merged
+                .lib_path
+                .as_ref()
+                .map(|p| format!("{}/texmf", p))
+                .or_else(|| {
+                    dirs::data_local_dir().map(|d| {
+                        d.join("omnidoc")
+                            .join("texmf")
+                            .to_string_lossy()
+                            .to_string()
+                    })
+                })
+                .unwrap_or_else(|| {
+                    if let Some(h) = dirs::home_dir() {
+                        h.join(".local")
+                            .join("share")
+                            .join("omnidoc")
+                            .join("texmf")
+                            .to_string_lossy()
+                            .to_string()
+                    } else {
+                        ".local/share/omnidoc/texmf".to_string()
+                    }
+                });
+            env::set_var("TEXMFHOME", default_texmf);
         }
 
         if let Some(bibinputs) = &merged.bibinputs {
-            env::set_var("BIBINPUTS", bibinputs);
+            let expanded = expand_home_placeholders(bibinputs);
+            env::set_var("BIBINPUTS", expanded);
         }
 
         if let Some(texinputs) = &merged.texinputs {
-            env::set_var("TEXINPUTS", texinputs);
+            let expanded = expand_home_placeholders(texinputs);
+            env::set_var("TEXINPUTS", expanded);
         }
 
         Ok(())
@@ -365,4 +428,3 @@ impl ConfigManager {
         &self.merged.paths
     }
 }
-

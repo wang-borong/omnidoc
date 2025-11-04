@@ -1,5 +1,5 @@
 use crate::cli::commands::FigureSubcommand;
-use crate::config::{CliOverrides, ConfigManager};
+use crate::cli::handlers::common::create_figure_service;
 use crate::doc::services::FigureService;
 use crate::error::{OmniDocError, Result};
 use std::path::{Path, PathBuf};
@@ -57,58 +57,50 @@ pub fn handle_figure(
             format,
             force,
             output,
-        }) => {
-            handle_bitfield(
-                sources,
-                vspace,
-                hspace,
-                lanes,
-                bits,
-                fontfamily,
-                fontweight,
-                fontsize,
-                strokewidth,
-                beautify,
-                json5,
-                no_json5,
-                compact,
-                hflip,
-                vflip,
-                trim,
-                uneven,
-                legend,
-                format,
-                force,
-                output,
-            )
-        }
+        }) => handle_bitfield(
+            sources,
+            vspace,
+            hspace,
+            lanes,
+            bits,
+            fontfamily,
+            fontweight,
+            fontsize,
+            strokewidth,
+            beautify,
+            json5,
+            no_json5,
+            compact,
+            hflip,
+            vflip,
+            trim,
+            uneven,
+            legend,
+            format,
+            force,
+            output,
+        ),
         Some(FigureSubcommand::Drawio {
             sources,
             drawio,
             format,
             force,
             output,
-        }) => {
-            handle_drawio(sources, drawio, format, force, output)
-        }
+        }) => handle_drawio(sources, drawio, format, force, output),
         Some(FigureSubcommand::Dot {
             sources,
             gradot,
             format,
             force,
             output,
-        }) => {
-            handle_dot(sources, gradot, format, force, output)
-        }
+        }) => handle_dot(sources, gradot, format, force, output),
         Some(FigureSubcommand::Plantuml {
             sources,
             plantuml,
             format,
             force,
             output,
-        }) => {
-            handle_plantuml(sources, plantuml, format, force, output)
-        }
+        }) => handle_plantuml(sources, plantuml, format, force, output),
         Some(FigureSubcommand::Convert {
             sources,
             inkscape,
@@ -116,17 +108,43 @@ pub fn handle_figure(
             format,
             force,
             output,
-        }) => {
-            handle_convert(sources, inkscape, imagemagick, format, force, output)
-        }
+        }) => handle_convert(sources, inkscape, imagemagick, format, force, output),
         None => {
             // 自动检测文件类型
             if sources.is_empty() {
-                return Err(OmniDocError::Project("No source files specified".to_string()));
+                return Err(OmniDocError::Project(
+                    "No source files specified".to_string(),
+                ));
             }
             handle_auto_detect(sources, format, force, output)
         }
     }
+}
+
+/// Helper function to prepare paths and call service
+fn execute_figure_generation(
+    sources: Vec<String>,
+    output: Option<String>,
+    format: String,
+    force: bool,
+    service: &FigureService,
+    bitfield_options: Option<BitfieldOptions>,
+) -> Result<()> {
+    use std::env;
+    let source_paths: Vec<PathBuf> = sources.iter().map(|s| PathBuf::from(s)).collect();
+    // Use current working directory as project_path, not the parent of the source file
+    // This prevents path duplication when source files are relative paths
+    let project_path = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let output_dir = output.as_ref().map(|s| PathBuf::from(s));
+
+    service.generate_figures(
+        &project_path,
+        &source_paths,
+        output_dir.as_deref(),
+        Some(&format),
+        force,
+        bitfield_options.as_ref(),
+    )
 }
 
 fn handle_bitfield(
@@ -152,16 +170,7 @@ fn handle_bitfield(
     force: bool,
     output: Option<String>,
 ) -> Result<()> {
-    let config_manager = ConfigManager::new(None, CliOverrides::new())
-        .map_err(|e| OmniDocError::Config(format!("Failed to load config: {}", e)))?;
-    let merged_config = config_manager.get_merged().clone();
-    let figure_service = FigureService::new(merged_config)?;
-
-    let source_paths: Vec<PathBuf> = sources.iter().map(|s| PathBuf::from(s)).collect();
-    let project_path = source_paths.first()
-        .and_then(|p| p.parent())
-        .unwrap_or_else(|| Path::new("."));
-    let output_dir = output.as_ref().map(|s| PathBuf::from(s));
+    let figure_service = create_figure_service(vec![])?;
 
     let legend_parsed: Vec<(String, String)> = legend
         .iter()
@@ -195,13 +204,13 @@ fn handle_bitfield(
         legend: legend_parsed,
     };
 
-    figure_service.generate_figures(
-        project_path,
-        &source_paths,
-        output_dir.as_deref(),
-        Some(&format),
+    execute_figure_generation(
+        sources,
+        output,
+        format,
         force,
-        Some(&bitfield_options),
+        &figure_service,
+        Some(bitfield_options),
     )?;
 
     println!("✓ Bitfield generation completed");
@@ -215,33 +224,9 @@ fn handle_drawio(
     force: bool,
     output: Option<String>,
 ) -> Result<()> {
-    let mut cli_overrides = CliOverrides::new();
-    if let Some(ref d) = drawio {
-        cli_overrides = cli_overrides.with_tool_path("drawio".to_string(), Some(d.clone()));
-    }
+    let figure_service = create_figure_service(vec![("drawio", drawio)])?;
 
-    let config_manager = ConfigManager::new(None, cli_overrides)
-        .map_err(|e| OmniDocError::Config(format!("Failed to load config: {}", e)))?;
-    let mut merged_config = config_manager.get_merged().clone();
-    if let Some(ref d) = drawio {
-        merged_config.tool_paths.insert("drawio".to_string(), Some(d.clone()));
-    }
-
-    let figure_service = FigureService::new(merged_config)?;
-    let source_paths: Vec<PathBuf> = sources.iter().map(|s| PathBuf::from(s)).collect();
-    let project_path = source_paths.first()
-        .and_then(|p| p.parent())
-        .unwrap_or_else(|| Path::new("."));
-    let output_dir = output.as_ref().map(|s| PathBuf::from(s));
-
-    figure_service.generate_figures(
-        project_path,
-        &source_paths,
-        output_dir.as_deref(),
-        Some(&format),
-        force,
-        None,
-    )?;
+    execute_figure_generation(sources, output, format, force, &figure_service, None)?;
 
     println!("✓ Drawio generation completed");
     Ok(())
@@ -254,33 +239,9 @@ fn handle_dot(
     force: bool,
     output: Option<String>,
 ) -> Result<()> {
-    let mut cli_overrides = CliOverrides::new();
-    if let Some(ref g) = gradot {
-        cli_overrides = cli_overrides.with_tool_path("dot".to_string(), Some(g.clone()));
-    }
+    let figure_service = create_figure_service(vec![("dot", gradot)])?;
 
-    let config_manager = ConfigManager::new(None, cli_overrides)
-        .map_err(|e| OmniDocError::Config(format!("Failed to load config: {}", e)))?;
-    let mut merged_config = config_manager.get_merged().clone();
-    if let Some(ref g) = gradot {
-        merged_config.tool_paths.insert("dot".to_string(), Some(g.clone()));
-    }
-
-    let figure_service = FigureService::new(merged_config)?;
-    let source_paths: Vec<PathBuf> = sources.iter().map(|s| PathBuf::from(s)).collect();
-    let project_path = source_paths.first()
-        .and_then(|p| p.parent())
-        .unwrap_or_else(|| Path::new("."));
-    let output_dir = output.as_ref().map(|s| PathBuf::from(s));
-
-    figure_service.generate_figures(
-        project_path,
-        &source_paths,
-        output_dir.as_deref(),
-        Some(&format),
-        force,
-        None,
-    )?;
+    execute_figure_generation(sources, output, format, force, &figure_service, None)?;
 
     println!("✓ Dot generation completed");
     Ok(())
@@ -293,33 +254,9 @@ fn handle_plantuml(
     force: bool,
     output: Option<String>,
 ) -> Result<()> {
-    let mut cli_overrides = CliOverrides::new();
-    if let Some(ref p) = plantuml {
-        cli_overrides = cli_overrides.with_tool_path("plantuml".to_string(), Some(p.clone()));
-    }
+    let figure_service = create_figure_service(vec![("plantuml", plantuml)])?;
 
-    let config_manager = ConfigManager::new(None, cli_overrides)
-        .map_err(|e| OmniDocError::Config(format!("Failed to load config: {}", e)))?;
-    let mut merged_config = config_manager.get_merged().clone();
-    if let Some(ref p) = plantuml {
-        merged_config.tool_paths.insert("plantuml".to_string(), Some(p.clone()));
-    }
-
-    let figure_service = FigureService::new(merged_config)?;
-    let source_paths: Vec<PathBuf> = sources.iter().map(|s| PathBuf::from(s)).collect();
-    let project_path = source_paths.first()
-        .and_then(|p| p.parent())
-        .unwrap_or_else(|| Path::new("."));
-    let output_dir = output.as_ref().map(|s| PathBuf::from(s));
-
-    figure_service.generate_figures(
-        project_path,
-        &source_paths,
-        output_dir.as_deref(),
-        Some(&format),
-        force,
-        None,
-    )?;
+    execute_figure_generation(sources, output, format, force, &figure_service, None)?;
 
     println!("✓ PlantUML generation completed");
     Ok(())
@@ -333,39 +270,10 @@ fn handle_convert(
     force: bool,
     output: Option<String>,
 ) -> Result<()> {
-    let mut cli_overrides = CliOverrides::new();
-    if let Some(ref i) = inkscape {
-        cli_overrides = cli_overrides.with_tool_path("inkscape".to_string(), Some(i.clone()));
-    }
-    if let Some(ref m) = imagemagick {
-        cli_overrides = cli_overrides.with_tool_path("imagemagick".to_string(), Some(m.clone()));
-    }
+    let figure_service =
+        create_figure_service(vec![("inkscape", inkscape), ("imagemagick", imagemagick)])?;
 
-    let config_manager = ConfigManager::new(None, cli_overrides)
-        .map_err(|e| OmniDocError::Config(format!("Failed to load config: {}", e)))?;
-    let mut merged_config = config_manager.get_merged().clone();
-    if let Some(ref i) = inkscape {
-        merged_config.tool_paths.insert("inkscape".to_string(), Some(i.clone()));
-    }
-    if let Some(ref m) = imagemagick {
-        merged_config.tool_paths.insert("imagemagick".to_string(), Some(m.clone()));
-    }
-
-    let figure_service = FigureService::new(merged_config)?;
-    let source_paths: Vec<PathBuf> = sources.iter().map(|s| PathBuf::from(s)).collect();
-    let project_path = source_paths.first()
-        .and_then(|p| p.parent())
-        .unwrap_or_else(|| Path::new("."));
-    let output_dir = output.as_ref().map(|s| PathBuf::from(s));
-
-    figure_service.generate_figures(
-        project_path,
-        &source_paths,
-        output_dir.as_deref(),
-        Some(&format),
-        force,
-        None,
-    )?;
+    execute_figure_generation(sources, output, format, force, &figure_service, None)?;
 
     println!("✓ Image conversion completed");
     Ok(())
@@ -377,27 +285,10 @@ fn handle_auto_detect(
     force: bool,
     output: Option<String>,
 ) -> Result<()> {
-    let config_manager = ConfigManager::new(None, CliOverrides::new())
-        .map_err(|e| OmniDocError::Config(format!("Failed to load config: {}", e)))?;
-    let merged_config = config_manager.get_merged().clone();
-    let figure_service = FigureService::new(merged_config)?;
+    let figure_service = create_figure_service(vec![])?;
 
-    let source_paths: Vec<PathBuf> = sources.iter().map(|s| PathBuf::from(s)).collect();
-    let project_path = source_paths.first()
-        .and_then(|p| p.parent())
-        .unwrap_or_else(|| Path::new("."));
-    let output_dir = output.as_ref().map(|s| PathBuf::from(s));
-
-    figure_service.generate_figures(
-        project_path,
-        &source_paths,
-        output_dir.as_deref(),
-        Some(&format),
-        force,
-        None,
-    )?;
+    execute_figure_generation(sources, output, format, force, &figure_service, None)?;
 
     println!("✓ Figure generation completed");
     Ok(())
 }
-

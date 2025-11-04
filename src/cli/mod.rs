@@ -2,9 +2,9 @@ pub mod commands;
 pub mod handlers;
 pub mod utils;
 
-use crate::constants::git_refs;
+use crate::config::global::GlobalConfig;
 use crate::error::{OmniDocError, Result};
-use crate::git::{git_clone, git_pull};
+use crate::git::git_clone;
 use clap::Parser;
 use clap::{Command, CommandFactory};
 use clap_complete::{generate, Generator};
@@ -34,7 +34,16 @@ pub fn cli() -> Result<()> {
                     OmniDocError::Other("Local data directory not found".to_string())
                 })?;
                 let olib = dld.join("omnidoc");
-                let _ = git_clone("https://github.com/wang-borong/omnidoc-libs", &olib, true);
+                // 从配置获取库 URL，如果没有配置则使用默认值
+                let lib_url = GlobalConfig::load()
+                    .ok()
+                    .and_then(|gc| {
+                        gc.get_config()
+                            .and_then(|c| c.lib.lib.as_ref())
+                            .and_then(|l| l.url.clone())
+                    })
+                    .unwrap_or_else(|| "https://github.com/wang-borong/omnidoc-libs".to_string());
+                let _ = git_clone(&lib_url, &olib, true);
             }
         }
         _ => {}
@@ -116,10 +125,18 @@ pub fn cli() -> Result<()> {
                 handle_template_validate();
             }
         }
-        Commands::Md2pdf { inputs, output } => {
-            handle_md2pdf(inputs, output)?;
+        Commands::Md2pdf {
+            lang,
+            inputs,
+            output,
+        } => {
+            handle_md2pdf(lang, inputs, output)?;
         }
-        Commands::Md2html { inputs, output, css } => {
+        Commands::Md2html {
+            inputs,
+            output,
+            css,
+        } => {
             handle_md2html(inputs, output, css)?;
         }
         Commands::Fmt {

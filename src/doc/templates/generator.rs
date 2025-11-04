@@ -1,10 +1,10 @@
 use super::types::TemplateDocType;
-use crate::config::ConfigParser;
+use crate::config::{CliOverrides, ConfigManager};
+use crate::utils::fs;
 use chrono::prelude::*;
 use dirs::config_local_dir;
 use serde::Deserialize;
 use std::env;
-use std::fs;
 use std::path::{Path, PathBuf};
 use tera::{Context, Tera};
 
@@ -38,8 +38,9 @@ fn build_external_tera() -> Option<Tera> {
         }
     } else {
         // Try to read from config if available
-        if let Ok(cp) = ConfigParser::default() {
-            if let Some(dir) = cp.get_template_dir() {
+        if let Ok(config_manager) = ConfigManager::new(None, CliOverrides::new()) {
+            let merged_config = config_manager.get_merged();
+            if let Some(dir) = &merged_config.template_dir {
                 let pattern = format!("{}/**/*", dir);
                 if let Ok(t) = Tera::new(&pattern) {
                     return Some(t);
@@ -64,16 +65,17 @@ fn resolve_template_root() -> Option<PathBuf> {
     if let Ok(dir) = env::var("OMNIDOC_TEMPLATE_DIR") {
         return Some(PathBuf::from(dir));
     }
-    // Try strict config parser first
-    if let Ok(cp) = ConfigParser::default() {
-        if let Some(dir) = cp.get_template_dir() {
+    // Try ConfigManager first
+    if let Ok(config_manager) = ConfigManager::new(None, CliOverrides::new()) {
+        let merged_config = config_manager.get_merged();
+        if let Some(dir) = &merged_config.template_dir {
             return Some(PathBuf::from(dir));
         }
     }
     // Fallback: read template_dir only from ~/.config/omnidoc.toml without requiring full schema
     if let Some(cfg_dir) = config_local_dir() {
         let p = cfg_dir.join(crate::constants::config::OMNIDOC_CONFIG_FILE);
-        if p.exists() {
+        if fs::exists(&p) {
             if let Ok(s) = fs::read_to_string(&p) {
                 if let Ok(val) = s.parse::<toml::Value>() {
                     // 1) top-level template_dir
@@ -96,7 +98,7 @@ fn resolve_template_root() -> Option<PathBuf> {
 fn load_manifest_for_key(key: &str) -> Option<(TemplateManifest, PathBuf)> {
     let root = resolve_template_root()?;
     let p1 = root.join("manifests").join(format!("{}.toml", key));
-    if p1.exists() {
+    if fs::exists(&p1) {
         if let Ok(s) = fs::read_to_string(&p1) {
             if let Ok(m) = toml::from_str::<TemplateManifest>(&s) {
                 return Some((m, p1.parent()?.to_path_buf()));
@@ -104,7 +106,7 @@ fn load_manifest_for_key(key: &str) -> Option<(TemplateManifest, PathBuf)> {
         }
     }
     let p2 = root.join(key).join("manifest.toml");
-    if p2.exists() {
+    if fs::exists(&p2) {
         if let Ok(s) = fs::read_to_string(&p2) {
             if let Ok(m) = toml::from_str::<TemplateManifest>(&s) {
                 return Some((m, p2.parent()?.to_path_buf()));
@@ -159,7 +161,7 @@ pub fn list_external_templates() -> Vec<ExternalTemplateInfo> {
 
     // manifests/*.toml
     let manifests_dir = root.join("manifests");
-    if manifests_dir.exists() {
+    if fs::exists(&manifests_dir) {
         if let Ok(entries) = fs::read_dir(&manifests_dir) {
             for e in entries.flatten() {
                 let path = e.path();
@@ -184,7 +186,7 @@ pub fn list_external_templates() -> Vec<ExternalTemplateInfo> {
             let child = e.path();
             if child.is_dir() {
                 let mpath = child.join("manifest.toml");
-                if mpath.exists() {
+                if fs::exists(&mpath) {
                     if let Ok(s) = fs::read_to_string(&mpath) {
                         if let Ok(m) = toml::from_str::<TemplateManifest>(&s) {
                             // avoid duplicates with same key
@@ -217,7 +219,7 @@ pub fn validate_external_templates() -> Vec<(String, Result<(), String>)> {
             if let Ok(m) = toml::from_str::<TemplateManifest>(&s) {
                 let base_dir = manifest_path.parent().unwrap_or(&root);
                 let template_path = base_dir.join(&m.template_file);
-                if !template_path.exists() {
+                if !fs::exists(&template_path) {
                     results.push((
                         m.key.clone(),
                         Err(format!(
@@ -245,7 +247,7 @@ pub fn validate_external_templates() -> Vec<(String, Result<(), String>)> {
 
     // manifests/*.toml
     let manifests_dir = root.join("manifests");
-    if manifests_dir.exists() {
+    if fs::exists(&manifests_dir) {
         if let Ok(entries) = fs::read_dir(&manifests_dir) {
             for e in entries.flatten() {
                 let path = e.path();
@@ -262,7 +264,7 @@ pub fn validate_external_templates() -> Vec<(String, Result<(), String>)> {
             let child = e.path();
             if child.is_dir() {
                 let mpath = child.join("manifest.toml");
-                if mpath.exists() {
+                if fs::exists(&mpath) {
                     try_validate_manifest(&mpath);
                 }
             }
@@ -445,43 +447,43 @@ pub fn generate_markdown_template(title: &str, author: &str, dt: TemplateDocType
     let date = local.format("%Y/%m/%d").to_string();
 
     const EHEADER: &str = r#"\usepackage{elegant}
-\usepackage{bookmark}
-\usepackage{xr}
-\usepackage{lstlangarm}
-\usepackage{pdfpages}
+        \usepackage{bookmark}
+        \usepackage{xr}
+        \usepackage{lstlangarm}
+        \usepackage{pdfpages}
 
-\usepackage{utils}
+        \usepackage{utils}
 
-\usepackage{circuitikz}
+        \usepackage{circuitikz}
 
-\usepackage{wrapfig}
-\usepackage{enumitem}
-\setlist[description]{nosep,labelindent=2em,leftmargin=4em}
+        \usepackage{wrapfig}
+        \usepackage{enumitem}
+        \setlist[description]{nosep,labelindent=2em,leftmargin=4em}
 
-\usepackage{bytefield}
-\lstset{defaultdialect=[ARM]Assembler}
-\captionsetup{font=small}
+        \usepackage{bytefield}
+        \lstset{defaultdialect=[ARM]Assembler}
+        \captionsetup{font=small}
 
-%\cover{cover}"#;
+        %\cover{cover}"#;
 
     const CTEXHEADER: &str = r#"\usepackage{omni}
-\usepackage{bookmark}
-\usepackage{xr}
-\usepackage{lstlangarm}
-\usepackage{pdfpages}
+        \usepackage{bookmark}
+        \usepackage{xr}
+        \usepackage{lstlangarm}
+        \usepackage{pdfpages}
 
-\usepackage{utils}
+        \usepackage{utils}
 
-\usepackage{circuitikz}
+        \usepackage{circuitikz}
 
-\usepackage{wrapfig}
-\usepackage{enumitem}
-\setlist[description]{nosep,labelindent=2em,leftmargin=4em}
+        \usepackage{wrapfig}
+        \usepackage{enumitem}
+        \setlist[description]{nosep,labelindent=2em,leftmargin=4em}
 
-\usepackage{bytefield}
-\lstset{defaultdialect=[ARM]Assembler}
-\usepackage{caption}
-\captionsetup{font=small}"#;
+        \usepackage{bytefield}
+        \lstset{defaultdialect=[ARM]Assembler}
+        \usepackage{caption}
+        \captionsetup{font=small}"#;
 
     let (doctype, latex_header) = match dt {
         TemplateDocType::EBOOK => (

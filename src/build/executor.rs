@@ -1,4 +1,5 @@
 use crate::error::{OmniDocError, Result};
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -57,7 +58,7 @@ impl BuildExecutor {
     /// 执行命令
     pub fn execute(&self, cmd: &str, args: &[&str], verbose: bool) -> Result<()> {
         let tool_path = self.check_tool(cmd)?;
-        
+
         let mut command = Command::new(&tool_path);
         command.args(args);
 
@@ -65,8 +66,9 @@ impl BuildExecutor {
             println!("Executing: {} {}", tool_path, args.join(" "));
         }
 
-        let output = command.output()
-            .map_err(|e| OmniDocError::CommandExecution(format!("Failed to execute '{}': {}", cmd, e)))?;
+        let output = command.output().map_err(|e| {
+            OmniDocError::CommandExecution(format!("Failed to execute '{}': {}", cmd, e))
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -89,11 +91,10 @@ impl BuildExecutor {
     /// 执行命令并返回输出
     pub fn execute_with_output(&self, cmd: &str, args: &[&str]) -> Result<String> {
         let tool_path = self.check_tool(cmd)?;
-        
-        let output = Command::new(&tool_path)
-            .args(args)
-            .output()
-            .map_err(|e| OmniDocError::CommandExecution(format!("Failed to execute '{}': {}", cmd, e)))?;
+
+        let output = Command::new(&tool_path).args(args).output().map_err(|e| {
+            OmniDocError::CommandExecution(format!("Failed to execute '{}': {}", cmd, e))
+        })?;
 
         if !output.status.success() {
             return Err(OmniDocError::CommandNonZeroExit {
@@ -104,5 +105,59 @@ impl BuildExecutor {
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
-}
 
+    /// 异步执行命令（不等待完成）
+    /// 用于启动后台进程或打开文件等场景
+    pub fn spawn(&self, cmd: &str, args: &[&str]) -> Result<()> {
+        let tool_path = self.check_tool(cmd)?;
+
+        Command::new(&tool_path).args(args).spawn().map_err(|e| {
+            OmniDocError::CommandExecution(format!("Failed to spawn '{}': {}", cmd, e))
+        })?;
+
+        Ok(())
+    }
+
+    /// 执行命令（不检查工具路径，直接使用命令名）
+    /// 用于执行系统命令（如 make, xdg-open）等不需要检查工具的场景
+    pub fn execute_system_cmd(&self, cmd: &str, args: &[&str], verbose: bool) -> Result<()> {
+        let mut command = Command::new(cmd);
+        command.args(args);
+
+        if verbose {
+            println!("Executing: {} {}", cmd, args.join(" "));
+        }
+
+        let output = command.output().map_err(|e| {
+            OmniDocError::CommandExecution(format!("Failed to execute '{}': {}", cmd, e))
+        })?;
+
+        // 输出 stdout 和 stderr
+        std::io::stdout()
+            .write_all(&output.stdout)
+            .map_err(|e| OmniDocError::Io(e))?;
+        std::io::stderr()
+            .write_all(&output.stderr)
+            .map_err(|e| OmniDocError::Io(e))?;
+
+        if !output.status.success() {
+            let command_str = format!("{} {}", cmd, args.join(" "));
+            return Err(OmniDocError::CommandNonZeroExit {
+                code: output.status.code(),
+                command: command_str,
+            });
+        }
+
+        Ok(())
+    }
+
+    /// 异步执行系统命令（不检查工具路径，直接使用命令名）
+    /// 用于启动后台进程或打开文件等场景
+    pub fn spawn_system_cmd(&self, cmd: &str, args: &[&str]) -> Result<()> {
+        Command::new(cmd).args(args).spawn().map_err(|e| {
+            OmniDocError::CommandExecution(format!("Failed to spawn '{}': {}", cmd, e))
+        })?;
+
+        Ok(())
+    }
+}

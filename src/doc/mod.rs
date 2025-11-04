@@ -1,6 +1,4 @@
 // Re-export the main Doc struct for backward compatibility
-mod builder;
-mod cleaner;
 mod initializer;
 mod opener;
 mod project;
@@ -8,8 +6,6 @@ pub mod services;
 pub mod templates;
 pub mod utils;
 
-pub use builder::*;
-pub use cleaner::*;
 pub use initializer::*;
 pub use opener::*;
 pub use project::Doc;

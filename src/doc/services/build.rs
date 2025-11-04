@@ -75,28 +75,41 @@ impl BuildService {
 
     /// 清理构建产物
     pub fn clean(&self, project_path: &Path, distclean: bool) -> Result<()> {
-        use std::fs;
+        use crate::utils::fs;
         use std::path::PathBuf;
 
         // 确定输出目录
-        let outdir = self.config.outdir.as_ref()
+        let outdir = self
+            .config
+            .outdir
+            .as_ref()
             .map(|s| project_path.join(s))
             .unwrap_or_else(|| project_path.join("build"));
 
         // 清理输出目录
-        if outdir.exists() {
+        if fs::exists(&outdir) {
             if distclean {
                 fs::remove_dir_all(&outdir)?;
             } else {
                 // 只清理 LaTeX 临时文件
-                let patterns = ["*.aux", "*.log", "*.out", "*.synctex.gz", "*.toc", "*.fdb_latexmk", "*.fls"];
+                let patterns = [
+                    "*.aux",
+                    "*.log",
+                    "*.out",
+                    "*.synctex.gz",
+                    "*.toc",
+                    "*.fdb_latexmk",
+                    "*.fls",
+                ];
                 for pattern in &patterns {
                     // 使用 glob 查找文件（简化实现）
                     if let Ok(entries) = fs::read_dir(&outdir) {
                         for entry in entries.flatten() {
                             let path = entry.path();
                             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                                if pattern.replace("*", "").is_empty() || name.ends_with(&pattern[2..]) {
+                                if pattern.replace("*", "").is_empty()
+                                    || name.ends_with(&pattern[2..])
+                                {
                                     let _ = fs::remove_file(&path);
                                 }
                             }
@@ -113,9 +126,11 @@ impl BuildService {
                 if let Ok(entries) = fs::read_dir(project_path) {
                     for entry in entries.flatten() {
                         let path = entry.path();
-                        if path.is_file() {
+                        if fs::is_file(&path) {
                             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                                if pattern.replace("*", "").is_empty() || name.ends_with(&pattern[2..]) {
+                                if pattern.replace("*", "").is_empty()
+                                    || name.ends_with(&pattern[2..])
+                                {
                                     let _ = fs::remove_file(&path);
                                 }
                             }
@@ -126,7 +141,7 @@ impl BuildService {
 
             // 清理 auto 目录
             let auto_dir = project_path.join("auto");
-            if auto_dir.exists() {
+            if fs::exists(&auto_dir) {
                 let _ = fs::remove_dir_all(&auto_dir);
             }
         }
@@ -134,4 +149,3 @@ impl BuildService {
         Ok(())
     }
 }
-

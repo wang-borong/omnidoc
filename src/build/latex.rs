@@ -2,9 +2,9 @@ use crate::build::executor::BuildExecutor;
 use crate::build::pipeline::{BuildPipeline, ProjectType};
 use crate::config::MergedConfig;
 use crate::error::{OmniDocError, Result};
+use crate::utils::fs;
 use dirs::data_local_dir;
 use std::path::{Path, PathBuf};
-use std::fs;
 
 /// LaTeX 构建器
 /// 实现 top.mk 的 latex 构建功能
@@ -20,7 +20,10 @@ impl LatexBuilder {
     }
 
     /// 查找图片源文件
-    fn find_figure_sources(&self, project_path: &Path) -> (Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>) {
+    fn find_figure_sources(
+        &self,
+        project_path: &Path,
+    ) -> (Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>) {
         let mut drawio_files = Vec::new();
         let mut dot_mmd_files = Vec::new();
         let mut json_files = Vec::new();
@@ -29,17 +32,22 @@ impl LatexBuilder {
         let search_paths = if !self.config.figure_paths.is_empty() {
             self.config.figure_paths.clone()
         } else {
-            vec!["drawio".to_string(), "dac".to_string(), "figure".to_string(), "figures".to_string()]
+            vec![
+                "drawio".to_string(),
+                "dac".to_string(),
+                "figure".to_string(),
+                "figures".to_string(),
+            ]
         };
 
         for path_str in search_paths {
             let search_path = project_path.join(&path_str);
-            if !search_path.exists() {
+            if !fs::exists(&search_path) {
                 continue;
             }
 
             // 查找 drawio 文件
-            if path_str == "drawio" || search_path.join("drawio").exists() {
+            if path_str == "drawio" || fs::exists(&search_path.join("drawio")) {
                 let drawio_dir = if path_str == "drawio" {
                     search_path.clone()
                 } else {
@@ -56,7 +64,7 @@ impl LatexBuilder {
             }
 
             // 查找 dot 和 mmd 文件
-            if path_str == "dac" || search_path.join("dac").exists() {
+            if path_str == "dac" || fs::exists(&search_path.join("dac")) {
                 let dac_dir = if path_str == "dac" {
                     search_path.clone()
                 } else {
@@ -75,7 +83,6 @@ impl LatexBuilder {
                     }
                 }
             }
-
         }
 
         (drawio_files, dot_mmd_files, json_files)
@@ -93,11 +100,14 @@ impl LatexBuilder {
         }
 
         // 创建输出目录
-        let figures_dir = self.config.figure_output.as_ref()
+        let figures_dir = self
+            .config
+            .figure_output
+            .as_ref()
             .map(|s| project_path.join(s))
             .unwrap_or_else(|| project_path.join("figures"));
 
-        if !figures_dir.exists() {
+        if !fs::exists(&figures_dir) {
             fs::create_dir_all(&figures_dir)?;
         }
 
@@ -105,7 +115,9 @@ impl LatexBuilder {
         // 这里需要调用 figure-generator.py 和 bit-field.py
         // 暂时先跳过，将在 FigureService 中实现
 
-        if verbose && (!drawio_files.is_empty() || !dot_mmd_files.is_empty() || !json_files.is_empty()) {
+        if verbose
+            && (!drawio_files.is_empty() || !dot_mmd_files.is_empty() || !json_files.is_empty())
+        {
             println!("ℹ Figure generation will be handled by FigureService");
         }
 
@@ -113,7 +125,12 @@ impl LatexBuilder {
     }
 
     /// 构建 latexmk 选项
-    fn build_latexmk_options(&self, entry_file: &Path, target_name: &str, verbose: bool) -> Vec<String> {
+    fn build_latexmk_options(
+        &self,
+        entry_file: &Path,
+        target_name: &str,
+        verbose: bool,
+    ) -> Vec<String> {
         let mut options = Vec::new();
 
         // Quiet 模式（默认）
@@ -140,12 +157,27 @@ impl LatexBuilder {
             env::set_var("TEXMFHOME", texmfhome);
         } else {
             // 默认值
-            let omnidoc_lib = self.config.lib_path.clone()
-                .unwrap_or_else(|| {
-                    data_local_dir()
-                        .map(|d| d.join("omnidoc").join("texmf").to_string_lossy().to_string())
-                        .unwrap_or_else(|| "$HOME/.local/share/omnidoc/texmf".to_string())
-                });
+            let omnidoc_lib = self.config.lib_path.clone().unwrap_or_else(|| {
+                data_local_dir()
+                    .map(|d| {
+                        d.join("omnidoc")
+                            .join("texmf")
+                            .to_string_lossy()
+                            .to_string()
+                    })
+                    .unwrap_or_else(|| {
+                        if let Some(h) = dirs::home_dir() {
+                            h.join(".local")
+                                .join("share")
+                                .join("omnidoc")
+                                .join("texmf")
+                                .to_string_lossy()
+                                .to_string()
+                        } else {
+                            ".local/share/omnidoc/texmf".to_string()
+                        }
+                    })
+            });
             env::set_var("TEXMFHOME", &omnidoc_lib);
         }
 
@@ -174,7 +206,7 @@ impl BuildPipeline for LatexBuilder {
         } else {
             // 尝试查找 main.tex
             let main_tex = project_path.join("main.tex");
-            if main_tex.exists() {
+            if fs::exists(&main_tex) {
                 main_tex
             } else {
                 // 尝试查找任何 .tex 文件
@@ -182,7 +214,9 @@ impl BuildPipeline for LatexBuilder {
                 if let Ok(entries) = fs::read_dir(project_path) {
                     for entry in entries.flatten() {
                         let path = entry.path();
-                        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("tex") {
+                        if fs::is_file(&path)
+                            && path.extension().and_then(|s| s.to_str()) == Some("tex")
+                        {
                             if path.file_stem().and_then(|s| s.to_str()) == Some("main") {
                                 found = Some(path);
                                 break;
@@ -198,7 +232,7 @@ impl BuildPipeline for LatexBuilder {
             }
         };
 
-        if !entry_file.exists() {
+        if !fs::exists(&entry_file) {
             return Err(OmniDocError::Project(format!(
                 "Entry file not found: {}",
                 entry_file.display()
@@ -206,24 +240,26 @@ impl BuildPipeline for LatexBuilder {
         }
 
         // 确定输出目录
-        let outdir = self.config.outdir.as_ref()
+        let outdir = self
+            .config
+            .outdir
+            .as_ref()
             .map(|s| project_path.join(s))
             .unwrap_or_else(|| project_path.join("build"));
 
         // 创建输出目录
-        if !outdir.exists() {
+        if !fs::exists(&outdir) {
             fs::create_dir_all(&outdir)?;
         }
 
         // 确定目标名称
-        let target_name = self.config.target.as_ref()
-            .cloned()
-            .unwrap_or_else(|| {
-                project_path.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("document")
-                    .to_string()
-            });
+        let target_name = self.config.target.as_ref().cloned().unwrap_or_else(|| {
+            project_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("document")
+                .to_string()
+        });
 
         // 生成图片（如果有源文件）
         // 注意：这里只是检查，实际生成将在 FigureService 中实现
@@ -251,7 +287,12 @@ impl BuildPipeline for LatexBuilder {
             if verbose {
                 println!("⚠ Build failed, attempting to clean...");
             }
-            let clean_options = vec!["-c", "-jobname", &target_name, entry_file.to_str().unwrap_or("")];
+            let clean_options = vec![
+                "-c",
+                "-jobname",
+                &target_name,
+                entry_file.to_str().unwrap_or(""),
+            ];
             let clean_args: Vec<&str> = clean_options.iter().map(|s| *s).collect();
             let _ = self.executor.execute("latexmk", &clean_args[..], false);
             return result;
@@ -259,18 +300,19 @@ impl BuildPipeline for LatexBuilder {
 
         // 检查输出文件
         let output_file = outdir.join(format!("{}.pdf", target_name));
-        if !output_file.exists() {
+        if !fs::exists(&output_file) {
             // 可能输出在项目根目录
             let alt_output = project_path.join(format!("{}.pdf", target_name));
-            if alt_output.exists() {
+            if fs::exists(&alt_output) {
                 if verbose {
                     println!("✓ Built PDF: {}", alt_output.display());
                 }
             } else {
-                return Err(OmniDocError::Project(
-                    format!("PDF output not found. Expected at {} or {}", 
-                        output_file.display(), alt_output.display())
-                ));
+                return Err(OmniDocError::Project(format!(
+                    "PDF output not found. Expected at {} or {}",
+                    output_file.display(),
+                    alt_output.display()
+                )));
             }
         } else {
             if verbose {
@@ -285,14 +327,14 @@ impl BuildPipeline for LatexBuilder {
         // 检查入口文件
         if let Some(entry) = &self.config.entry {
             let entry_path = project_path.join(entry);
-            if entry_path.exists() {
+            if fs::exists(&entry_path) {
                 return Ok(ProjectType::from_entry_file(&entry_path));
             }
         }
 
         // 尝试查找 main.tex
         let main_tex = project_path.join("main.tex");
-        if main_tex.exists() {
+        if fs::exists(&main_tex) {
             return Ok(ProjectType::Latex);
         }
 
@@ -300,7 +342,7 @@ impl BuildPipeline for LatexBuilder {
         if let Ok(entries) = fs::read_dir(project_path) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("tex") {
+                if fs::is_file(&path) && path.extension().and_then(|s| s.to_str()) == Some("tex") {
                     return Ok(ProjectType::Latex);
                 }
             }
@@ -309,4 +351,3 @@ impl BuildPipeline for LatexBuilder {
         Ok(ProjectType::Unknown)
     }
 }
-

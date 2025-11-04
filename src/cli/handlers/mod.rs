@@ -1,3 +1,5 @@
+mod common;
+
 pub mod build;
 pub mod clean;
 pub mod config;
