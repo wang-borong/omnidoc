@@ -3,7 +3,7 @@ use thiserror::Error;
 /// Unified error type for OmniDoc
 #[derive(Debug, Error)]
 pub enum OmniDocError {
-    #[error("IO error: {0}")]
+    #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
     #[error("Configuration error: {0}")]
@@ -15,7 +15,7 @@ pub enum OmniDocError {
     #[error("Project error: {0}")]
     Project(String),
 
-    #[error("Not an omnidoc project: {0}")]
+    #[error("This is not an OmniDoc project: {0}")]
     NotOmniDocProject(String),
 
     #[error("Unsupported document type: {0}")]

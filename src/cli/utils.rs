@@ -1,8 +1,8 @@
+use crate::doc::templates::generator::list_external_templates;
 use crate::doctype::DocumentTypeRegistry;
 use crate::error::{OmniDocError, Result};
 use console::style;
 use inquire::Select;
-use crate::doc::templates::generator::list_external_templates;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -12,9 +12,7 @@ pub fn print_doctypes() {
     let all = DocumentTypeRegistry::all();
     println!(
         "{} ({} types)",
-        style("Current supported document types:")
-            .bold()
-            .underlined(),
+        style("Supported document types:").bold().underlined(),
         all.len()
     );
     println!("{}", DocumentTypeRegistry::list_display());
@@ -56,11 +54,11 @@ where
             items.push(format!("{} — {}", t.key, name));
         }
     }
-    items.push("[Cancel] 取消".to_string());
+    items.push("[Cancel]".to_string());
 
-    let selection = Select::new("请选择文档类型:", items)
+    let selection = Select::new("Select document type:", items)
         .with_page_size(10)
-        .with_help_message("上下键选择，Enter 确认，Esc/Ctrl+C 取消")
+        .with_help_message("Use arrow keys to navigate, Enter to confirm, Esc/Ctrl+C to cancel")
         .prompt();
 
     let selection = match selection {
@@ -70,22 +68,22 @@ where
         ) => {
             let _ = env::set_current_dir(orig_path.as_ref());
             let _ = fs::remove_dir_all(path.as_ref());
-            return Err(OmniDocError::Other("操作已取消".to_string()));
+            return Err(OmniDocError::Other("Operation canceled".to_string()));
         }
         Err(e) => {
             let _ = env::set_current_dir(orig_path.as_ref());
             let _ = fs::remove_dir_all(path.as_ref());
-            return Err(OmniDocError::Other(format!("Prompt failed ({})", e)));
+            return Err(OmniDocError::Other(format!("Failed to prompt user: {}", e)));
         }
     };
 
     if selection.starts_with("[Cancel]") {
         let _ = env::set_current_dir(orig_path.as_ref());
         let _ = fs::remove_dir_all(path.as_ref());
-        return Err(OmniDocError::Other("操作已取消".to_string()));
+        return Err(OmniDocError::Other("Operation canceled".to_string()));
     }
 
-    // selection is in the form "key — desc"; split to return the key
+    // selection is in the form "key — desc"; split to get the key
     let key = selection.split(' ').next().unwrap_or("").to_string();
 
     Ok(key)

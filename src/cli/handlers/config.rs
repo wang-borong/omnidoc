@@ -13,9 +13,9 @@ pub fn handle_config(
     force: bool,
 ) -> Result<()> {
     ConfigParser::gen(authors, lib, outdir, texmfhome, bibinputs, texinputs, force)
-        .map_err(|e| OmniDocError::Config(format!("Generate configuration failed: {}", e)))?;
+        .map_err(|e| OmniDocError::Config(format!("Failed to generate configuration: {}", e)))?;
     println!(
-        "{} Generate configuration success",
+        "{} Configuration generated successfully",
         style("✔").green().bold()
     );
     Ok(())

@@ -39,7 +39,7 @@ pub fn handle_new(
     let envs = config_parser.get_envs().map_err(|e| {
         let _ = env::set_current_dir(orig_path);
         let _ = fs::remove_dir_all(&path);
-        OmniDocError::Config(format!("Failed to get envs: {}", e))
+        OmniDocError::Config(format!("Failed to retrieve environment variables: {}", e))
     })?;
 
     let author = author
@@ -54,7 +54,7 @@ pub fn handle_new(
     doc.create_project().map_err(|e| {
         let _ = env::set_current_dir(paths_internal::PARENT_DIR);
         let _ = fs::remove_dir_all(&path);
-        OmniDocError::Project(format!("Create project failed: {}", e))
+        OmniDocError::Project(format!("Failed to create project: {}", e))
     })?;
 
     Ok(())

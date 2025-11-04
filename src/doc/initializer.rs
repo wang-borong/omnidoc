@@ -81,7 +81,11 @@ impl<'a> Doc<'a> {
             {
                 let file_name = match path.file_name() {
                     Some(f) => f,
-                    None => return Err(OmniDocError::Other("file_name not found".to_string())),
+                    None => {
+                        return Err(OmniDocError::Other(
+                            "Could not retrieve file name".to_string(),
+                        ))
+                    }
                 };
 
                 if fstem == Some(crate::constants::file_names::MAIN)
@@ -125,14 +129,14 @@ impl<'a> Doc<'a> {
             println!(
                 "{} {} '{}'",
                 style("✔").green().bold(),
-                style("Project files updated at").green().bold(),
+                style("Project updated in").green().bold(),
                 &self.path.display()
             );
         } else {
             println!(
                 "{} {} '{}'",
                 style("✔").green().bold(),
-                style("Project initialized at").green().bold(),
+                style("Project initialized in").green().bold(),
                 &self.path.display()
             );
         }

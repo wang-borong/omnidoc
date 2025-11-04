@@ -17,9 +17,9 @@ pub fn handle_init(
     // Load config and get envs
     let config_parser = ConfigParser::default()
         .map_err(|e| OmniDocError::Config(format!("Failed to load config: {}", e)))?;
-    let envs = config_parser
-        .get_envs()
-        .map_err(|e| OmniDocError::Config(format!("Failed to get envs: {}", e)))?;
+    let envs = config_parser.get_envs().map_err(|e| {
+        OmniDocError::Config(format!("Failed to retrieve environment variables: {}", e))
+    })?;
 
     let author = author
         .or_else(|| config_parser.get_author_name().ok())
@@ -32,11 +32,11 @@ pub fn handle_init(
     let doc = Doc::new(&title, &path, &author, &doctype_str, envs);
     if Doc::is_omnidoc_project() {
         return Err(OmniDocError::Project(
-            "It is an omnidoc project already, no action".to_string(),
+            "This is already an OmniDoc project, no action taken".to_string(),
         ));
     }
     doc.init_project(false)
-        .map_err(|e| OmniDocError::Project(format!("Initial project failed: {}", e)))?;
+        .map_err(|e| OmniDocError::Project(format!("Failed to initialize project: {}", e)))?;
 
     Ok(())
 }

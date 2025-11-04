@@ -54,7 +54,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    ```
    $ omnidoc new hello --title "hello"
 
-   ? 请选择文档类型:
+   ? Select document type:
    > ctex-md — ctex class based markdown document writing system
      ebook-md — elegantbook class based markdown document writing system
      enote-md — elegantnote class based markdown document writing system
@@ -66,7 +66,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
      ctart-tex — ctart class based latex document writing system
      ctrep-tex — ctrep class based latex document writing system
 
-   [上下键选择，Enter 确认，Esc/Ctrl+C 取消]
+   [Use arrow keys to navigate, Enter to confirm, Esc/Ctrl+C to cancel]
    ```
 
    The suffixes `-tex` and `-md` indicate the text format for built-in types; external templates are shown under “External templates”.

@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand, ValueHint};
 
-/// the omnidoc management cli
+/// The OmniDoc management CLI
 #[derive(Debug, Parser)]
 #[command(name = "omnidoc")]
-#[command(version, about = "the omnidoc management cli", long_about = None)]
+#[command(version, about = "The OmniDoc management CLI", long_about = None)]
 pub struct OmniCli {
     /// document management subcommands
     #[command(subcommand)]
@@ -80,22 +80,22 @@ pub enum Commands {
 
     /// generate a default configuration
     Config {
-        /// config the author name
+        /// configure the author name
         #[arg(short, long)]
         authors: String,
-        /// config the omindoc lib path
+        /// configure the OmniDoc library path
         #[arg(short, long)]
         lib: Option<String>,
-        /// config the output directory for building
+        /// configure the output directory for building
         #[arg(short, long)]
         outdir: Option<String>,
-        /// config the TEXMFHOME env (in which does the system find the texmf home)
+        /// configure the TEXMFHOME environment variable (the directory where the system finds the texmf home)
         #[arg(short = 'T', long)]
         texmfhome: Option<String>,
-        /// config the BIBINPUTS env (in which does the system find the bibliograpies)
+        /// configure the BIBINPUTS environment variable (the directory where the system finds the bibliographies)
         #[arg(short, long)]
         bibinputs: Option<String>,
-        /// config the TEXINPUTS env (in which does the system find the tex sources)
+        /// configure the TEXINPUTS environment variable (the directory where the system finds the tex sources)
         #[arg(short, long)]
         texinputs: Option<String>,
 
@@ -104,18 +104,18 @@ pub enum Commands {
         force: bool,
     },
 
-    /// maintain the omnidoc library
+    /// maintain the OmniDoc library
     Lib {
-        /// install the omnidoc lib to XDG_DATA_DIR
+        /// install the OmniDoc library to XDG_DATA_DIR
         #[arg(short, long)]
         install: bool,
 
-        /// update the omnidoc lib
+        /// update the OmniDoc library
         #[arg(short, long)]
         update: bool,
     },
 
-    /// list current supported document types
+    /// list all supported document types
     List,
 
     /// template toolkit

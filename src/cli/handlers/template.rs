@@ -4,7 +4,7 @@ use console::style;
 pub fn handle_template_validate() {
     let results = validate_external_templates();
     if results.is_empty() {
-        println!("{} No external templates found", style("ℹ").cyan().bold());
+        println!("{} No external templates found.", style("ℹ").cyan().bold());
         return;
     }
     let mut ok_count = 0usize;
@@ -26,7 +26,7 @@ pub fn handle_template_validate() {
         }
     }
     println!(
-        "\n{} {} OK, {} failed",
+        "\n{} {} OK, {} failed.",
         style("Summary:").bold(),
         style(ok_count).green(),
         style(err_count).red()

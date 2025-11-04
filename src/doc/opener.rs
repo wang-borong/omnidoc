@@ -11,7 +11,7 @@ impl<'a> Doc<'a> {
         use super::utils::is_omnidoc_project;
         if !is_omnidoc_project() {
             return Err(OmniDocError::NotOmniDocProject(
-                "Current directory is not an omnidoc project".to_string(),
+                "The current directory is not an OmniDoc project".to_string(),
             ));
         }
 
@@ -27,14 +27,14 @@ impl<'a> Doc<'a> {
 
         if !doc_path.exists() {
             return Err(OmniDocError::Project(format!(
-                "The document '{}' does not exist",
+                "Document '{}' does not exist",
                 doc_path_str
             )));
         }
 
-        let doc_path_str_for_cmd = doc_path.to_str().ok_or_else(|| {
-            OmniDocError::Other("Failed to convert document path to string".to_string())
-        })?;
+        let doc_path_str_for_cmd = doc_path
+            .to_str()
+            .ok_or_else(|| OmniDocError::Other("Failed to convert path to string".to_string()))?;
 
         do_cmd(commands::XDG_OPEN, &[doc_path_str_for_cmd], true)
     }

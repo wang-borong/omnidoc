@@ -18,9 +18,9 @@ impl CommandContext {
         let config = ConfigParser::default()
             .map_err(|e| OmniDocError::Config(format!("Failed to load config: {}", e)))?;
 
-        let envs = config
-            .get_envs()
-            .map_err(|e| OmniDocError::Config(format!("Failed to get envs: {}", e)))?;
+        let envs = config.get_envs().map_err(|e| {
+            OmniDocError::Config(format!("Failed to retrieve environment variables: {}", e))
+        })?;
 
         let original_dir = env::current_dir().map_err(|e| OmniDocError::Io(e))?;
 

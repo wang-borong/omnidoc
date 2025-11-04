@@ -8,7 +8,7 @@ use dirs::{config_local_dir, data_local_dir};
 /// Handle the 'lib' command
 pub fn handle_lib(update: bool) -> Result<()> {
     let dld = data_local_dir()
-        .ok_or_else(|| OmniDocError::Other("data_local_dir not found".to_string()))?;
+        .ok_or_else(|| OmniDocError::Other("Local data directory not found".to_string()))?;
     let olib = dld.join("omnidoc");
 
     if update {
@@ -17,7 +17,7 @@ pub fn handle_lib(update: bool) -> Result<()> {
         println!(
             "{} {} '{}'",
             style("✔").green().bold(),
-            style("Updated omnidoc library at").green().bold(),
+            style("OmniDoc library updated in").green().bold(),
             olib.display()
         );
     } else {
@@ -26,13 +26,14 @@ pub fn handle_lib(update: bool) -> Result<()> {
         println!(
             "{} {} '{}'",
             style("✔").green().bold(),
-            style("Installed omnidoc library to").green().bold(),
+            style("OmniDoc library installed in").green().bold(),
             olib.display()
         );
     }
 
-    let mut latexmkrc = config_local_dir()
-        .ok_or_else(|| OmniDocError::Other("config_local_dir not found".to_string()))?;
+    let mut latexmkrc = config_local_dir().ok_or_else(|| {
+        OmniDocError::Other("Local configuration directory not found".to_string())
+    })?;
 
     latexmkrc.push("latexmk");
     if !latexmkrc.exists() {

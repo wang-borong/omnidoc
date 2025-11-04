@@ -12,7 +12,7 @@ impl<'a> Doc<'a> {
         use super::utils::is_omnidoc_project;
         if !is_omnidoc_project() {
             return Err(OmniDocError::NotOmniDocProject(
-                "Current directory is not an omnidoc project".to_string(),
+                "The current directory is not an OmniDoc project".to_string(),
             ));
         }
 
@@ -33,12 +33,12 @@ impl<'a> Doc<'a> {
         let target = format!("{}{}", build::TARGET_PREFIX, &docname);
 
         let mut topmk = data_local_dir()
-            .ok_or_else(|| OmniDocError::Other("data_local_dir not found".to_string()))?;
+            .ok_or_else(|| OmniDocError::Other("Local data directory not found".to_string()))?;
         topmk.push(paths_internal::OMNIDOC_TOOL_TOP_MK);
 
-        let topmk_str = topmk.to_str().ok_or_else(|| {
-            OmniDocError::Other("Failed to convert top.mk path to string".to_string())
-        })?;
+        let topmk_str = topmk
+            .to_str()
+            .ok_or_else(|| OmniDocError::Other("Failed to convert path to string".to_string()))?;
 
         let clean_target = if distclean {
             build::DISTCLEAN_TARGET

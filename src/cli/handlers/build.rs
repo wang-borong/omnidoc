@@ -7,14 +7,14 @@ use crate::error::{OmniDocError, Result};
 pub fn handle_build(path: Option<String>, verbose: bool) -> Result<()> {
     let config_parser = ConfigParser::default()
         .map_err(|e| OmniDocError::Config(format!("Failed to load config: {}", e)))?;
-    let envs = config_parser
-        .get_envs()
-        .map_err(|e| OmniDocError::Config(format!("Failed to get envs: {}", e)))?;
+    let envs = config_parser.get_envs().map_err(|e| {
+        OmniDocError::Config(format!("Failed to retrieve environment variables: {}", e))
+    })?;
 
     let path = path.unwrap_or_else(|| paths_internal::CURRENT_DIR.to_string());
     let doc = Doc::new("", &path, "", "", envs);
     doc.build_project(verbose)
-        .map_err(|e| OmniDocError::Project(format!("Build project failed: {}", e)))?;
+        .map_err(|e| OmniDocError::Project(format!("Failed to build project: {}", e)))?;
 
     Ok(())
 }

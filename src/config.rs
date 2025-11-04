@@ -76,7 +76,7 @@ impl ConfigParser {
                 false,
             );
             println!(
-                "{} The '{}' configuration file was created in '{}'.\n    You can modify it to change the author to yours.",
+                "{} The '{}' configuration file was created in '{}'.\n    You can modify it to set your author name.",
                 style("ℹ").cyan().bold(),
                 config_consts::OMNIDOC_CONFIG_FILE,
                 config_local_dir.display()
@@ -99,7 +99,7 @@ impl ConfigParser {
     pub fn parse(&mut self) -> Result<()> {
         if !self.path.exists() {
             return Err(OmniDocError::ConfigNotFound(format!(
-                "No omnidoc config file at {}, please create it by 'omnidoc config'",
+                "No OmniDoc config file found at {}. Please create it using 'omnidoc config'",
                 self.path.display()
             )));
         }
@@ -118,7 +118,7 @@ impl ConfigParser {
         let config = self
             .config
             .as_ref()
-            .ok_or_else(|| OmniDocError::Config("Config not loaded".to_string()))?;
+            .ok_or_else(|| OmniDocError::Config("Configuration not loaded".to_string()))?;
 
         // Create a HashMap to store the URLs and filenames
         let mut downloads = HashMap::new();
@@ -137,7 +137,7 @@ impl ConfigParser {
         let config = self
             .config
             .as_ref()
-            .ok_or_else(|| OmniDocError::Config("Config not loaded".to_string()))?;
+            .ok_or_else(|| OmniDocError::Config("Configuration not loaded".to_string()))?;
 
         match &config.author.name {
             Some(author) => Ok(author.to_owned()),
@@ -151,12 +151,12 @@ impl ConfigParser {
         let config = self
             .config
             .as_ref()
-            .ok_or_else(|| OmniDocError::Config("Config not loaded".to_string()))?;
+            .ok_or_else(|| OmniDocError::Config("Configuration not loaded".to_string()))?;
 
         match &config.lib.path {
             Some(lib_path) => Ok(lib_path.to_owned()),
             None => Err(OmniDocError::Config(
-                "No omnidoc lib configured".to_string(),
+                "No OmniDoc library configured".to_string(),
             )),
         }
     }
@@ -170,7 +170,7 @@ impl ConfigParser {
         let config = self
             .config
             .as_ref()
-            .ok_or_else(|| OmniDocError::Config("Config not loaded".to_string()))?;
+            .ok_or_else(|| OmniDocError::Config("Configuration not loaded".to_string()))?;
 
         if let Some(outdir) = &config.env.outdir {
             envs.insert("outdir", Some(outdir.to_owned()));
@@ -222,8 +222,9 @@ impl ConfigParser {
             config.push_str(config_consts::SECTION_LIB);
             config.push_str(&format!("path = \"{}\"\n", lib));
         } else {
-            let dld = data_local_dir()
-                .ok_or_else(|| OmniDocError::Config("data_local_dir not found".to_string()))?;
+            let dld = data_local_dir().ok_or_else(|| {
+                OmniDocError::Config("Local data directory not found".to_string())
+            })?;
             let olib = dld.join("omnidoc");
             let lib_path_str = olib.to_str().ok_or_else(|| {
                 OmniDocError::Config("Library path contains invalid UTF-8".to_string())
@@ -310,7 +311,7 @@ impl ConfigParser {
             Ok(())
         } else {
             Err(OmniDocError::Config(
-                "No ~/.config directory found in your system".to_string(),
+                "No ~/.config directory found on your system".to_string(),
             ))
         }
     }
@@ -319,7 +320,7 @@ impl ConfigParser {
         let config = self
             .config
             .as_ref()
-            .ok_or_else(|| OmniDocError::Config("Config not loaded".to_string()))?;
+            .ok_or_else(|| OmniDocError::Config("Configuration not loaded".to_string()))?;
 
         match &config.env.texmfhome {
             Some(texmfhome) => env_set_var("TEXMFHOME", texmfhome),
@@ -353,7 +354,7 @@ mod tests {
                 if let Some(config) = conf_parser.config.as_ref() {
                     println!("show conf: {:?}", config);
                 } else {
-                    eprintln!("Config not loaded after parse");
+                    eprintln!("Configuration not loaded after parse");
                     return;
                 }
                 assert!(true);

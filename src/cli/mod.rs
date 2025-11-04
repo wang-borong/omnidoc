@@ -30,8 +30,9 @@ pub fn cli() -> Result<()> {
     match args.command {
         Commands::New { .. } | Commands::Init { .. } | Commands::Build { .. } => {
             if !omnidoc_lib_exists() {
-                let dld = data_local_dir()
-                    .ok_or_else(|| OmniDocError::Other("data_local_dir not found".to_string()))?;
+                let dld = data_local_dir().ok_or_else(|| {
+                    OmniDocError::Other("Local data directory not found".to_string())
+                })?;
                 let olib = dld.join("omnidoc");
                 let _ = git_clone("https://github.com/wang-borong/omnidoc-libs", &olib, true);
             }
@@ -49,7 +50,7 @@ pub fn cli() -> Result<()> {
             if let Some(path) = path {
                 if !Path::new(&path).exists() {
                     return Err(OmniDocError::Project(format!(
-                        "The path doesn't exist: {}",
+                        "Path does not exist: {}",
                         path
                     )));
                 }

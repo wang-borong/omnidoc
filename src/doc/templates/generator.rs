@@ -221,7 +221,7 @@ pub fn validate_external_templates() -> Vec<(String, Result<(), String>)> {
                     results.push((
                         m.key.clone(),
                         Err(format!(
-                            "template file not found: {}",
+                            "Template file not found: {}",
                             template_path.display()
                         )),
                     ));
@@ -237,7 +237,7 @@ pub fn validate_external_templates() -> Vec<(String, Result<(), String>)> {
                     .and_then(|tpl| Tera::one_off(&tpl, &ctx, false).ok())
                 {
                     Some(_) => results.push((m.key.clone(), Ok(()))),
-                    None => results.push((m.key.clone(), Err("render failed".to_string()))),
+                    None => results.push((m.key.clone(), Err("Rendering failed".to_string()))),
                 }
             }
         }

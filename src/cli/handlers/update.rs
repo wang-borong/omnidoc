@@ -7,16 +7,16 @@ use crate::error::{OmniDocError, Result};
 pub fn handle_update(path: Option<String>) -> Result<()> {
     let config_parser = ConfigParser::default()
         .map_err(|e| OmniDocError::Config(format!("Failed to load config: {}", e)))?;
-    let envs = config_parser
-        .get_envs()
-        .map_err(|e| OmniDocError::Config(format!("Failed to get envs: {}", e)))?;
+    let envs = config_parser.get_envs().map_err(|e| {
+        OmniDocError::Config(format!("Failed to retrieve environment variables: {}", e))
+    })?;
 
     let path = path.unwrap_or_else(|| paths_internal::CURRENT_DIR.to_string());
 
     let mut doc = Doc::new("", &path, "", "", envs);
 
     doc.update_project()
-        .map_err(|e| OmniDocError::Project(format!("Update project failed: {}", e)))?;
+        .map_err(|e| OmniDocError::Project(format!("Failed to update project: {}", e)))?;
 
     Ok(())
 }
