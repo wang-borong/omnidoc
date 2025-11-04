@@ -116,6 +116,29 @@ pub fn cli() -> Result<()> {
                 handle_template_validate();
             }
         }
+        Commands::Md2pdf { inputs, output } => {
+            handle_md2pdf(inputs, output)?;
+        }
+        Commands::Md2html { inputs, output, css } => {
+            handle_md2html(inputs, output, css)?;
+        }
+        Commands::Fmt {
+            paths,
+            backup,
+            semantic,
+            symbol,
+        } => {
+            handle_fmt(paths, backup, semantic, symbol)?;
+        }
+        Commands::Figure {
+            subcommand,
+            format,
+            force,
+            output,
+            sources,
+        } => {
+            handle_figure(subcommand, format, force, output, sources)?;
+        }
     }
 
     Ok(())

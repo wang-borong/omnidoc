@@ -4,14 +4,16 @@ mod cleaner;
 mod initializer;
 mod opener;
 mod project;
+pub mod services;
 pub mod templates;
-mod utils;
+pub mod utils;
 
 pub use builder::*;
 pub use cleaner::*;
 pub use initializer::*;
 pub use opener::*;
 pub use project::Doc;
+pub use utils::is_omnidoc_project;
 
 // Re-export template types for backward compatibility
 pub use templates::TemplateDocType;

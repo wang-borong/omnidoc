@@ -16,13 +16,25 @@ walkdir = "2.3"
 reqwest = { version = "0.11", features = ["blocking"] }
 toml = "0.5"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 dirs = "5.0"
 git2 = "0.19"
 indoc = "2"
 chrono = "0.4"
-#regex = "1.10"
 #sha256 = "1.5.0"
 thiserror = "1.0"
 inquire = "0.9.1"
 console = "0.15"
 tera = "1"
+which = "6"
+regex = "1.10"
+
+[package.metadata.deb]
+maintainer = "Jason Wang <wang_borong@163.com>"
+copyright = "Copyright (c) 2024-2025, Jason Wang"
+depends = "$auto"
+extended-description = """\
+OmniDoc is a documentation tool for building PDF documents.
+"""
+section = "utils"
+priority = "optional"

@@ -33,6 +33,9 @@ pub enum OmniDocError {
     #[error("Git error: {0}")]
     Git(#[from] git2::Error),
 
+    #[error("Walkdir error: {0}")]
+    Walkdir(#[from] walkdir::Error),
+
     #[error("Unsupported language: {0}")]
     UnsupportedLanguage(String),
 

@@ -1,7 +1,8 @@
 use crate::cli::utils::get_doctype_from_readline;
-use crate::config::ConfigParser;
+use crate::config::{ConfigParser, ProjectConfig};
 use crate::constants::paths_internal;
 use crate::doc::Doc;
+use crate::doctype::DocumentTypeRegistry;
 use crate::error::{OmniDocError, Result};
 use std::path::Path;
 
@@ -37,6 +38,33 @@ pub fn handle_init(
     }
     doc.init_project(false)
         .map_err(|e| OmniDocError::Project(format!("Failed to initialize project: {}", e)))?;
+
+    // 创建项目配置文件（如果不存在）
+    let project_path = Path::new(&path);
+    if !ProjectConfig::exists(project_path) {
+        let doctype = DocumentTypeRegistry::from_str(&doctype_str)
+            .map_err(|e| OmniDocError::Project(format!("Invalid document type: {}", e)))?;
+        
+        let entry = Some(doctype.file_name());
+        let from = if doctype.file_extension() == "md" {
+            Some("markdown")
+        } else {
+            Some("latex")
+        };
+        let to = Some("pdf");
+        let target_name = project_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("document");
+        
+        ProjectConfig::create_default(project_path, entry, from, to, Some(target_name))
+            .map_err(|e| {
+                eprintln!("Warning: Failed to create project config: {}", e);
+                e
+            })?;
+
+        println!("✓ Created project configuration file: .omnidoc.toml");
+    }
 
     Ok(())
 }

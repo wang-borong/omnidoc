@@ -1,41 +1,102 @@
 name: Release
 
-permissions:
-  contents: write
-
 on:
   push:
     tags:
-      - v[0-9]+.*
+      - 'v*'
 
 jobs:
-  create-release:
+  build-deb:
+    name: Build Debian Package
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libssl-dev \
+            pkg-config \
+            debhelper \
+            dh-make
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Build deb package
+        run: cargo deb
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-package
+          path: target/debian/*.deb
+
+  build-tar-gz:
+    name: Build Arch Linux tar.gz
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: taiki-e/create-gh-release-action@v1
-        with:
-          # (optional) Path to changelog.
-          # changelog: CHANGELOG.md
-          # (required) GitHub token for creating GitHub Releases.
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-  upload-assets:
-    needs: create-release
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: taiki-e/upload-rust-binary-action@v1
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libssl-dev \
+            pkg-config
+
+      - name: Build release binary
+        run: |
+          cargo build --release
+          strip target/release/omnidoc || true
+
+      - name: Create tar.gz package
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          mkdir -p omnidoc-$VERSION
+          cp target/release/omnidoc omnidoc-$VERSION/
+          tar czf omnidoc-$VERSION-x86_64.tar.gz omnidoc-$VERSION/
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+
+      - name: Upload tar.gz artifact
+        uses: actions/upload-artifact@v4
         with:
-          # (required) Comma-separated list of binary names (non-extension portion of filename) to build and upload.
-          # Note that glob pattern is not supported yet.
-          bin: omnidoc
-          # (optional) Target triple, default is host triple.
-          target: ${{ matrix.target }}
-          # (required) GitHub token for uploading assets to GitHub Releases.
-          token: ${{ secrets.GITHUB_TOKEN }}
+          name: tar-gz-package
+          path: omnidoc-*-x86_64.tar.gz
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-deb, build-tar-gz]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download deb artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deb-package
+          path: ./artifacts
+
+      - name: Download tar.gz artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tar-gz-package
+          path: ./artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
