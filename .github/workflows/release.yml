@@ -8,7 +8,7 @@ on:
 jobs:
   build-deb:
     name: Build Debian Package
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -99,4 +99,4 @@ jobs:
         with:
           files: ./artifacts/*
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
