@@ -162,9 +162,13 @@ impl<'a> Doc<'a> {
         let gitignore_content = get_gitignore_template();
         Doc::gen_file(gitignore_content, paths::GITIGNORE)?;
 
-        // Write embedded latexmkrc template
-        let latexmkrc_content = get_latexmkrc_template();
-        Doc::gen_file(latexmkrc_content, paths::LATEXMKRC)?;
+        // Write embedded latexmkrc template only for LaTeX document types
+        let doctype = DocumentTypeRegistry::from_str(&self.doctype)
+            .map_err(|e| OmniDocError::Project(format!("Invalid document type: {}", e)))?;
+        if doctype.file_extension() == lang::LATEX {
+            let latexmkrc_content = get_latexmkrc_template();
+            Doc::gen_file(latexmkrc_content, paths::LATEXMKRC)?;
+        }
 
         Ok(())
     }
@@ -203,7 +207,14 @@ impl<'a> Doc<'a> {
 
     /// Update the project
     pub fn update_project(&mut self) -> Result<()> {
-        let update_files = vec![paths::FIGURE_README, paths::LATEXMKRC, paths::GITIGNORE];
+        let mut update_files = vec![paths::FIGURE_README, paths::GITIGNORE];
+
+        // Only update .latexmkrc for LaTeX document types
+        let doctype = DocumentTypeRegistry::from_str(&self.doctype)
+            .map_err(|e| OmniDocError::Project(format!("Invalid document type: {}", e)))?;
+        if doctype.file_extension() == lang::LATEX {
+            update_files.push(paths::LATEXMKRC);
+        }
 
         for uf in update_files {
             if fs::exists(Path::new(uf)) {

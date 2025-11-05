@@ -7,7 +7,6 @@ use crate::doctype::DocumentTypeRegistry;
 use crate::error::{OmniDocError, Result};
 use crate::utils::fs;
 use std::env;
-use std::path::Path;
 
 /// Handle the 'new' command
 pub fn handle_new(
@@ -57,7 +56,8 @@ pub fn handle_new(
     })?;
 
     // 创建项目配置文件
-    let project_path = Path::new(&path);
+    // 使用当前目录（已切换到新项目目录）而不是相对路径
+    let project_path = env::current_dir().map_err(|e| OmniDocError::Io(e))?;
     let doctype = DocumentTypeRegistry::from_str(&doctype_str)
         .map_err(|e| OmniDocError::Project(format!("Invalid document type: {}", e)))?;
 
@@ -73,7 +73,7 @@ pub fn handle_new(
         .and_then(|n| n.to_str())
         .unwrap_or("document");
 
-    ProjectConfig::create_default(project_path, entry, from, to, Some(target_name)).map_err(
+    ProjectConfig::create_default(&project_path, entry, from, to, Some(target_name)).map_err(
         |e| {
             eprintln!("Warning: Failed to create project config: {}", e);
             e
