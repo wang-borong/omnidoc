@@ -20,6 +20,7 @@ struct RegexCache {
     ascii_to_han: Regex,
     punct_pattern: Regex,
     digit_hyphen: Regex,
+    digit_equal: Regex,
     date_format: Regex,
     han_space_han: Regex,
     #[allow(dead_code)] // May be used in future versions
@@ -69,13 +70,14 @@ fn get_regex_cache() -> &'static RegexCache {
     REGEX_CACHE.get_or_init(|| {
         RegexCache {
             // 通用格式化
-            han_to_ascii: Regex::new(r"([\p{Han}])([0-9a-zA-Z_/\\-])").unwrap(),
-            ascii_to_han: Regex::new(r"([0-9a-zA-Z_)\\/\\-])([\p{Han}])").unwrap(),
+            han_to_ascii: Regex::new(r"([\p{Han}])([=+0-9a-zA-Z_/\\-])").unwrap(),
+            ascii_to_han: Regex::new(r"([=+0-9a-zA-Z_)\\/\\-])([\p{Han}])").unwrap(),
             punct_pattern: Regex::new(
                 r#"[ \t]*([，。？！：、；…．～￥""（）「」《》——【】〈〉〔〕''])[ \t]*"#,
             )
             .unwrap(),
             digit_hyphen: Regex::new(r"(\d) *- *(\d)").unwrap(),
+            digit_equal: Regex::new(r"(\d) *= *(\d)").unwrap(),
             date_format: Regex::new(r"([12][90]\d\d) *- *([01]\d)").unwrap(),
             // 移除中文字符之间的空格（包括中文标点）
             han_space_han: Regex::new(
@@ -351,6 +353,12 @@ impl FormatService {
         result = cache
             .digit_hyphen
             .replace_all(&result, "$1 - $2")
+            .to_string();
+
+        // 数字之间的等号
+        result = cache
+            .digit_equal
+            .replace_all(&result, "$1 = $2")
             .to_string();
 
         // 日期格式（YYYY-MM-DD）
