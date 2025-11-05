@@ -17,6 +17,24 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
   You can install LaTeX following [this manual](https://www.tug.org/texlive/quickinstall.html) or through your Linux distribution's package manager.
 
+  For example, on Arch Linux, you should install these packages:
+
+  ```
+  texlive-basic
+  texlive-bibtexextra
+  texlive-bin
+  texlive-fontsrecommended
+  texlive-langchinese
+  texlive-langcjk
+  texlive-latex
+  texlive-latexextra
+  texlive-latexrecommended
+  texlive-mathscience
+  texlive-pictures
+  texlive-plaingeneric
+  texlive-xetex
+  ```
+
 - **Draw.io**  
 
   Download Draw.io from its [GitHub releases](https://github.com/jgraph/drawio-desktop/releases).
@@ -33,21 +51,26 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
   Install it through your Linux distribution's package manager.
 
+- **PlantUML**
+
+  Install it through your Linux distribution's package manager.
+
 ## Usage
 
-1. Create a new documentation repository
+### Quick Start
+
+1. **Create a new documentation repository**
 
    ```bash
-   omnidoc new hello --title "hello"
+   omnidoc new <PATH> --title "Document Title" [--author "Author Name"]
+   ```
+
+   Example:
+   ```bash
+   omnidoc new hello --title "My Document" --author "John Doe"
    ```
 
    You'll be prompted to choose a template (built-in + external) with an interactive selector. Use arrow keys to navigate, Enter to select. You can also type an external template key directly (e.g., `simple-md`).
-
-   To preview available types/templates at any time:
-
-   ```bash
-   omnidoc list
-   ```
 
    Example (inquire-based selection):
 
@@ -69,45 +92,320 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    [Use arrow keys to navigate, Enter to confirm, Esc/Ctrl+C to cancel]
    ```
 
-   The suffixes `-tex` and `-md` indicate the text format for built-in types; external templates are shown under “External templates”.
+   The suffixes `-tex` and `-md` indicate the text format for built-in types; external templates are shown under "External templates".
 
-   After selecting a template, the tool creates the repository:
+   After selecting a template, the tool creates the repository with the following structure:
 
    ```
-   biblio  dac  drawio  figure  figures  main.md  md
+   biblio/     # Bibliography files (.bib)
+   dac/        # D2 diagram source files
+   drawio/     # Draw.io diagram source files
+   figure/     # Generated figure output directory
+   figures/    # Third-party figure files
+   md/         # Additional markdown files (for markdown projects)
+   tex/        # Additional LaTeX files (for LaTeX projects, if configured)
+   main.md     # Main entry file (or main.tex for LaTeX projects)
    ```
 
-   You can use draw.io, Graphviz, and D2 to create diagrams and figures. The tool can also convert figure formats with Inkscape and ImageMagick. Please ensure these tools are installed beforehand.
+   The project is automatically initialized as a git repository.
 
-2. Initialize an existing repository
+2. **Initialize an existing repository**
 
-   Initialization works similarly to "new" and supports the same template selection (including external templates):
+   If you have an existing directory with markdown or LaTeX files, you can initialize it as an omnidoc project:
 
    ```bash
-   omnidoc init --title "hello"
+   omnidoc init [PATH] --title "Document Title" [--author "Author Name"]
    ```
 
-3. Build the repository
+   If `PATH` is not specified, the current directory is used. The tool will:
+   - Prompt you to select a document type
+   - Move existing `.md` and `.tex` files to appropriate directories
+   - Create the directory structure
+   - Initialize git repository if not already present
+
+3. **Build the repository**
 
    Build your content into a PDF for review:
 
    ```bash
-   omnidoc build
+   omnidoc build [PATH] [--verbose]
    ```
 
-   The build directory is `build/`, and the PDF file is named after the repository directory.
+   - If `PATH` is not specified, the current directory is used
+   - Use `--verbose` to show detailed build messages
+   - The build directory is `build/` (configurable via config), and the PDF file is named after the repository directory
 
-4. Clean the repository
+4. **Open the built PDF document**
 
    ```bash
-   omnidoc clean [--distclean]
+   omnidoc open [PATH]
    ```
 
-5. Open the built PDF document
+   Opens the built PDF document using the system's default PDF viewer.
+
+5. **Clean the repository**
+
+   Remove build artifacts:
 
    ```bash
-   omnidoc open
+   omnidoc clean [PATH] [--distclean]
    ```
+
+   - `clean`: Removes the build directory
+   - `clean --distclean`: Removes build directory and all generated files
+
+### Project Management Commands
+
+6. **Update a document repository**
+
+   Update an existing omnidoc project structure:
+
+   ```bash
+   omnidoc update [PATH]
+   ```
+
+   This command updates the project structure, template files, and configuration to match the current omnidoc version.
+
+7. **List all supported document types**
+
+   Preview available built-in types and external templates:
+
+   ```bash
+   omnidoc list
+   ```
+
+   This displays all built-in document types and external templates that are available for selection.
+
+### Configuration Commands
+
+8. **Generate default configuration**
+
+   Create or update the global configuration file:
+
+   ```bash
+   omnidoc config --authors "Author Name" [OPTIONS]
+   ```
+
+   Options:
+   - `--authors <AUTHORS>`: Configure the author name (required)
+   - `--lib <LIB>`: Configure the OmniDoc library path
+   - `--outdir <OUTDIR>`: Configure the output directory for building (default: `build`)
+   - `--texmfhome <TEXMFHOME>`: Configure the TEXMFHOME environment variable
+   - `--bibinputs <BIBINPUTS>`: Configure the BIBINPUTS environment variable
+   - `--texinputs <TEXINPUTS>`: Configure the TEXINPUTS environment variable
+   - `--force`: Force generation (overwrite existing config)
+
+   Example:
+   ```bash
+   omnidoc config --authors "John Doe" --outdir "output" --lib "$HOME/.local/share/omnidoc"
+   ```
+
+9. **Maintain the OmniDoc library**
+
+   Install or update the OmniDoc library files:
+
+   ```bash
+   omnidoc lib --install    # Install library to XDG_DATA_DIR
+   omnidoc lib --update     # Update the library
+   ```
+
+   The library contains templates, LaTeX classes, and other resources used by omnidoc.
+
+### Document Formatting Commands
+
+10. **Format documents**
+
+    Format markdown or LaTeX documents recursively:
+
+    ```bash
+    omnidoc fmt [PATHS...] [OPTIONS]
+    ```
+
+    Options:
+    - `--backup`: Create backup files before formatting
+    - `--semantic`: Enable semantic formatting
+    - `--symbol`: Enable symbol formatting (Chinese punctuation)
+
+    Examples:
+    ```bash
+    omnidoc fmt main.md                    # Format a single file
+    omnidoc fmt md/                        # Format all files in md directory
+    omnidoc fmt --backup --semantic .      # Format all files in current directory with backup
+    ```
+
+### Figure Generation Commands
+
+11. **Generate figures from source files**
+
+    Generate figures from various diagram source formats:
+
+    ```bash
+    omnidoc figure [SOURCES...] [OPTIONS] [COMMAND]
+    ```
+
+    General options:
+    - `--format <FORMAT>`: Output format (pdf, png, svg, etc.), default: pdf
+    - `--force`: Force regenerate even if output exists
+    - `--output <OUTPUT>`: Output directory
+
+    If no subcommand is specified, the tool will auto-detect the figure type based on file extension.
+
+    **Subcommands:**
+
+    - **Generate bitfield diagrams from JSON**
+
+      ```bash
+      omnidoc figure bitfield <SOURCES>... [OPTIONS]
+      ```
+
+      Options:
+      - `--vspace <VSPACE>`: Vertical space
+      - `--hspace <HSPACE>`: Horizontal space
+      - `--lanes <LANES>`: Rectangle lanes
+      - `--bits <BITS>`: Overall bitwidth
+      - `--fontfamily <FONTFAMILY>`: Font family (default: sans-serif)
+      - `--fontsize <FONTSIZE>`: Font size (default: 14)
+      - `--strokewidth <STROKEWIDTH>`: Stroke width (default: 1.0)
+      - `--beautify`: Beautify output
+      - `--json5`: Use JSON5 parser
+      - `--compact`: Compact mode
+      - `--hflip`: Horizontal flip
+      - `--vflip`: Vertical flip
+      - `--trim <TRIM>`: Trim long bitfield names (character width)
+      - `--uneven`: Uneven lanes
+      - `--legend <LEGEND>`: Legend item (format: NAME:TYPE, can be used multiple times)
+
+    - **Generate diagrams from Draw.io files**
+
+      ```bash
+      omnidoc figure drawio <SOURCES>... [OPTIONS]
+      ```
+
+      Options:
+      - `--drawio <DRAWIO>`: Draw.io executable path
+      - `--format <FORMAT>`: Output format (default: pdf)
+
+    - **Generate diagrams from Graphviz dot files**
+
+      ```bash
+      omnidoc figure dot <SOURCES>... [OPTIONS]
+      ```
+
+      Options:
+      - `--gradot <GRADOT>`: Graphviz dot executable path
+      - `--format <FORMAT>`: Output format (default: pdf)
+
+    - **Generate diagrams from PlantUML files**
+
+      ```bash
+      omnidoc figure plantuml <SOURCES>... [OPTIONS]
+      ```
+
+      Options:
+      - `--plantuml <PLANTUML>`: PlantUML executable path or jar file path
+      - `--format <FORMAT>`: Output format (default: png)
+
+    - **Convert images**
+
+      Convert images between different formats (SVG, PDF, PNG, etc.):
+
+      ```bash
+      omnidoc figure convert <SOURCES>... [OPTIONS]
+      ```
+
+      Options:
+      - `--inkscape <INKSCAPE>`: Inkscape executable path
+      - `--imagemagick <IMAGEMAGICK>`: ImageMagick executable path
+      - `--format <FORMAT>`: Output format (default: pdf)
+
+    Examples:
+    ```bash
+    # Auto-detect and generate from drawio file
+    omnidoc figure diagram.drawio --format pdf
+
+    # Generate bitfield diagram from JSON
+    omnidoc figure bitfield bitfield.json --format svg --beautify
+
+    # Convert SVG to PDF
+    omnidoc figure convert figure.svg --format pdf
+
+    # Generate all figures in a directory
+    omnidoc figure drawio/ --format pdf --output figure/
+    ```
+
+### Document Conversion Commands
+
+12. **Convert markdown to PDF**
+
+    Convert markdown files directly to PDF without creating a full project:
+
+    ```bash
+    omnidoc md2pdf <INPUTS>... [OPTIONS]
+    ```
+
+    Options:
+    - `--lang <LANG>`: Language (cn or en)
+    - `--output <OUTPUT>`: Output file path
+
+    Examples:
+    ```bash
+    omnidoc md2pdf document.md --lang cn --output document.pdf
+    omnidoc md2pdf file1.md file2.md --output combined.pdf
+    ```
+
+13. **Convert markdown to HTML**
+
+    Convert markdown files to HTML:
+
+    ```bash
+    omnidoc md2html <INPUTS>... [OPTIONS]
+    ```
+
+    Options:
+    - `--output <OUTPUT>`: Output file path (for single input) or directory (for multiple inputs)
+    - `--css <CSS>`: CSS file path for styling
+
+    Examples:
+    ```bash
+    omnidoc md2html document.md --output document.html
+    omnidoc md2html file1.md file2.md --output html/ --css style.css
+    ```
+
+### Template Management Commands
+
+14. **Template toolkit**
+
+    Validate external template manifests and files:
+
+    ```bash
+    omnidoc template --validate
+    ```
+
+    This command validates all external templates (hot-loaded, no restart needed). It checks:
+    - Manifest parsing
+    - Template file existence
+    - Minimal Tera render with `title/author/date`
+
+### Utility Commands
+
+15. **Generate shell completion**
+
+    Generate shell completion scripts for bash, zsh, fish, elvish, or PowerShell:
+
+    ```bash
+    omnidoc complete --generate <SHELL>
+    ```
+
+    Supported shells: `bash`, `zsh`, `fish`, `elvish`, `powershell`
+
+    Example:
+    ```bash
+    # For zsh
+    omnidoc complete --generate zsh > ~/.zsh_completions/_omnidoc
+
+    # For bash
+    omnidoc complete --generate bash > ~/.bash_completion.d/omnidoc
+    ```
 
 ## Dynamic Templates (External)
 
