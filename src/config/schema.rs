@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// 配置结构定义
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

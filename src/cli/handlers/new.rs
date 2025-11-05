@@ -1,6 +1,6 @@
 use crate::cli::handlers::common::{create_config_manager_default, merged_config_to_envs};
 use crate::cli::utils::get_doctype_from_readline;
-use crate::config::{CliOverrides, ProjectConfig};
+use crate::config::ProjectConfig;
 use crate::constants::paths_internal;
 use crate::doc::Doc;
 use crate::doctype::DocumentTypeRegistry;

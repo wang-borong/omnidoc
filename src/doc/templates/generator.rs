@@ -8,6 +8,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use tera::{Context, Tera};
 
+#[allow(dead_code)] // May be used in future versions
 fn build_builtin_tera() -> Tera {
     let mut tera = Tera::default();
     let _ = tera.add_raw_template(
@@ -329,7 +330,6 @@ pub fn generate_latex_template(title: &str, author: &str, dt: TemplateDocType) -
                 return s;
             }
         }
-        let mut builtin = build_builtin_tera();
         let template = r#"\documentclass[11pt, a4paper]{moderncv}
 
 % optional argument are 'blue' (default), 'orange',

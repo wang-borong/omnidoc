@@ -1,5 +1,3 @@
-use crate::config::schema::ConfigSchema;
-
 /// CLI 参数覆盖
 /// 用于存储命令行参数，这些参数会覆盖配置文件的设置
 #[derive(Debug, Clone, Default)]

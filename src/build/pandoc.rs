@@ -22,7 +22,7 @@ impl PandocBuilder {
     /// 构建 Pandoc 选项
     fn build_pandoc_options(
         &self,
-        project_path: &Path,
+        _project_path: &Path,
         entry_file: &Path,
         output_file: &Path,
     ) -> Vec<String> {

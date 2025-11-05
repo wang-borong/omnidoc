@@ -1,6 +1,6 @@
 use crate::build::{BuildPipeline, LatexBuilder, PandocBuilder, ProjectType};
 use crate::config::MergedConfig;
-use crate::error::{OmniDocError, Result};
+use crate::error::Result;
 use std::path::Path;
 
 /// 构建服务
@@ -76,7 +76,6 @@ impl BuildService {
     /// 清理构建产物
     pub fn clean(&self, project_path: &Path, distclean: bool) -> Result<()> {
         use crate::utils::fs;
-        use std::path::PathBuf;
 
         // 确定输出目录
         let outdir = self

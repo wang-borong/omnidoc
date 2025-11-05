@@ -1,6 +1,5 @@
 use crate::config::schema::ConfigSchema;
 use crate::error::{OmniDocError, Result};
-use crate::utils::fs;
 use std::path::{Path, PathBuf};
 
 const PROJECT_CONFIG_FILE: &str = ".omnidoc.toml";

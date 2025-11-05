@@ -1,9 +1,8 @@
-use crate::error::{OmniDocError, Result};
+use crate::error::Result;
 use crate::utils::fs;
 use std::collections::HashMap;
 use std::env;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Document project structure
 #[derive(Debug, PartialEq)]

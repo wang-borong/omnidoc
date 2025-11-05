@@ -6,7 +6,11 @@ pub mod services;
 pub mod templates;
 pub mod utils;
 
+// Doc methods are implemented in initializer and opener modules
+// These re-exports are kept for backward compatibility but may not be directly used
+#[allow(unused_imports)]
 pub use initializer::*;
+#[allow(unused_imports)]
 pub use opener::*;
 pub use project::Doc;
 pub use utils::is_omnidoc_project;

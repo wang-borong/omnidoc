@@ -63,7 +63,7 @@ pub fn create_figure_service(tool_overrides: Vec<(&str, Option<String>)>) -> Res
 }
 
 // Re-export path functions for backward compatibility
-pub use crate::utils::path::{check_omnidoc_project, determine_project_path};
+pub use crate::utils::path::check_omnidoc_project;
 
 /// Convert MergedConfig to Doc's envs HashMap format
 pub fn merged_config_to_envs(
@@ -75,11 +75,4 @@ pub fn merged_config_to_envs(
     envs.insert("texinputs", merged_config.texinputs.clone());
     envs.insert("bibinputs", merged_config.bibinputs.clone());
     envs
-}
-
-/// Helper to create BuildExecutor from MergedConfig
-pub fn create_build_executor(
-    merged_config: &MergedConfig,
-) -> crate::build::executor::BuildExecutor {
-    crate::build::executor::BuildExecutor::new(merged_config.tool_paths.clone())
 }

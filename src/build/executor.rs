@@ -71,7 +71,6 @@ impl BuildExecutor {
         })?;
 
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(OmniDocError::CommandNonZeroExit {
                 code: output.status.code(),
                 command: format!("{} {}", tool_path, args.join(" ")),

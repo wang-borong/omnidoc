@@ -1,5 +1,5 @@
 use crate::config::{CliOverrides, ConfigManager, MergedConfig};
-use crate::error::{OmniDocError, Result};
+use crate::error::Result;
 use crate::utils::{error, path};
 use std::collections::HashMap;
 use std::path::PathBuf;

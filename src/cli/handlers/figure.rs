@@ -2,7 +2,7 @@ use crate::cli::commands::FigureSubcommand;
 use crate::cli::handlers::common::create_figure_service;
 use crate::doc::services::FigureService;
 use crate::error::{OmniDocError, Result};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Bitfield options for figure generation
 #[derive(Default, Clone)]

@@ -216,7 +216,7 @@ impl<'a> Doc<'a> {
 
     fn create_entry(&self, title: &str, doctype_str: &str) -> Result<()> {
         // First try dynamic template by key
-        if let Some((content, is_markdown, file_name)) =
+        if let Some((content, _is_markdown, file_name)) =
             try_generate_dynamic(doctype_str, title, &self.author)
         {
             if fs::exists(Path::new(&file_name)) {

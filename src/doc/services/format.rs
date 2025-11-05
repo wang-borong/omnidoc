@@ -1,8 +1,7 @@
 use crate::error::{OmniDocError, Result};
 use crate::utils::fs;
 use regex::Regex;
-use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::OnceLock;
 
 /// 格式化服务
@@ -23,6 +22,7 @@ struct RegexCache {
     digit_hyphen: Regex,
     date_format: Regex,
     han_space_han: Regex,
+    #[allow(dead_code)] // May be used in future versions
     math_pattern: Regex,
     code_inline_pattern: Regex,
 
@@ -40,6 +40,7 @@ struct RegexCache {
     link_pattern: Regex,
 
     // 语义格式化
+    #[allow(dead_code)] // May be used in future versions
     indent_pattern: Regex,
     sentence_break: Regex,
     indent_simple: Regex,

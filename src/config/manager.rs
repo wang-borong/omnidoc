@@ -2,7 +2,7 @@ use crate::config::cli::CliOverrides;
 use crate::config::global::GlobalConfig;
 use crate::config::project::ProjectConfig;
 use crate::config::schema::*;
-use crate::error::{OmniDocError, Result};
+use crate::error::Result;
 use std::collections::HashMap;
 use std::env;
 use std::path::Path;
@@ -12,6 +12,7 @@ use std::path::Path;
 pub struct ConfigManager {
     global: GlobalConfig,
     project: Option<ProjectConfig>,
+    #[allow(dead_code)] // Kept for potential future use or debugging
     cli_overrides: CliOverrides,
     merged: MergedConfig,
 }

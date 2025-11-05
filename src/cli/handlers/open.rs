@@ -1,7 +1,6 @@
 use crate::cli::handlers::common::{create_config_manager_default, merged_config_to_envs};
-use crate::constants::paths_internal;
 use crate::doc::Doc;
-use crate::error::{OmniDocError, Result};
+use crate::error::Result;
 use crate::utils::path;
 
 /// Handle the 'open' command

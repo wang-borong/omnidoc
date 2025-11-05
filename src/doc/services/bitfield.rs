@@ -714,7 +714,9 @@ impl BitfieldRenderer {
 
 /// SVG 构建器
 struct SvgBuilder {
+    #[allow(dead_code)] // May be used in future versions
     width: u32,
+    #[allow(dead_code)] // May be used in future versions
     height: u32,
     content: String,
     indent: usize,

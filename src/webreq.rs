@@ -9,7 +9,7 @@ pub fn https_download<P>(url: &str, file: P) -> Result<()>
 where
     P: AsRef<Path>,
 {
-    let response = get(url).map_err(|e| OmniDocError::HttpError {
+    let response = get(url).map_err(|_e| OmniDocError::HttpError {
         status: 0,
         url: url.to_string(),
     })?;
@@ -22,7 +22,7 @@ where
     }
 
     let mut file = File::create(file).map_err(|e| OmniDocError::Io(e))?;
-    let mut content = Cursor::new(response.bytes().map_err(|e| OmniDocError::HttpError {
+    let mut content = Cursor::new(response.bytes().map_err(|_e| OmniDocError::HttpError {
         status: 0,
         url: url.to_string(),
     })?);

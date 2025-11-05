@@ -1,5 +1,5 @@
 use crate::config::schema::PathConfig;
-use crate::constants::{paths, paths_internal};
+use crate::constants::paths_internal;
 use std::env;
 use std::path::Path;
 
