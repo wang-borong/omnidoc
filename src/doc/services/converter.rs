@@ -44,6 +44,7 @@ impl ConverterService {
         // 写入临时文件：元数据头 + 原始内容，然后以该临时文件作为 Pandoc 输入
         let mut effective_input: PathBuf = input.to_path_buf();
         let mut temp_to_cleanup: Option<PathBuf> = None;
+        let mut use_cn = false;
         if let Ok(content) = fs::read_to_string(input) {
             let trimmed = content.trim_start();
             let has_frontmatter = trimmed.starts_with("---\n") || trimmed.starts_with("---\r\n");
@@ -57,7 +58,7 @@ impl ConverterService {
                     .unwrap_or("Unknown Author");
 
                 // 语言：默认中文（保持与 Python 默认一致）；英文时使用更简洁的头部
-                let use_cn = match lang {
+                use_cn = match lang {
                     Some(l) => l.eq_ignore_ascii_case("cn") || l.eq_ignore_ascii_case("zh"),
                     None => true,
                 };
@@ -89,7 +90,7 @@ impl ConverterService {
         }
 
         // 构建 Pandoc 选项（可能使用临时合成的输入文件）
-        let options = self.build_pandoc_pdf_options(&effective_input, &output_path);
+        let options = self.build_pandoc_pdf_options(&effective_input, &output_path, use_cn);
 
         // 执行转换
         let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
@@ -138,7 +139,7 @@ impl ConverterService {
     }
 
     /// 构建 Pandoc PDF 选项
-    fn build_pandoc_pdf_options(&self, input: &Path, output: &Path) -> Vec<String> {
+    fn build_pandoc_pdf_options(&self, input: &Path, output: &Path, use_cn: bool) -> Vec<String> {
         let mut options =
             self.build_pandoc_common_options(input, output, pandoc::DEFAULT_FROM_PDF, None);
 
@@ -172,16 +173,14 @@ impl ConverterService {
         // Citeproc（PDF 专用）
         options.push("--citeproc".to_string());
 
-        // Crossref YAML（如果配置了语言且不是英文）
-        if let Some(lang) = &self.config.pandoc_lang {
-            if lang != "en" {
-                let omnidoc_lib = self.get_omnidoc_lib_path();
-                let crossref_yaml = self.config.pandoc_crossref_yaml.clone().unwrap_or_else(|| {
+        if use_cn {
+            let omnidoc_lib = self.get_omnidoc_lib_path();
+            let crossref_yaml =
+                self.config.pandoc_crossref_yaml.clone().unwrap_or_else(|| {
                     format!("{}/{}", omnidoc_lib, pandoc::LIB_PANDOC_CROSSREF_YAML)
                 });
-                options.push(pandoc::FLAG_META_SHORT.to_string());
-                options.push(format!("crossrefYaml={}", crossref_yaml));
-            }
+            options.push(pandoc::FLAG_META_SHORT.to_string());
+            options.push(format!("crossrefYaml={}", crossref_yaml));
         }
 
         options
