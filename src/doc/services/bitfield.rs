@@ -25,6 +25,117 @@ pub struct BitfieldEntry {
     pub msbm: u32,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum BitfieldJsonDocument {
+    Entries(Vec<BitfieldEntry>),
+    WithOptions(BitfieldDocumentWithOptions),
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct BitfieldDocumentWithOptions {
+    #[serde(flatten)]
+    overrides: BitfieldRenderOverrides,
+    #[serde(
+        default,
+        alias = "bitfields",
+        alias = "fields",
+        alias = "items",
+        alias = "data"
+    )]
+    entries: Option<Vec<BitfieldEntry>>,
+}
+
+impl BitfieldDocumentWithOptions {
+    fn into_parts(self) -> Result<(Vec<BitfieldEntry>, BitfieldRenderOverrides), String> {
+        let entries = self.entries.unwrap_or_default();
+        if entries.is_empty() {
+            return Err("Bitfield JSON config must include an 'entries' array".to_string());
+        }
+        Ok((entries, self.overrides))
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct BitfieldRenderOverrides {
+    pub vspace: Option<u32>,
+    pub hspace: Option<u32>,
+    pub lanes: Option<u32>,
+    pub bits: Option<u32>,
+    pub fontfamily: Option<String>,
+    pub fontweight: Option<String>,
+    pub fontsize: Option<u32>,
+    pub strokewidth: Option<f32>,
+    pub beautify: Option<bool>,
+    pub json5: Option<bool>,
+    pub no_json5: Option<bool>,
+    pub compact: Option<bool>,
+    pub hflip: Option<bool>,
+    pub vflip: Option<bool>,
+    pub trim: Option<f32>,
+    pub uneven: Option<bool>,
+    #[serde(default)]
+    pub legend: Option<serde_json::Value>,
+}
+
+impl BitfieldRenderOverrides {
+    fn apply_to(self, target: &mut crate::cli::handlers::BitfieldOptions) -> Result<(), String> {
+        if let Some(v) = self.vspace {
+            target.vspace = Some(v);
+        }
+        if let Some(v) = self.hspace {
+            target.hspace = Some(v);
+        }
+        if let Some(v) = self.lanes {
+            target.lanes = Some(v);
+        }
+        if let Some(v) = self.bits {
+            target.bits = Some(v);
+        }
+        if let Some(v) = self.fontfamily {
+            target.fontfamily = v;
+        }
+        if let Some(v) = self.fontweight {
+            target.fontweight = v;
+        }
+        if let Some(v) = self.fontsize {
+            target.fontsize = v;
+        }
+        if let Some(v) = self.strokewidth {
+            target.strokewidth = v;
+        }
+        if let Some(v) = self.beautify {
+            target.beautify = v;
+        }
+        if let Some(v) = self.json5 {
+            target.json5 = v;
+        }
+        if let Some(v) = self.no_json5 {
+            target.no_json5 = v;
+        }
+        if let Some(v) = self.compact {
+            target.compact = v;
+        }
+        if let Some(v) = self.hflip {
+            target.hflip = v;
+        }
+        if let Some(v) = self.vflip {
+            target.vflip = v;
+        }
+        if let Some(v) = self.trim {
+            target.trim = Some(v);
+        }
+        if let Some(v) = self.uneven {
+            target.uneven = v;
+        }
+        if let Some(raw_legend) = self.legend {
+            target.legend = parse_legend_value(raw_legend)?;
+        }
+
+        Ok(())
+    }
+}
+
 /// Bitfield 渲染器配置
 #[derive(Debug, Clone)]
 pub struct BitfieldRenderer {
@@ -1031,25 +1142,164 @@ pub fn render_bitfield_from_json(
         fs::read_to_string(json_path).map_err(|e| format!("Failed to read JSON file: {}", e))?;
 
     // 尝试解析 JSON5 或普通 JSON
-    let entries: Vec<BitfieldEntry> = if options.json5 {
+    let document: BitfieldJsonDocument = if options.json5 {
         // 如果要求使用 json5，但 Rust 没有原生支持，先尝试普通 JSON
         serde_json::from_str(&json_content).map_err(|e| format!("Failed to parse JSON: {}", e))?
     } else if options.no_json5 {
         serde_json::from_str(&json_content).map_err(|e| format!("Failed to parse JSON: {}", e))?
     } else {
         // 默认尝试普通 JSON，如果失败可以考虑提示用户
-        serde_json::from_str(&json_content)
-            .map_err(|e| format!("Failed to parse JSON: {}. Note: JSON5 support requires json5 crate or manual parsing.", e))?
+        serde_json::from_str(&json_content).map_err(|e| {
+            format!("Failed to parse JSON: {}. Note: JSON5 support requires json5 crate or manual parsing.", e)
+        })?
     };
 
-    let mut renderer = BitfieldRenderer::new(options)?;
-    let mut entries = entries;
+    let (mut entries, overrides) = match document {
+        BitfieldJsonDocument::Entries(entries) => (entries, None),
+        BitfieldJsonDocument::WithOptions(doc) => {
+            let (entries, overrides) = doc.into_parts()?;
+            (entries, Some(overrides))
+        }
+    };
+
+    let mut effective_options = options.clone();
+    if let Some(overrides) = overrides {
+        overrides.apply_to(&mut effective_options)?;
+    }
+
+    if entries.is_empty() {
+        return Err("Bitfield description is empty".to_string());
+    }
+
+    let mut renderer = BitfieldRenderer::new(&effective_options)?;
     let mut svg = renderer.render(&mut entries)?;
 
     // 如果启用了 beautify，格式化 SVG
-    if options.beautify {
+    if effective_options.beautify {
         svg = beautify_svg(&svg);
     }
 
     Ok(svg)
+}
+
+fn parse_legend_value(value: serde_json::Value) -> Result<Vec<(String, String)>, String> {
+    use serde_json::Value;
+
+    match value {
+        Value::Null => Ok(Vec::new()),
+        Value::Object(map) => {
+            let mut legend = Vec::new();
+            for (key, val) in map {
+                legend.push((key, value_to_string(val)));
+            }
+            Ok(legend)
+        }
+        Value::Array(items) => {
+            let mut legend = Vec::new();
+            for item in items {
+                match item {
+                    Value::String(text) => legend.push(parse_legend_string(&text)?),
+                    Value::Object(map) => {
+                        if map.len() == 1 {
+                            let (key, val) = map.into_iter().next().unwrap();
+                            legend.push((key, value_to_string(val)));
+                        } else {
+                            let name_value = map
+                                .get("name")
+                                .or_else(|| map.get("key"))
+                                .or_else(|| map.get("label"))
+                                .cloned();
+                            let desc_value = map
+                                .get("value")
+                                .or_else(|| map.get("desc"))
+                                .or_else(|| map.get("description"))
+                                .or_else(|| map.get("text"))
+                                .cloned();
+                            match (name_value, desc_value) {
+                                (Some(name), Some(desc)) => {
+                                    legend.push((value_to_string(name), value_to_string(desc)));
+                                }
+                                _ => {
+                                    return Err("Legend array objects must include both name(key) and value(desc) fields".to_string());
+                                }
+                            }
+                        }
+                    }
+                    other => legend.push(parse_legend_string(&value_to_string(other))?),
+                }
+            }
+            Ok(legend)
+        }
+        Value::String(text) => Ok(vec![parse_legend_string(&text)?]),
+        other => Err(format!(
+            "Legend must be an object, array, or string. Got: {}",
+            other
+        )),
+    }
+}
+
+fn parse_legend_string(value: &str) -> Result<(String, String), String> {
+    let mut parts = value.splitn(2, ':');
+    let key = parts
+        .next()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "Legend entries must include a name before ':'".to_string())?;
+    let desc = parts.next().map(|s| s.trim()).unwrap_or("");
+    Ok((key.to_string(), desc.to_string()))
+}
+
+fn value_to_string(value: serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s,
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::handlers::BitfieldOptions;
+
+    #[test]
+    fn document_with_overrides_parses_entries() {
+        let json = r#"
+        {
+            "vspace": 160,
+            "beautify": true,
+            "entries": [
+                {"bits": 8},
+                {"bits": 1}
+            ],
+            "legend": [
+                "LEN:Length",
+                {"ST": "Status"}
+            ]
+        }
+        "#;
+
+        let document: BitfieldJsonDocument = serde_json::from_str(json).unwrap();
+        match document {
+            BitfieldJsonDocument::Entries(_) => panic!("expected overrides"),
+            BitfieldJsonDocument::WithOptions(doc) => {
+                let (entries, overrides) = doc.into_parts().unwrap();
+                assert_eq!(entries.len(), 2);
+                let mut opts = BitfieldOptions {
+                    fontfamily: "sans-serif".to_string(),
+                    fontweight: "normal".to_string(),
+                    fontsize: 14,
+                    strokewidth: 1.0,
+                    ..Default::default()
+                };
+                overrides.apply_to(&mut opts).unwrap();
+                assert_eq!(opts.vspace, Some(160));
+                assert!(opts.beautify);
+                assert_eq!(opts.legend.len(), 2);
+                assert_eq!(opts.legend[0], ("LEN".to_string(), "Length".to_string()));
+            }
+        }
+    }
 }

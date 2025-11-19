@@ -275,6 +275,25 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
       - `--uneven`: Uneven lanes
       - `--legend <LEGEND>`: Legend item (format: NAME:TYPE, can be used multiple times)
 
+      Bitfield JSON sources can embed the same rendering options so you don't have to repeat CLI flags. Define an object that includes the option names alongside an `entries` array (aliases: `bitfields`, `fields`, `items`, `data`):
+
+      ```json
+      {
+        "vspace": 130,
+        "beautify": true,
+        "legend": {
+          "LEN": "Frame length",
+          "ST": "Trigger status"
+        },
+        "entries": [
+          { "bits": 8, "name": "LEN", "attr": "0" },
+          { "bits": 1, "name": "ST", "attr": ["0: no trigger", "1: triggered"] }
+        ]
+      }
+      ```
+
+      CLI flags always override the values stored in the JSON document.
+
     - **Generate diagrams from Draw.io files**
 
       ```bash

@@ -108,7 +108,14 @@ pub fn handle_figure(
             format,
             force: subcommand_force,
             output,
-        }) => handle_convert(sources, inkscape, imagemagick, format, force || subcommand_force, output),
+        }) => handle_convert(
+            sources,
+            inkscape,
+            imagemagick,
+            format,
+            force || subcommand_force,
+            output,
+        ),
         None => {
             // 自动检测文件类型
             if sources.is_empty() {

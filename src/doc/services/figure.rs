@@ -422,10 +422,23 @@ fn detect_file_type(path: &Path) -> Result<FigureType> {
             // Check if it's a bitfield JSON by reading a small portion
             if let Ok(content) = fs::read_to_string(path) {
                 // Simple heuristic: check if it looks like a bitfield JSON array
-                let trimmed = content.trim();
-                if trimmed.starts_with('[') && trimmed.contains("bits") {
-                    return Ok(FigureType::Bitfield);
-                }
+                 let trimmed = content.trim();
+                 if (trimmed.starts_with('[') || trimmed.starts_with('{'))
+                     && trimmed.contains("\"bits\"")
+                 {
+                     return Ok(FigureType::Bitfield);
+                 }
+                 if trimmed.starts_with('{') {
+                     if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                         if value.get("entries").is_some()
+                             || value.get("bitfields").is_some()
+                             || value.get("fields").is_some()
+                             || value.get("items").is_some()
+                         {
+                             return Ok(FigureType::Bitfield);
+                         }
+                     }
+                 }
             }
             Ok(FigureType::Unknown)
         }
