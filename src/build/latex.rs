@@ -139,8 +139,7 @@ impl LatexBuilder {
         }
 
         // Job name (输出文件名)
-        options.push("-jobname".to_string());
-        options.push(target_name.to_string());
+        options.push(format!("-jobname={}", target_name));
 
         // 输入文件
         options.push(entry_file.to_string_lossy().to_string());
@@ -287,10 +286,10 @@ impl BuildPipeline for LatexBuilder {
             if verbose {
                 println!("⚠ Build failed, attempting to clean...");
             }
+            let jobname_arg = format!("-jobname={}", target_name);
             let clean_options = vec![
                 "-c",
-                "-jobname",
-                &target_name,
+                &jobname_arg,
                 entry_file.to_str().unwrap_or(""),
             ];
             let clean_args: Vec<&str> = clean_options.iter().map(|s| *s).collect();
