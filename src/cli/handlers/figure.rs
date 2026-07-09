@@ -5,7 +5,7 @@ use crate::error::{OmniDocError, Result};
 use std::path::PathBuf;
 
 /// Bitfield options for figure generation
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct BitfieldOptions {
     pub vspace: Option<u32>,
     pub hspace: Option<u32>,
@@ -24,6 +24,30 @@ pub struct BitfieldOptions {
     pub trim: Option<f32>,
     pub uneven: bool,
     pub legend: Vec<(String, String)>,
+}
+
+impl Default for BitfieldOptions {
+    fn default() -> Self {
+        Self {
+            vspace: None,
+            hspace: None,
+            lanes: None,
+            bits: None,
+            fontfamily: "sans-serif".to_string(),
+            fontweight: "normal".to_string(),
+            fontsize: 14,
+            strokewidth: 1.0,
+            beautify: false,
+            json5: false,
+            no_json5: false,
+            compact: false,
+            hflip: false,
+            vflip: false,
+            trim: None,
+            uneven: false,
+            legend: Vec::new(),
+        }
+    }
 }
 
 /// Handle the 'figure' command

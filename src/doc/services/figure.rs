@@ -364,6 +364,22 @@ impl FigureService {
         output_path: &Path,
         format: &str,
     ) -> Result<()> {
+        if let Ok(rsvg_convert_path) = self.executor.check_tool("rsvg-convert") {
+            let args = vec![
+                "-f",
+                format,
+                "-o",
+                output_path
+                    .to_str()
+                    .ok_or_else(|| OmniDocError::Other("Invalid output path".to_string()))?,
+                svg_path
+                    .to_str()
+                    .ok_or_else(|| OmniDocError::Other("Invalid SVG path".to_string()))?,
+            ];
+            self.executor.execute(&rsvg_convert_path, &args, false)?;
+            return Ok(());
+        }
+
         // Try inkscape first (better for SVG)
         if let Ok(inkscape_path) = self.executor.check_tool("inkscape") {
             let args = vec![
@@ -396,7 +412,7 @@ impl FigureService {
         }
 
         Err(OmniDocError::Other(
-            "No SVG conversion tool found (inkscape or imagemagick)".to_string(),
+            "No SVG conversion tool found (rsvg-convert, inkscape, or imagemagick)".to_string(),
         ))
     }
 }

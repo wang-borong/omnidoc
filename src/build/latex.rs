@@ -2,12 +2,15 @@ use crate::build::executor::BuildExecutor;
 use crate::build::pipeline::{BuildPipeline, ProjectType};
 use crate::config::MergedConfig;
 use crate::diagnostics::summarize_latex_log;
+use crate::doc::services::FigureService;
 use crate::error::{OmniDocError, Result};
 use crate::utils::fs;
 use dirs::data_local_dir;
-use std::collections::BTreeMap;
+use regex::Regex;
+use std::collections::{BTreeMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
 
 /// LaTeX 构建器
 /// 实现 top.mk 的 latex 构建功能
@@ -91,9 +94,7 @@ impl LatexBuilder {
         (drawio_files, dot_mmd_files, json_files)
     }
 
-    /// 生成图片
-    /// 这部分功能将在后续的 FigureService 中实现
-    /// 这里先提供一个占位实现
+    /// 生成被 LaTeX 文档引用的派生图片。
     fn generate_figures(&self, project_path: &Path, verbose: bool) -> Result<()> {
         let (drawio_files, dot_mmd_files, json_files) = self.find_figure_sources(project_path);
 
@@ -102,29 +103,181 @@ impl LatexBuilder {
             return Ok(());
         }
 
-        // 创建输出目录
         let figures_dir = self
             .config
             .figure_output
             .as_ref()
             .map(|s| project_path.join(s))
-            .unwrap_or_else(|| project_path.join("figures"));
+            .unwrap_or_else(|| project_path.join(&self.config.paths.figures_dir));
 
         if !fs::exists(&figures_dir) {
             fs::create_dir_all(&figures_dir)?;
         }
 
-        // TODO: 实现图片生成逻辑
-        // 这里需要调用 figure-generator.py 和 bit-field.py
-        // 暂时先跳过，将在 FigureService 中实现
+        let referenced_figures = self.referenced_figure_names(project_path);
+        let mut sources = Vec::new();
+        sources.extend(Self::filter_referenced_figure_sources(
+            &json_files,
+            &referenced_figures,
+        ));
+        sources.extend(Self::filter_referenced_figure_sources(
+            &drawio_files,
+            &referenced_figures,
+        ));
+        sources.extend(Self::filter_referenced_figure_sources(
+            &dot_mmd_files
+                .into_iter()
+                .filter(|path| {
+                    matches!(
+                        path.extension()
+                            .and_then(|extension| extension.to_str())
+                            .map(|extension| extension.to_ascii_lowercase())
+                            .as_deref(),
+                        Some("dot" | "gv")
+                    )
+                })
+                .collect::<Vec<_>>(),
+            &referenced_figures,
+        ));
 
-        if verbose
-            && (!drawio_files.is_empty() || !dot_mmd_files.is_empty() || !json_files.is_empty())
-        {
-            println!("ℹ Figure generation will be handled by FigureService");
+        if sources.is_empty() {
+            if verbose {
+                println!("No referenced generated figures found.");
+            }
+            return Ok(());
         }
 
+        if verbose {
+            println!(
+                "Generating {} referenced figure source(s) into {}",
+                sources.len(),
+                figures_dir.display()
+            );
+        }
+
+        let figure_service = FigureService::new(self.config.clone())?;
+        figure_service.generate_figures(
+            project_path,
+            &sources,
+            Some(&figures_dir),
+            Some("pdf"),
+            false,
+            None,
+        )?;
+
         Ok(())
+    }
+
+    fn filter_referenced_figure_sources(
+        sources: &[PathBuf],
+        referenced_figures: &HashSet<String>,
+    ) -> Vec<PathBuf> {
+        sources
+            .iter()
+            .filter(|path| {
+                if referenced_figures.is_empty() {
+                    return true;
+                }
+                path.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .map(|stem| referenced_figures.contains(stem))
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn referenced_figure_names(&self, project_path: &Path) -> HashSet<String> {
+        let mut names = HashSet::new();
+        let Ok(figure_re) =
+            Regex::new(r#"\\(?:Figure|includegraphics)(?:\[[^\]]*\])?\{(?P<name>[^{}]+)\}"#)
+        else {
+            return names;
+        };
+
+        for entry in WalkDir::new(project_path)
+            .into_iter()
+            .filter_entry(|entry| Self::should_scan_tex_path(entry.path(), project_path))
+            .flatten()
+            .filter(|entry| {
+                entry.file_type().is_file()
+                    && entry.path().extension().and_then(|value| value.to_str()) == Some("tex")
+            })
+        {
+            let Ok(content) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
+            for capture in figure_re.captures_iter(&content) {
+                let Some(name) = capture.name("name").map(|value| value.as_str().trim()) else {
+                    continue;
+                };
+                if name.is_empty() {
+                    continue;
+                }
+                let stem = Path::new(name)
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or(name);
+                names.insert(stem.to_string());
+            }
+        }
+
+        names
+    }
+
+    fn should_scan_tex_path(path: &Path, root: &Path) -> bool {
+        if path == root {
+            return true;
+        }
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
+        !matches!(
+            name,
+            ".git" | "build" | "target" | ".target" | ".cache" | ".omnidoc-cache" | "node_modules"
+        )
+    }
+
+    fn ensure_bibliography_tools(&self, project_path: &Path) -> Result<()> {
+        if !self.project_uses_biber(project_path) {
+            return Ok(());
+        }
+
+        self.executor.check_tool("biber").map(|_| ()).map_err(|_| {
+            OmniDocError::Project(
+                "This LaTeX project uses biblatex/\\printbibliography, but the 'biber' command was not found. Install biber (for example texlive-biber or the equivalent TeX Live package) and rebuild.".to_string(),
+            )
+        })
+    }
+
+    fn project_uses_biber(&self, project_path: &Path) -> bool {
+        for entry in WalkDir::new(project_path)
+            .into_iter()
+            .filter_entry(|entry| Self::should_scan_tex_path(entry.path(), project_path))
+            .flatten()
+            .filter(|entry| {
+                entry.file_type().is_file()
+                    && entry.path().extension().and_then(|value| value.to_str()) == Some("tex")
+            })
+        {
+            let Ok(content) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
+            let lower = content.to_ascii_lowercase();
+            if lower.contains("backend=bibtex") {
+                continue;
+            }
+            if lower.contains("\\printbibliography")
+                || lower.contains("\\addbibresource")
+                || lower.contains("\\usepackage{biblatex}")
+                || lower.contains("]{biblatex}")
+            {
+                return true;
+            }
+        }
+
+        false
     }
 
     /// 构建 latexmk 选项
@@ -446,6 +599,7 @@ impl BuildPipeline for LatexBuilder {
         if !drawio.is_empty() || !dot_mmd.is_empty() || !json.is_empty() {
             self.generate_figures(project_path, verbose)?;
         }
+        self.ensure_bibliography_tools(project_path)?;
 
         let latex_engine = self.executor.check_tool("latex_engine")?;
         let use_tectonic = Self::is_tectonic_engine(&latex_engine);
