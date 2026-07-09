@@ -21,13 +21,23 @@ where
         });
     }
 
-    let mut file = File::create(file).map_err(|e| OmniDocError::Io(e))?;
-    let mut content = Cursor::new(response.bytes().map_err(|_e| OmniDocError::HttpError {
+    let content = response.bytes().map_err(|_e| OmniDocError::HttpError {
         status: 0,
         url: url.to_string(),
-    })?);
+    })?;
 
-    copy(&mut content, &mut file).map_err(|e| OmniDocError::Io(e))?;
+    write_bytes_to_file(content.as_ref(), file)?;
+
+    Ok(())
+}
+
+fn write_bytes_to_file<P>(bytes: &[u8], file: P) -> Result<()>
+where
+    P: AsRef<Path>,
+{
+    let mut file = File::create(file).map_err(OmniDocError::Io)?;
+    let mut content = Cursor::new(bytes);
+    copy(&mut content, &mut file).map_err(OmniDocError::Io)?;
 
     Ok(())
 }
@@ -35,13 +45,31 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_file_path(name: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "omnidoc_{}_{}_{}",
+            name,
+            std::process::id(),
+            unique
+        ))
+    }
 
     #[test]
-    fn test_http_download() {
-        let r = https_download(
-            "https://raw.githubusercontent.com/wang-borong/embedded-knowledge/main/Makefile",
-            "downloadfile",
-        );
-        assert_eq!(r.is_ok(), true);
+    fn writes_downloaded_bytes_to_file() {
+        let output = temp_file_path("download");
+
+        write_bytes_to_file(b"hello omnidoc", &output).expect("write bytes");
+
+        let content = fs::read(&output).expect("read output");
+        assert_eq!(content, b"hello omnidoc");
+
+        let _ = fs::remove_file(output);
     }
 }

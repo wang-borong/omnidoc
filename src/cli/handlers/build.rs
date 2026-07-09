@@ -6,11 +6,19 @@ use crate::error::{OmniDocError, Result};
 use crate::utils::path;
 
 /// Handle the 'build' command
-pub fn handle_build(path: Option<String>, verbose: bool) -> Result<()> {
+pub fn handle_build(
+    path: Option<String>,
+    to: Option<String>,
+    pdf_engine: Option<String>,
+    verbose: bool,
+) -> Result<()> {
     let project_path = path::determine_project_path(path)?;
     check_omnidoc_project(&project_path)?;
 
-    let cli_overrides = CliOverrides::new().with_verbose(verbose);
+    let mut cli_overrides = CliOverrides::new().with_verbose(verbose).with_to(to);
+    if let Some(engine) = pdf_engine {
+        cli_overrides = cli_overrides.with_tool_path("latex_engine".to_string(), Some(engine));
+    }
     let build_service = create_build_service(Some(&project_path), cli_overrides.clone())?;
 
     // 设置环境变量

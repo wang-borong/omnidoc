@@ -39,6 +39,16 @@ impl CliOverrides {
         self
     }
 
+    pub fn with_from(mut self, from: Option<String>) -> Self {
+        self.from = from;
+        self
+    }
+
+    pub fn with_to(mut self, to: Option<String>) -> Self {
+        self.to = to;
+        self
+    }
+
     pub fn with_verbose(mut self, verbose: bool) -> Self {
         self.verbose = Some(verbose);
         self

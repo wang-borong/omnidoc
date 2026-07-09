@@ -1,3 +1,5 @@
+use crate::constants::pandoc;
+use crate::diagnostics::summarize_command_output;
 use crate::error::{OmniDocError, Result};
 use std::io::Write;
 use std::path::PathBuf;
@@ -30,9 +32,14 @@ impl BuildExecutor {
                     if let Ok(path) = which::which(path) {
                         return Ok(path.to_string_lossy().to_string());
                     }
+
+                    return Err(OmniDocError::Other(format!(
+                        "Configured LaTeX engine '{}' not found. Please install it or update the latex_engine setting.",
+                        path
+                    )));
                 }
                 // 默认使用 xelatex
-                "xelatex"
+                pandoc::DEFAULT_ENGINE_LATEX
             }
             _ => tool,
         };
@@ -71,9 +78,14 @@ impl BuildExecutor {
         })?;
 
         if !output.status.success() {
-            return Err(OmniDocError::CommandNonZeroExit {
+            let command = format!("{} {}", tool_path, args.join(" "));
+            let diagnostic = summarize_command_output(&output.stdout, &output.stderr)
+                .unwrap_or_else(|| "No command output was captured.".to_string());
+
+            return Err(OmniDocError::CommandFailed {
                 code: output.status.code(),
-                command: format!("{} {}", tool_path, args.join(" ")),
+                command,
+                output: diagnostic,
             });
         }
 
@@ -81,6 +93,10 @@ impl BuildExecutor {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if !stdout.is_empty() {
                 print!("{}", stdout);
+            }
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !stderr.is_empty() {
+                eprint!("{}", stderr);
             }
         }
 
@@ -96,9 +112,14 @@ impl BuildExecutor {
         })?;
 
         if !output.status.success() {
-            return Err(OmniDocError::CommandNonZeroExit {
+            let command = format!("{} {}", tool_path, args.join(" "));
+            let diagnostic = summarize_command_output(&output.stdout, &output.stderr)
+                .unwrap_or_else(|| "No command output was captured.".to_string());
+
+            return Err(OmniDocError::CommandFailed {
                 code: output.status.code(),
-                command: format!("{} {}", tool_path, args.join(" ")),
+                command,
+                output: diagnostic,
             });
         }
 
@@ -141,9 +162,12 @@ impl BuildExecutor {
 
         if !output.status.success() {
             let command_str = format!("{} {}", cmd, args.join(" "));
-            return Err(OmniDocError::CommandNonZeroExit {
+            let diagnostic = summarize_command_output(&output.stdout, &output.stderr)
+                .unwrap_or_else(|| "No command output was captured.".to_string());
+            return Err(OmniDocError::CommandFailed {
                 code: output.status.code(),
                 command: command_str,
+                output: diagnostic,
             });
         }
 
@@ -158,5 +182,27 @@ impl BuildExecutor {
         })?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BuildExecutor;
+    use std::collections::HashMap;
+
+    #[test]
+    fn configured_missing_latex_engine_does_not_fallback() {
+        let mut tool_paths = HashMap::new();
+        tool_paths.insert(
+            "latex_engine".to_string(),
+            Some("__omnidoc_missing_latex_engine__".to_string()),
+        );
+        let executor = BuildExecutor::new(tool_paths);
+
+        let err = executor
+            .check_tool("latex_engine")
+            .expect_err("missing configured engine should fail");
+
+        assert!(err.to_string().contains("__omnidoc_missing_latex_engine__"));
     }
 }

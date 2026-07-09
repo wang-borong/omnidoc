@@ -41,7 +41,7 @@ pub fn handle_config(
         config.lib = LibConfig {
             lib: Some(LibSection {
                 path: Some(lib_path),
-                url: Some("https://github.com/wang-borong/omnidoc-libs".to_string()),
+                url: Some(config_consts::DEFAULT_LIB_URL.to_string()),
             }),
         };
     }

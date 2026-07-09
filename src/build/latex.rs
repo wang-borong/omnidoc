@@ -1,6 +1,7 @@
 use crate::build::executor::BuildExecutor;
 use crate::build::pipeline::{BuildPipeline, ProjectType};
 use crate::config::MergedConfig;
+use crate::diagnostics::summarize_latex_log;
 use crate::error::{OmniDocError, Result};
 use crate::utils::fs;
 use dirs::data_local_dir;
@@ -147,6 +148,75 @@ impl LatexBuilder {
         options
     }
 
+    fn build_tectonic_options(&self, entry_file: &Path, outdir: &Path) -> Vec<String> {
+        vec![
+            "--outdir".to_string(),
+            outdir.to_string_lossy().to_string(),
+            "--keep-logs".to_string(),
+            "--keep-intermediates".to_string(),
+            entry_file.to_string_lossy().to_string(),
+        ]
+    }
+
+    fn is_tectonic_engine(engine: &str) -> bool {
+        Path::new(engine)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .map(|name| name.eq_ignore_ascii_case("tectonic"))
+            .unwrap_or_else(|| engine.eq_ignore_ascii_case("tectonic"))
+    }
+
+    fn find_latex_log_summary(
+        &self,
+        project_path: &Path,
+        outdir: &Path,
+        entry_file: &Path,
+        target_name: &str,
+    ) -> Option<String> {
+        let entry_stem = entry_file
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or(target_name);
+        let candidates = [
+            outdir.join(format!("{}.log", target_name)),
+            project_path.join(format!("{}.log", target_name)),
+            outdir.join(format!("{}.log", entry_stem)),
+            project_path.join(format!("{}.log", entry_stem)),
+        ];
+
+        for log_path in candidates {
+            if let Some(summary) = summarize_latex_log(&log_path) {
+                return Some(format!(
+                    "LaTeX log summary ({}):\n{}",
+                    log_path.display(),
+                    summary
+                ));
+            }
+        }
+
+        None
+    }
+
+    fn copy_tectonic_output(
+        &self,
+        entry_file: &Path,
+        outdir: &Path,
+        target_name: &str,
+    ) -> Result<()> {
+        let entry_stem = entry_file
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or(target_name);
+        let produced_pdf = outdir.join(format!("{}.pdf", entry_stem));
+        let target_pdf = outdir.join(format!("{}.pdf", target_name));
+
+        if produced_pdf != target_pdf && fs::exists(&produced_pdf) {
+            fs::copy(&produced_pdf, &target_pdf)?;
+        }
+
+        Ok(())
+    }
+
     /// 设置 LaTeX 环境变量
     fn setup_latex_env(&self) -> Result<()> {
         use std::env;
@@ -250,6 +320,7 @@ impl BuildPipeline for LatexBuilder {
         if !fs::exists(&outdir) {
             fs::create_dir_all(&outdir)?;
         }
+        std::env::set_var("OUTDIR", &outdir);
 
         // 确定目标名称
         let target_name = self.config.target.as_ref().cloned().unwrap_or_else(|| {
@@ -267,34 +338,53 @@ impl BuildPipeline for LatexBuilder {
             self.generate_figures(project_path, verbose)?;
         }
 
-        // 构建 latexmk 命令
-        let options = self.build_latexmk_options(&entry_file, &target_name, verbose);
+        let latex_engine = self.executor.check_tool("latex_engine")?;
+        let use_tectonic = Self::is_tectonic_engine(&latex_engine);
+        let options = if use_tectonic {
+            self.build_tectonic_options(&entry_file, &outdir)
+        } else {
+            self.build_latexmk_options(&entry_file, &target_name, verbose)
+        };
 
         // 切换到项目目录执行（latexmk 需要相对路径）
         let original_dir = std::env::current_dir()?;
         std::env::set_current_dir(project_path)?;
 
-        // 执行 latexmk
         let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
-        let result = self.executor.execute("latexmk", &args[..], verbose);
+        let command = if use_tectonic {
+            "latex_engine"
+        } else {
+            "latexmk"
+        };
+        let result = self.executor.execute(command, &args[..], verbose);
 
         // 恢复原目录
         std::env::set_current_dir(original_dir)?;
 
         // 如果构建失败，尝试清理
-        if result.is_err() {
-            if verbose {
+        if let Err(err) = result {
+            if verbose && !use_tectonic {
                 println!("⚠ Build failed, attempting to clean...");
             }
-            let jobname_arg = format!("-jobname={}", target_name);
-            let clean_options = vec![
-                "-c",
-                &jobname_arg,
-                entry_file.to_str().unwrap_or(""),
-            ];
-            let clean_args: Vec<&str> = clean_options.iter().map(|s| *s).collect();
-            let _ = self.executor.execute("latexmk", &clean_args[..], false);
-            return result;
+            if !use_tectonic {
+                let jobname_arg = format!("-jobname={}", target_name);
+                let clean_options = ["-c", &jobname_arg, entry_file.to_str().unwrap_or("")];
+                let clean_args: Vec<&str> = clean_options.iter().copied().collect();
+                let _ = self.executor.execute("latexmk", &clean_args[..], false);
+            }
+
+            let mut message = err.to_string();
+            if let Some(log_summary) =
+                self.find_latex_log_summary(project_path, &outdir, &entry_file, &target_name)
+            {
+                message.push_str("\n\n");
+                message.push_str(&log_summary);
+            }
+            return Err(OmniDocError::Project(message));
+        }
+
+        if use_tectonic {
+            self.copy_tectonic_output(&entry_file, &outdir, &target_name)?;
         }
 
         // 检查输出文件

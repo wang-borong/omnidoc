@@ -1,7 +1,7 @@
 # omnidoc
 
 This is a wrapper, based on Pandoc and LaTeX, for a documentation writing system that helps manage document repositories.
-With omnidoc, you can write in Pandoc markdown or LaTeX and convert these files to PDF easily.
+With omnidoc, you can write in Pandoc markdown or LaTeX and convert these files to PDF, HTML, EPUB, DOCX, or LaTeX outputs easily.
 To use this tool, you need to learn how to write in [Pandoc markdown](https://pandoc.org/MANUAL.html#pandocs-markdown) or [LaTeX](https://www.overleaf.com/learn/latex/Learn_LaTeX_in_30_minutes).
 
 ## Dependencies
@@ -34,6 +34,16 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
   texlive-plaingeneric
   texlive-xetex
   ```
+
+- **Tectonic (optional)**  
+
+  Tectonic can be used as a lighter PDF engine. It downloads missing TeX packages on demand and can be selected per build:
+
+  ```bash
+  omnidoc build --pdf-engine tectonic
+  ```
+
+  For raw LaTeX projects, the default `latexmk` backend is still recommended when you depend on custom `latexmkrc` rules, external bibliography tools, or shell-escape workflows.
 
 - **Draw.io**  
 
@@ -125,15 +135,42 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
 3. **Build the repository**
 
-   Build your content into a PDF for review:
+   Build your content. Markdown projects can output `pdf`, `html`, `epub`, `docx`, or `latex`; LaTeX projects output PDF.
 
    ```bash
-   omnidoc build [PATH] [--verbose]
+   omnidoc build [PATH] [--to <FORMAT>] [--pdf-engine <ENGINE>] [--verbose]
    ```
 
    - If `PATH` is not specified, the current directory is used
+   - Use `--to html`, `--to epub`, `--to docx`, or `--to latex` for Markdown project builds
+   - Use `--pdf-engine tectonic` to compile PDFs with Tectonic instead of XeLaTeX
    - Use `--verbose` to show detailed build messages
-   - The build directory is `build/` (configurable via config), and the PDF file is named after the repository directory
+   - The build directory is `build/` (configurable via config), and the output file is named after the repository directory
+
+   Examples:
+
+   ```bash
+   omnidoc build
+   omnidoc build --to html
+   omnidoc build --to docx
+   omnidoc build --pdf-engine tectonic
+   ```
+
+   Build failures include a compact Pandoc/LaTeX diagnostic summary so the first relevant error is visible without reading the full `.log` file.
+
+   You can also persist build choices in `.omnidoc.toml`:
+
+   ```toml
+   [project]
+   entry = "main.md"
+   from = "markdown"
+   to = "html"
+   target = "manual"
+
+   [tools]
+   latex_engine = "tectonic"
+   # tectonic = "/custom/path/to/tectonic"
+   ```
 
 4. **Open the built PDF document**
 
@@ -550,4 +587,3 @@ The validator checks manifest parsing, template file existence, and a minimal Te
 ### Initialize with external templates
 
 When prompted to choose a document type, you can type the external template `key` (e.g., `simple-md`, `my-tex`), or pick from the list if displayed.
-

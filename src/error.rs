@@ -27,6 +27,13 @@ pub enum OmniDocError {
     #[error("Command exited with code {code:?}: {command}")]
     CommandNonZeroExit { code: Option<i32>, command: String },
 
+    #[error("Command exited with code {code:?}: {command}\n{output}")]
+    CommandFailed {
+        code: Option<i32>,
+        command: String,
+        output: String,
+    },
+
     #[error("HTTP error {status}: {url}")]
     HttpError { status: u16, url: String },
 

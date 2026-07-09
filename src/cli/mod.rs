@@ -3,6 +3,7 @@ pub mod handlers;
 pub mod utils;
 
 use crate::config::global::GlobalConfig;
+use crate::constants::config as config_consts;
 use crate::error::{OmniDocError, Result};
 use crate::git::git_clone;
 use clap::Parser;
@@ -28,7 +29,11 @@ pub fn cli() -> Result<()> {
     // Ensure omnidoc lib exists for commands that need it.
     // Only perform a one-time install (clone) if missing; do not auto update.
     match args.command {
-        Commands::New { .. } | Commands::Init { .. } | Commands::Build { .. } => {
+        Commands::New { .. }
+        | Commands::Init { .. }
+        | Commands::Build { .. }
+        | Commands::Md2pdf { .. }
+        | Commands::Md2html { .. } => {
             if !omnidoc_lib_exists() {
                 let dld = data_local_dir().ok_or_else(|| {
                     OmniDocError::Other("Local data directory not found".to_string())
@@ -42,7 +47,7 @@ pub fn cli() -> Result<()> {
                             .and_then(|c| c.lib.lib.as_ref())
                             .and_then(|l| l.url.clone())
                     })
-                    .unwrap_or_else(|| "https://github.com/wang-borong/omnidoc-libs".to_string());
+                    .unwrap_or_else(|| config_consts::DEFAULT_LIB_URL.to_string());
                 let _ = git_clone(&lib_url, &olib, true);
             }
         }
@@ -85,8 +90,13 @@ pub fn cli() -> Result<()> {
         } => {
             handle_init(&orig_path, path, title, author)?;
         }
-        Commands::Build { path, verbose } => {
-            handle_build(path, verbose)?;
+        Commands::Build {
+            path,
+            to,
+            pdf_engine,
+            verbose,
+        } => {
+            handle_build(path, to, pdf_engine, verbose)?;
         }
         Commands::Open { path } => {
             handle_open(path)?;

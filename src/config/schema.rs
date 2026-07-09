@@ -176,6 +176,8 @@ pub struct ToolsSection {
     pub python3: Option<String>,
     /// LaTeX 引擎（xelatex, pdflatex, lualatex）
     pub latex_engine: Option<String>,
+    /// Tectonic executable path
+    pub tectonic: Option<String>,
     /// pandoc-crossref 可执行文件路径
     pub pandoc_crossref: Option<String>,
     /// kroki 服务 URL 或本地可执行文件路径（用于 mermaid 生成）

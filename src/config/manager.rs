@@ -18,7 +18,7 @@ pub struct ConfigManager {
 }
 
 /// 合并后的配置（最终使用的配置值）
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MergedConfig {
     pub author: Option<String>,
     pub lib_path: Option<String>,
@@ -254,6 +254,9 @@ impl ConfigManager {
                 }
                 if let Some(p) = &tools.latex_engine {
                     tool_paths.insert("latex_engine".to_string(), Some(p.clone()));
+                }
+                if let Some(p) = &tools.tectonic {
+                    tool_paths.insert("tectonic".to_string(), Some(p.clone()));
                 }
                 if let Some(p) = &tools.pandoc_crossref {
                     tool_paths.insert("pandoc-crossref".to_string(), Some(p.clone()));

@@ -77,7 +77,7 @@ impl GlobalConfig {
         config.lib = LibConfig {
             lib: Some(LibSection {
                 path: Some(lib_path_str.to_string()),
-                url: Some("https://github.com/wang-borong/omnidoc-libs".to_string()),
+                url: Some(config_consts::DEFAULT_LIB_URL.to_string()),
             }),
         };
 

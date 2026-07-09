@@ -48,6 +48,14 @@ pub enum Commands {
         #[arg(value_hint = ValueHint::DirPath)]
         path: Option<String>,
 
+        /// override output format (pdf, html, epub, docx, latex)
+        #[arg(long)]
+        to: Option<String>,
+
+        /// override PDF engine (xelatex, lualatex, pdflatex, tectonic, or executable path)
+        #[arg(long = "pdf-engine")]
+        pdf_engine: Option<String>,
+
         /// show verbose message
         #[arg(short = 'v', long)]
         verbose: bool,

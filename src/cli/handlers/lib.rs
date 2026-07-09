@@ -1,4 +1,5 @@
 use crate::config::global::GlobalConfig;
+use crate::constants::config as config_consts;
 use crate::constants::git_refs;
 use crate::doc::templates::get_latexmkrc_template;
 use crate::error::{OmniDocError, Result};
@@ -29,7 +30,7 @@ pub fn handle_lib(update: bool) -> Result<()> {
             .get_config()
             .and_then(|c| c.lib.lib.as_ref())
             .and_then(|l| l.url.clone())
-            .unwrap_or_else(|| "https://github.com/wang-borong/omnidoc-libs".to_string());
+            .unwrap_or_else(|| config_consts::DEFAULT_LIB_URL.to_string());
 
         git_clone(&lib_url, &olib, true).map_err(|e| OmniDocError::Git(e))?;
         println!(

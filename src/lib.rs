@@ -3,6 +3,7 @@ pub mod cli;
 pub mod config;
 pub mod constants;
 pub mod context;
+pub mod diagnostics;
 pub mod doc;
 pub mod doctype;
 pub mod error;

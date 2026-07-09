@@ -326,20 +326,68 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use git2::Signature;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir_path(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "omnidoc_{}_{}_{}",
+            name,
+            std::process::id(),
+            unique
+        ))
+    }
+
+    fn create_source_repo(path: &Path) {
+        fs::create_dir_all(path).expect("create source dir");
+        let repo = Repository::init(path).expect("init source repo");
+        fs::write(path.join("README.md"), b"# source\n").expect("write source file");
+
+        let mut index = repo.index().expect("open index");
+        index
+            .add_path(Path::new("README.md"))
+            .expect("add source file");
+        let tree_id = index.write_tree().expect("write tree");
+        let tree = repo.find_tree(tree_id).expect("find tree");
+        let sig = Signature::now("OmniDoc Test", "omnidoc@example.invalid").expect("signature");
+        repo.commit(
+            Some(git_refs::HEAD),
+            &sig,
+            &sig,
+            "Initial test commit",
+            &tree,
+            &[],
+        )
+        .expect("commit source repo");
+    }
 
     #[test]
     fn test_git_clone() {
-        let _ = git_clone(
-            "https://github.com/wang-borong/embedded-knowledge",
-            "embedded-knowledge",
-            false,
-        );
-        assert_eq!(Path::new("embedded-knowledge").exists(), true);
+        let root = temp_dir_path("git_clone");
+        let source = root.join("source");
+        let target = root.join("target");
+        create_source_repo(&source);
+
+        git_clone(source.to_str().expect("source path"), &target, false).expect("clone local repo");
+
+        assert!(target.join(".git").exists());
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn test_git_init() {
-        let _ = git_init("test_git_init", false);
-        assert_eq!(Path::new("test_git_init").exists(), true);
+        let target = temp_dir_path("git_init");
+
+        git_init(&target, false).expect("init repo");
+
+        assert!(target.join(".git").exists());
+
+        let _ = fs::remove_dir_all(target);
     }
 }

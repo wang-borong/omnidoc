@@ -70,6 +70,7 @@ pub mod config {
     pub const OMNIDOC_CONFIG_FILE: &str = "omnidoc.toml";
     pub const CONFIG_DIR: &str = ".config";
     pub const UNKNOWN_AUTHOR: &str = "unknown";
+    pub const DEFAULT_LIB_URL: &str = "https://github.com/wang-borong/omnidoc-libs";
 }
 
 pub mod pandoc {

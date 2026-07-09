@@ -1,3 +1,4 @@
+use crate::diagnostics::summarize_command_output;
 use crate::error::{OmniDocError, Result};
 use crate::executor::trait_def::{CommandExecutor, CommandOutput};
 use std::io::{self, Write};
@@ -33,9 +34,12 @@ impl CommandExecutor for SystemCommandExecutor {
 
         if !output.status.success() {
             let command = format!("{} {}", cmd, args.join(" "));
-            return Err(OmniDocError::CommandNonZeroExit {
+            let diagnostic = summarize_command_output(&output.stdout, &output.stderr)
+                .unwrap_or_else(|| "No command output was captured.".to_string());
+            return Err(OmniDocError::CommandFailed {
                 code: output.status.code(),
                 command,
+                output: diagnostic,
             });
         }
 

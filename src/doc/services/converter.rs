@@ -90,7 +90,7 @@ impl ConverterService {
         }
 
         // 构建 Pandoc 选项（可能使用临时合成的输入文件）
-        let options = self.build_pandoc_pdf_options(&effective_input, &output_path, use_cn);
+        let options = self.build_pandoc_pdf_options(&effective_input, &output_path, use_cn)?;
 
         // 执行转换
         let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
@@ -139,17 +139,19 @@ impl ConverterService {
     }
 
     /// 构建 Pandoc PDF 选项
-    fn build_pandoc_pdf_options(&self, input: &Path, output: &Path, use_cn: bool) -> Vec<String> {
+    fn build_pandoc_pdf_options(
+        &self,
+        input: &Path,
+        output: &Path,
+        use_cn: bool,
+    ) -> Result<Vec<String>> {
         let mut options =
             self.build_pandoc_common_options(input, output, pandoc::DEFAULT_FROM_PDF, None);
 
         // PDF 专用选项
         // PDF engine（从配置获取，默认 xelatex）
         options.push(pandoc::FLAG_PDF_ENGINE.to_string());
-        let latex_engine = self
-            .executor
-            .check_tool("latex_engine")
-            .unwrap_or_else(|_| pandoc::DEFAULT_ENGINE_LATEX.to_string());
+        let latex_engine = self.executor.check_tool("latex_engine")?;
         options.push(latex_engine);
 
         // Syntax highlighting（从配置获取，默认 idiomatic）
@@ -183,7 +185,7 @@ impl ConverterService {
             options.push(format!("crossrefYaml={}", crossref_yaml));
         }
 
-        options
+        Ok(options)
     }
 
     /// 构建 Pandoc HTML 选项
