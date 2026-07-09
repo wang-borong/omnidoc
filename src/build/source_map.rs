@@ -939,7 +939,7 @@ mod tests {
         )
         .expect("diagnostic");
 
-        assert!(diagnostic.file.ends_with("chapters/intro.md"));
+        assert!(Path::new(&diagnostic.file).ends_with(Path::new("chapters").join("intro.md")));
         assert_eq!(diagnostic.line, 3);
         assert_eq!(diagnostic.column, 2);
         let _ = fs::remove_dir_all(root);

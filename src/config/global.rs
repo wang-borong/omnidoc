@@ -31,6 +31,8 @@ impl GlobalConfig {
 
         let config_file = config_local_dir.join(config_consts::OMNIDOC_CONFIG_FILE);
 
+        fs::create_dir_all(&config_local_dir)?;
+
         // 如果配置文件不存在，创建默认配置
         if !fs::exists(&config_file) {
             Self::create_default(&config_file)?;
