@@ -8,6 +8,7 @@ pub struct CliOverrides {
     pub entry: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
+    pub outputs: Vec<String>,
     pub verbose: Option<bool>,
     pub latex_backend: Option<String>,
     pub max_latex_passes: Option<usize>,
@@ -48,6 +49,11 @@ impl CliOverrides {
 
     pub fn with_to(mut self, to: Option<String>) -> Self {
         self.to = to;
+        self
+    }
+
+    pub fn with_outputs(mut self, outputs: Vec<String>) -> Self {
+        self.outputs = outputs;
         self
     }
 

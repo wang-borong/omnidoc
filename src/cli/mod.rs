@@ -33,6 +33,8 @@ pub fn cli() -> Result<()> {
         | Commands::Init { .. }
         | Commands::Build { .. }
         | Commands::Watch { .. }
+        | Commands::Publish { .. }
+        | Commands::Ci { .. }
         | Commands::Md2pdf { .. }
         | Commands::Md2html { .. } => {
             if !omnidoc_lib_exists() {
@@ -93,40 +95,114 @@ pub fn cli() -> Result<()> {
         Commands::Build {
             path,
             to,
+            all,
+            outputs,
             pdf_engine,
             latex_backend,
             max_latex_passes,
+            force,
+            report,
+            write_lock,
+            strict,
             verbose,
         } => {
             handle_build(
                 path,
                 to,
+                all,
+                outputs,
                 pdf_engine,
                 latex_backend,
                 max_latex_passes,
+                force,
+                report,
+                write_lock,
+                strict,
                 verbose,
             )?;
         }
         Commands::Watch {
             path,
             to,
+            all,
+            outputs,
             pdf_engine,
             latex_backend,
             max_latex_passes,
-            interval_ms,
+            debounce_ms,
             once,
+            force,
+            report,
+            strict,
             verbose,
         } => {
             handle_watch(
                 path,
                 to,
+                all,
+                outputs,
                 pdf_engine,
                 latex_backend,
                 max_latex_passes,
-                interval_ms,
+                debounce_ms,
                 once,
+                force,
+                report,
+                strict,
                 verbose,
             )?;
+        }
+        Commands::Publish {
+            path,
+            to,
+            all,
+            outputs,
+            pdf_engine,
+            latex_backend,
+            max_latex_passes,
+            dist_dir,
+            tag,
+            no_build,
+            force,
+            strict,
+            verbose,
+        } => {
+            handle_publish(
+                path,
+                to,
+                all,
+                outputs,
+                pdf_engine,
+                latex_backend,
+                max_latex_passes,
+                dist_dir,
+                tag,
+                no_build,
+                force,
+                strict,
+                verbose,
+            )?;
+        }
+        Commands::Doctor { path, json } => {
+            handle_doctor(path, json)?;
+        }
+        Commands::ConfigValidate { path } => {
+            handle_config_validate(path)?;
+        }
+        Commands::Lint { path, strict } => {
+            handle_lint(path, strict)?;
+        }
+        Commands::Deps { path, json } => {
+            handle_deps(path, json)?;
+        }
+        Commands::Ci { path, outputs } => {
+            handle_ci(path, outputs)?;
+        }
+        Commands::Lock { path, update } => {
+            handle_lock(path, update)?;
+        }
+        Commands::Plugin { path } => {
+            handle_plugin(path)?;
         }
         Commands::Open { path } => {
             handle_open(path)?;

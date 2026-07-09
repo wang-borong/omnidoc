@@ -30,6 +30,7 @@ pub struct MergedConfig {
     pub entry: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
+    pub outputs: Vec<String>,
     pub target: Option<String>,
     pub metadata_file: Option<String>,
     pub verbose: bool,
@@ -39,6 +40,8 @@ pub struct MergedConfig {
     pub figure_output: Option<String>,
     pub pandoc_options: Vec<String>,
     pub pandoc_css: Option<String>,
+    pub pandoc_reference_doc: Option<String>,
+    pub pandoc_epub_css: Option<String>,
     pub pandoc_from_format: Option<String>,
     pub pandoc_to_format: Option<String>,
     pub pandoc_lua_filters: Vec<String>,
@@ -168,6 +171,16 @@ impl ConfigManager {
                 .and_then(|p| p.target.clone())
         });
 
+        let outputs = if !cli.outputs.is_empty() {
+            cli.outputs.clone()
+        } else {
+            project_config
+                .and_then(|c| c.build.as_ref())
+                .and_then(|b| b.build.as_ref())
+                .and_then(|b| b.outputs.clone())
+                .unwrap_or_default()
+        };
+
         // 合并构建配置
         let metadata_file = project_config
             .and_then(|c| c.build.as_ref())
@@ -227,6 +240,8 @@ impl ConfigManager {
             .unwrap_or_default();
 
         let pandoc_css = pandoc_config.and_then(|p| p.css.clone());
+        let pandoc_reference_doc = pandoc_config.and_then(|p| p.reference_doc.clone());
+        let pandoc_epub_css = pandoc_config.and_then(|p| p.epub_css.clone());
 
         let pandoc_from_format = pandoc_config.and_then(|p| p.from_format.clone());
         let pandoc_to_format = pandoc_config.and_then(|p| p.to_format.clone());
@@ -325,6 +340,7 @@ impl ConfigManager {
             entry,
             from,
             to,
+            outputs,
             target,
             metadata_file,
             verbose,
@@ -334,6 +350,8 @@ impl ConfigManager {
             figure_output,
             pandoc_options,
             pandoc_css,
+            pandoc_reference_doc,
+            pandoc_epub_css,
             pandoc_from_format,
             pandoc_to_format,
             pandoc_lua_filters,

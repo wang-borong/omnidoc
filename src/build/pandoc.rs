@@ -190,6 +190,7 @@ impl PandocBuilder {
 
         self.push_template(&mut options, output_kind);
         self.push_css(&mut options, output_kind, &omnidoc_lib);
+        self.push_format_assets(&mut options, output_kind, &omnidoc_lib);
         self.push_metadata(&mut options, &omnidoc_lib);
 
         options.extend(self.config.pandoc_options.clone());
@@ -286,6 +287,33 @@ impl PandocBuilder {
         }
     }
 
+    fn push_format_assets(
+        &self,
+        options: &mut Vec<String>,
+        output_kind: PandocOutputKind,
+        omnidoc_lib: &str,
+    ) {
+        if output_kind == PandocOutputKind::Docx {
+            if let Some(reference_doc) = &self.config.pandoc_reference_doc {
+                options.push("--reference-doc".to_string());
+                options.push(reference_doc.clone());
+            }
+        }
+
+        if output_kind == PandocOutputKind::Epub {
+            let css_path = self
+                .config
+                .pandoc_epub_css
+                .as_ref()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(format!("{}/pandoc/data/epub.css", omnidoc_lib)));
+            if css_path.exists() {
+                options.push("--css".to_string());
+                options.push(css_path.to_string_lossy().to_string());
+            }
+        }
+    }
+
     fn push_metadata(&self, options: &mut Vec<String>, omnidoc_lib: &str) {
         if let Some(metadata_file) = &self.config.metadata_file {
             options.push("--metadata-file".to_string());
@@ -300,6 +328,15 @@ impl PandocBuilder {
                 options.push(pandoc::FLAG_META_SHORT.to_string());
                 options.push(format!("crossrefYaml={}", crossref_yaml));
             }
+        }
+
+        if let Some(author) = &self.config.author {
+            options.push(pandoc::FLAG_META_SHORT.to_string());
+            options.push(format!("author={}", author));
+        }
+        if let Some(target) = &self.config.target {
+            options.push(pandoc::FLAG_META_SHORT.to_string());
+            options.push(format!("title={}", target));
         }
 
         if self.config.verbose {

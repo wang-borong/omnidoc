@@ -11,6 +11,8 @@ pub mod md2html;
 pub mod md2pdf;
 pub mod new;
 pub mod open;
+pub mod publish;
+pub mod quality;
 pub mod template;
 pub mod update;
 pub mod watch;
@@ -26,6 +28,11 @@ pub use md2html::handle_md2html;
 pub use md2pdf::handle_md2pdf;
 pub use new::handle_new;
 pub use open::handle_open;
+pub use publish::handle_publish;
+pub use quality::{
+    handle_ci, handle_config_validate, handle_deps, handle_doctor, handle_lint, handle_lock,
+    handle_plugin,
+};
 pub use template::handle_template_validate;
 pub use update::handle_update;
 pub use watch::handle_watch;

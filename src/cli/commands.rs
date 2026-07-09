@@ -52,6 +52,14 @@ pub enum Commands {
         #[arg(long)]
         to: Option<String>,
 
+        /// build all configured or default outputs
+        #[arg(long)]
+        all: bool,
+
+        /// build multiple output formats (repeatable)
+        #[arg(long = "output")]
+        outputs: Vec<String>,
+
         /// override PDF engine (xelatex, lualatex, pdflatex, tectonic, or executable path)
         #[arg(long = "pdf-engine")]
         pdf_engine: Option<String>,
@@ -63,6 +71,22 @@ pub enum Commands {
         /// maximum direct LaTeX engine passes for --latex-backend engine
         #[arg(long = "max-latex-passes")]
         max_latex_passes: Option<usize>,
+
+        /// force rebuild even when input cache is unchanged
+        #[arg(short = 'F', long)]
+        force: bool,
+
+        /// write build/omnidoc-report.json
+        #[arg(long)]
+        report: bool,
+
+        /// update omnidoc.lock after a successful build
+        #[arg(long = "write-lock")]
+        write_lock: bool,
+
+        /// fail on lint warnings before build
+        #[arg(long)]
+        strict: bool,
 
         /// show verbose message
         #[arg(short = 'v', long)]
@@ -79,6 +103,14 @@ pub enum Commands {
         #[arg(long)]
         to: Option<String>,
 
+        /// build all configured or default outputs
+        #[arg(long)]
+        all: bool,
+
+        /// build multiple output formats (repeatable)
+        #[arg(long = "output")]
+        outputs: Vec<String>,
+
         /// override PDF engine (xelatex, lualatex, pdflatex, tectonic, or executable path)
         #[arg(long = "pdf-engine")]
         pdf_engine: Option<String>,
@@ -91,17 +123,153 @@ pub enum Commands {
         #[arg(long = "max-latex-passes")]
         max_latex_passes: Option<usize>,
 
-        /// polling interval in milliseconds
-        #[arg(long = "interval-ms", default_value_t = 1000)]
-        interval_ms: u64,
+        /// debounce interval in milliseconds
+        #[arg(long = "debounce-ms", default_value_t = 250)]
+        debounce_ms: u64,
 
         /// run the initial build and exit after one scan cycle
         #[arg(long)]
         once: bool,
 
+        /// force rebuild even when input cache is unchanged
+        #[arg(short = 'F', long)]
+        force: bool,
+
+        /// write build/omnidoc-report.json
+        #[arg(long)]
+        report: bool,
+
+        /// fail on lint warnings before build
+        #[arg(long)]
+        strict: bool,
+
         /// show verbose build messages
         #[arg(short = 'v', long)]
         verbose: bool,
+    },
+
+    /// build and publish generated artifacts into a dist directory
+    Publish {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// override output format (pdf, html, epub, docx, latex)
+        #[arg(long)]
+        to: Option<String>,
+
+        /// build/publish all configured or default outputs
+        #[arg(long)]
+        all: bool,
+
+        /// build/publish multiple output formats (repeatable)
+        #[arg(long = "output")]
+        outputs: Vec<String>,
+
+        /// override PDF engine (xelatex, lualatex, pdflatex, tectonic, or executable path)
+        #[arg(long = "pdf-engine")]
+        pdf_engine: Option<String>,
+
+        /// LaTeX project backend (latexmk or engine)
+        #[arg(long = "latex-backend", default_value = "latexmk")]
+        latex_backend: String,
+
+        /// maximum direct LaTeX engine passes for --latex-backend engine
+        #[arg(long = "max-latex-passes")]
+        max_latex_passes: Option<usize>,
+
+        /// publish directory
+        #[arg(long = "dist-dir", default_value = "dist")]
+        dist_dir: String,
+
+        /// publish tag or release directory name
+        #[arg(long)]
+        tag: Option<String>,
+
+        /// copy existing build artifacts without rebuilding first
+        #[arg(long = "no-build")]
+        no_build: bool,
+
+        /// force rebuild even when input cache is unchanged
+        #[arg(short = 'F', long)]
+        force: bool,
+
+        /// fail on lint warnings before build
+        #[arg(long)]
+        strict: bool,
+
+        /// show verbose build messages
+        #[arg(short = 'v', long)]
+        verbose: bool,
+    },
+
+    /// diagnose local tools, configuration, and template library
+    Doctor {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// emit JSON diagnostics
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// validate OmniDoc configuration files
+    ConfigValidate {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+    },
+
+    /// lint document sources for missing resources and weak references
+    Lint {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// treat warnings as errors
+        #[arg(long)]
+        strict: bool,
+    },
+
+    /// print the tracked project dependency graph
+    Deps {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// emit JSON dependency graph
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// run strict CI checks and configured builds
+    Ci {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// output format to build (repeatable)
+        #[arg(long = "output")]
+        outputs: Vec<String>,
+    },
+
+    /// create or update omnidoc.lock
+    Lock {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// rewrite the lock file
+        #[arg(long)]
+        update: bool,
+    },
+
+    /// list discovered local plugins and external templates
+    Plugin {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
     },
 
     /// open the built doc

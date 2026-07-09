@@ -80,7 +80,7 @@ pub struct ProjectSection {
     pub entry: Option<String>,
     /// 源码类型（markdown, latex）
     pub from: Option<String>,
-    /// 生成文档类型（pdf, html, epub）
+    /// 生成文档类型（pdf, html, epub, docx, latex）
     pub to: Option<String>,
     /// 生成文档名称（不含扩展名）
     pub target: Option<String>,
@@ -99,6 +99,8 @@ pub struct BuildSection {
     pub outdir: Option<String>,
     pub metadata_file: Option<String>,
     pub verbose: Option<bool>,
+    /// Output formats to build when --all/CI is used
+    pub outputs: Option<Vec<String>>,
     /// LaTeX project backend: latexmk (default) or engine (hash-stabilized direct engine)
     pub latex_backend: Option<String>,
     /// Maximum direct LaTeX engine passes when latex_backend = "engine"
@@ -135,6 +137,10 @@ pub struct PandocSection {
     pub options: Option<Vec<String>>,
     /// CSS 文件路径（用于 HTML 输出）
     pub css: Option<String>,
+    /// DOCX reference document path
+    pub reference_doc: Option<String>,
+    /// EPUB CSS file path
+    pub epub_css: Option<String>,
     /// Markdown 格式选项（如 "markdown+east_asian_line_breaks+footnotes"）
     pub from_format: Option<String>,
     /// 输出格式（如 "html", "latex"）

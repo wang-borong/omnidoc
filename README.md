@@ -138,14 +138,20 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    Build your content. Markdown projects can output `pdf`, `html`, `epub`, `docx`, or `latex`; LaTeX projects output PDF.
 
    ```bash
-   omnidoc build [PATH] [--to <FORMAT>] [--pdf-engine <ENGINE>] [--latex-backend <BACKEND>] [--verbose]
+   omnidoc build [PATH] [--to <FORMAT>] [--output <FORMAT>]... [--all] [OPTIONS]
    ```
 
    - If `PATH` is not specified, the current directory is used
    - Use `--to html`, `--to epub`, `--to docx`, or `--to latex` for Markdown project builds
+   - Use repeated `--output <FORMAT>` to build a specific set of outputs
+   - Use `--all` to build `[build].outputs` or the default set: `pdf`, `html`, `docx`, `epub`
    - Use `--pdf-engine tectonic` to compile PDFs with Tectonic instead of XeLaTeX
    - Use `--latex-backend engine --max-latex-passes 5` for direct XeLaTeX/LuaLaTeX/PDFLaTeX builds that stop when `.aux/.toc`-style files stop changing
    - Keep the default `--latex-backend latexmk` when you need bibliography/glossary automation or custom `.latexmkrc` rules
+   - Use `--force` to ignore the `.omnidoc-cache` input/config hash and rebuild
+   - Use `--report` to write `build/omnidoc-report.json`
+   - Use `--write-lock` to update `omnidoc.lock` after a successful build
+   - Use `--strict` to fail on lint/config warnings before building
    - Use `--verbose` to show detailed build messages
    - The build directory is `build/` (configurable via config), and the output file is named after the repository directory
 
@@ -154,6 +160,8 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    ```bash
    omnidoc build
    omnidoc build --to html
+   omnidoc build --output pdf --output docx
+   omnidoc build --all --report --write-lock
    omnidoc build --to docx
    omnidoc build --pdf-engine tectonic
    omnidoc build --latex-backend engine --pdf-engine xelatex
@@ -175,19 +183,33 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    # tectonic = "/custom/path/to/tectonic"
 
    [build]
+   outputs = ["pdf", "html", "docx"]
    latex_backend = "engine"
    max_latex_passes = 5
+
+   [pandoc]
+   css = "styles/manual.css"
+   reference_doc = "templates/reference.docx"
+   epub_css = "styles/epub.css"
    ```
 
 4. **Watch and rebuild while editing**
 
    ```bash
-   omnidoc watch [PATH] [--to <FORMAT>] [--interval-ms 1000]
+   omnidoc watch [PATH] [--to <FORMAT>] [--output <FORMAT>]... [--all] [--debounce-ms 250]
    ```
 
-   `watch` rebuilds once immediately, then polls source files such as `.md`, `.tex`, `.bib`, `.drawio`, `.dot`, `.json`, and common image assets. Build failures are printed and the watcher keeps running.
+   `watch` uses the native `notify` backend, rebuilds once immediately, then rebuilds on source changes such as `.md`, `.tex`, `.bib`, `.drawio`, `.dot`, `.json`, and common image assets. Build failures are printed and the watcher keeps running. There is no polling fallback.
 
-5. **Open the built PDF document**
+5. **Publish generated artifacts**
+
+   ```bash
+   omnidoc publish [PATH] [--to <FORMAT>] [--all] [--tag <TAG>] [--dist-dir dist]
+   ```
+
+   `publish` builds by default, writes `omnidoc.lock` and `build/omnidoc-report.json`, then copies generated artifacts into `dist/<tag-or-target>/` with an `omnidoc-publish.json` manifest. Use `--no-build` to publish existing build outputs.
+
+6. **Open the built PDF document**
 
    ```bash
    omnidoc open [PATH]
@@ -195,7 +217,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
    Opens the built PDF document using the system's default PDF viewer.
 
-6. **Clean the repository**
+7. **Clean the repository**
 
    Remove build artifacts:
 
@@ -262,6 +284,55 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    ```
 
    The library contains templates, LaTeX classes, and other resources used by omnidoc.
+
+### Project Quality and CI Commands
+
+Run environment diagnostics:
+
+```bash
+omnidoc doctor [PATH]
+omnidoc doctor --json
+```
+
+Validate project configuration:
+
+```bash
+omnidoc config-validate [PATH]
+```
+
+Lint source references and configured resources:
+
+```bash
+omnidoc lint [PATH] [--strict]
+```
+
+Inspect the tracked dependency graph used by cache, reports, and lock files:
+
+```bash
+omnidoc deps [PATH]
+omnidoc deps --json
+```
+
+Create or refresh the lock file:
+
+```bash
+omnidoc lock [PATH]
+omnidoc lock --update
+```
+
+Run CI-mode validation and builds:
+
+```bash
+omnidoc ci [PATH] [--output pdf] [--output html]
+```
+
+`ci` runs strict validation, builds all configured/default outputs, writes `build/omnidoc-report.json`, and updates `omnidoc.lock`.
+
+List discovered local plugins and external template manifests:
+
+```bash
+omnidoc plugin [PATH]
+```
 
 ### Document Formatting Commands
 

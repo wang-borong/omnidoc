@@ -28,6 +28,7 @@ console = "0.15"
 tera = "1"
 which = "6"
 regex = "1.10"
+notify = "6.1"
 
 [package.metadata.deb]
 maintainer = "Jason Wang <wang_borong@163.com>"
