@@ -42,7 +42,7 @@ pub mod error {
 }
 
 /// 文件操作辅助函数
-/// 统一使用 Result<OmniDocError> 类型
+/// 统一使用 `Result<OmniDocError>` 类型
 pub mod fs {
     use super::*;
     use std::fs;

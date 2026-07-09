@@ -85,6 +85,10 @@ pub fn handle_lint(path: Option<String>, strict: bool) -> Result<()> {
     let config_manager = create_config_manager_default(Some(&project_path))?;
     let mut issues = project_tools::validate_config(&project_path, config_manager.get_merged());
     issues.extend(project_tools::lint_project(&project_path));
+    issues.extend(project_tools::run_plugin_lint_rules(
+        &project_path,
+        config_manager.get_merged(),
+    ));
     project_tools::print_issues(&issues);
     if (strict && project_tools::has_warnings_or_errors(&issues))
         || project_tools::has_errors(&issues)

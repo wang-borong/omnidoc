@@ -1,0 +1,252 @@
+name: CICD
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CICD_INTERMEDIATES_DIR: _cicd-intermediates
+
+jobs:
+  all-jobs:
+    name: all-jobs
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - crate-metadata
+      - quality
+      - msrv
+      - audit
+      - package
+    steps:
+      - name: Verify required jobs
+        run: jq --exit-status 'all(.result == "success")' <<< '${{ toJson(needs) }}'
+
+  crate-metadata:
+    name: Extract crate metadata
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.metadata.outputs.name }}
+      version: ${{ steps.metadata.outputs.version }}
+      maintainer: ${{ steps.metadata.outputs.maintainer }}
+      homepage: ${{ steps.metadata.outputs.homepage }}
+      msrv: ${{ steps.metadata.outputs.msrv }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Extract metadata
+        id: metadata
+        shell: bash
+        run: |
+          metadata="$(cargo metadata --no-deps --format-version 1)"
+          jq -r '"name=" + .packages[0].name' <<< "$metadata" >> "$GITHUB_OUTPUT"
+          jq -r '"version=" + .packages[0].version' <<< "$metadata" >> "$GITHUB_OUTPUT"
+          jq -r '"maintainer=" + .packages[0].authors[0]' <<< "$metadata" >> "$GITHUB_OUTPUT"
+          jq -r '"homepage=" + .packages[0].homepage' <<< "$metadata" >> "$GITHUB_OUTPUT"
+          jq -r '"msrv=" + .packages[0].rust_version' <<< "$metadata" >> "$GITHUB_OUTPUT"
+
+  quality:
+    name: Quality gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev
+      - name: Format
+        run: cargo fmt -- --check
+      - name: Check
+        run: cargo check --locked --all-targets --all-features
+      - name: Clippy
+        run: cargo clippy --locked --all-targets --all-features
+      - name: Test
+        run: cargo test --locked --all-targets --all-features
+      - name: Documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --no-deps --document-private-items --all-features
+      - name: CLI smoke
+        shell: bash
+        run: |
+          cargo run --locked -- --help
+          cargo run --locked -- build --help
+          cargo run --locked -- watch --help
+          cargo run --locked -- publish --help
+          cargo run --locked -- lock --help
+          cargo run --locked -- plugin --help
+
+  msrv:
+    name: Minimum supported Rust version
+    runs-on: ubuntu-latest
+    needs: crate-metadata
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ needs.crate-metadata.outputs.msrv }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev
+      - name: MSRV check
+        run: cargo check --locked --all-targets
+
+  audit:
+    name: Cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit dependencies
+        run: cargo audit
+
+  package:
+    name: Package ${{ matrix.job.target }}
+    runs-on: ${{ matrix.job.os }}
+    needs: crate-metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        job:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            deb_arch: amd64
+          - target: x86_64-apple-darwin
+            os: macos-13
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.job.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev fakeroot
+      - name: Build release binary
+        shell: bash
+        run: cargo build --locked --release --target=${{ matrix.job.target }}
+      - name: Run target tests
+        shell: bash
+        run: cargo test --locked --target=${{ matrix.job.target }}
+      - name: Locate binary
+        id: bin
+        shell: bash
+        run: |
+          exe_suffix=""
+          case "${{ matrix.job.target }}" in
+            *-pc-windows-*) exe_suffix=".exe" ;;
+          esac
+          bin_name="${{ needs.crate-metadata.outputs.name }}${exe_suffix}"
+          bin_path="target/${{ matrix.job.target }}/release/${bin_name}"
+          echo "name=${bin_name}" >> "$GITHUB_OUTPUT"
+          echo "path=${bin_path}" >> "$GITHUB_OUTPUT"
+      - name: Package archive
+        id: archive
+        shell: bash
+        run: |
+          version="${{ needs.crate-metadata.outputs.version }}"
+          base="${{ needs.crate-metadata.outputs.name }}-v${version}-${{ matrix.job.target }}"
+          staging="${{ env.CICD_INTERMEDIATES_DIR }}/archive/${base}"
+          mkdir -p "$staging"
+          cp "${{ steps.bin.outputs.path }}" "$staging/"
+          cp README.md LICENSE "$staging/"
+          mkdir -p "${{ env.CICD_INTERMEDIATES_DIR }}/dist"
+          if [[ "${{ matrix.job.archive }}" == "zip" ]]; then
+            archive_name="${base}.zip"
+            7z -y a "${{ env.CICD_INTERMEDIATES_DIR }}/dist/${archive_name}" "$staging"/*
+          else
+            archive_name="${base}.tar.gz"
+            tar -C "${{ env.CICD_INTERMEDIATES_DIR }}/archive" -czf "${{ env.CICD_INTERMEDIATES_DIR }}/dist/${archive_name}" "$base"
+          fi
+          echo "name=${archive_name}" >> "$GITHUB_OUTPUT"
+          echo "path=${{ env.CICD_INTERMEDIATES_DIR }}/dist/${archive_name}" >> "$GITHUB_OUTPUT"
+      - name: Package Debian artifact
+        id: deb
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          version="${{ needs.crate-metadata.outputs.version }}"
+          package_name="${{ needs.crate-metadata.outputs.name }}"
+          deb_name="${package_name}_${version}_${{ matrix.job.deb_arch }}.deb"
+          deb_root="${{ env.CICD_INTERMEDIATES_DIR }}/deb/root"
+          rm -rf "$deb_root"
+          install -Dm755 "${{ steps.bin.outputs.path }}" "$deb_root/usr/bin/${{ steps.bin.outputs.name }}"
+          install -Dm644 README.md "$deb_root/usr/share/doc/${package_name}/README.md"
+          install -Dm644 LICENSE "$deb_root/usr/share/doc/${package_name}/copyright"
+          mkdir -p "$deb_root/DEBIAN"
+          cat > "$deb_root/DEBIAN/control" <<EOF
+          Package: ${package_name}
+          Version: ${version}
+          Section: utils
+          Priority: optional
+          Maintainer: ${{ needs.crate-metadata.outputs.maintainer }}
+          Homepage: ${{ needs.crate-metadata.outputs.homepage }}
+          Architecture: ${{ matrix.job.deb_arch }}
+          Description: OmniDoc document build tool.
+           Rust + Pandoc Markdown + LaTeX document build and publishing CLI.
+          EOF
+          fakeroot dpkg-deb --build "$deb_root" "${{ env.CICD_INTERMEDIATES_DIR }}/dist/${deb_name}"
+          echo "name=${deb_name}" >> "$GITHUB_OUTPUT"
+          echo "path=${{ env.CICD_INTERMEDIATES_DIR }}/dist/${deb_name}" >> "$GITHUB_OUTPUT"
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.archive.outputs.name }}
+          path: ${{ steps.archive.outputs.path }}
+      - name: Upload Debian package
+        if: steps.deb.outputs.path
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.deb.outputs.name }}
+          path: ${{ steps.deb.outputs.path }}
+
+  release:
+    name: Publish GitHub release
+    runs-on: ubuntu-latest
+    needs:
+      - all-jobs
+      - package
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish release artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

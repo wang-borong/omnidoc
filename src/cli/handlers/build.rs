@@ -132,9 +132,17 @@ fn build_project_once(
     let config_manager = create_config_manager(Some(&project_path), cli_overrides.clone())?;
     let config = config_manager.get_merged().clone();
     config_manager.setup_env()?;
+    let asset_context = project_tools::PluginContext {
+        project_path,
+        config: &config,
+        output: None,
+        target: None,
+    };
+    project_tools::run_plugin_hook(&asset_context, project_tools::PluginHook::AssetProvider)?;
 
     let mut issues = project_tools::validate_config(project_path, &config);
     issues.extend(project_tools::lint_project(project_path));
+    issues.extend(project_tools::run_plugin_lint_rules(project_path, &config));
     if run_options.strict && project_tools::has_warnings_or_errors(&issues) {
         project_tools::print_issues(&issues);
         return Err(OmniDocError::Project(
@@ -177,10 +185,19 @@ fn build_project_once(
         ));
     }
 
+    let build_context = project_tools::PluginContext {
+        project_path,
+        config: &config,
+        output: Some(&output),
+        target: Some(&target),
+    };
+    project_tools::run_plugin_hook(&build_context, project_tools::PluginHook::PreBuild)?;
+
     let build_service = create_build_service(Some(project_path), cli_overrides)?;
     build_service
         .build(project_path, verbose)
         .map_err(|e| OmniDocError::Project(format!("Failed to build project: {}", e)))?;
+    project_tools::run_plugin_hook(&build_context, project_tools::PluginHook::PostBuild)?;
 
     project_tools::write_cache(project_path, &output, input_hash)?;
     if run_options.write_lock {

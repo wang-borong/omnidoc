@@ -9,7 +9,27 @@ const MAX_NEEDLES: usize = 8;
 #[derive(Debug, Clone)]
 struct SourceSpan {
     line: usize,
+    column: usize,
     text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkdownDiagnostic {
+    pub file: String,
+    pub line: usize,
+    pub column: usize,
+    pub kind: String,
+    pub snippet: String,
+    pub message: String,
+}
+
+impl MarkdownDiagnostic {
+    pub fn render(&self) -> String {
+        format!(
+            "Markdown source diagnostic: {}:{}:{}: {}\n  {}\n  note: {}",
+            self.file, self.line, self.column, self.kind, self.snippet, self.message
+        )
+    }
 }
 
 pub fn locate_markdown_error(
@@ -17,12 +37,21 @@ pub fn locate_markdown_error(
     entry_file: &Path,
     diagnostic: &str,
 ) -> Option<String> {
+    locate_markdown_diagnostic(executor, entry_file, diagnostic)
+        .map(|diagnostic| diagnostic.render())
+}
+
+pub fn locate_markdown_diagnostic(
+    executor: &BuildExecutor,
+    entry_file: &Path,
+    diagnostic: &str,
+) -> Option<MarkdownDiagnostic> {
     let needles = extract_needles(diagnostic);
     if needles.is_empty() {
         return None;
     }
 
-    if let Some(line_hint) = locate_in_raw_markdown(entry_file, &needles) {
+    if let Some(line_hint) = locate_in_raw_markdown(entry_file, diagnostic, &needles) {
         return Some(line_hint);
     }
 
@@ -38,10 +67,12 @@ pub fn locate_markdown_error(
                 .to_ascii_lowercase()
                 .contains(&needle.to_ascii_lowercase())
         }) {
-            return Some(format!(
-                "Likely Markdown source near line {}: {}",
+            return Some(build_markdown_diagnostic(
+                entry_file,
                 span.line,
-                compact_snippet(&span.text)
+                span.column,
+                diagnostic,
+                &span.text,
             ));
         }
     }
@@ -61,10 +92,10 @@ fn load_source_spans(executor: &BuildExecutor, entry_file: &Path) -> Result<Vec<
 }
 
 fn collect_spans(value: &Value, spans: &mut Vec<SourceSpan>) {
-    if let Some(line) = data_pos_line(value) {
+    if let Some((line, column)) = data_pos_start(value) {
         let text = collect_text(value);
         if !text.trim().is_empty() {
-            spans.push(SourceSpan { line, text });
+            spans.push(SourceSpan { line, column, text });
         }
     }
 
@@ -83,18 +114,28 @@ fn collect_spans(value: &Value, spans: &mut Vec<SourceSpan>) {
     }
 }
 
-fn data_pos_line(value: &Value) -> Option<usize> {
+fn data_pos_start(value: &Value) -> Option<(usize, usize)> {
     let attrs = find_attr_keyvals(value)?;
     for keyval in attrs {
         let pair = keyval.as_array()?;
-        let key = pair.get(0)?.as_str()?;
+        let key = pair.first()?.as_str()?;
         let data_pos = pair.get(1)?.as_str()?;
         if key == "data-pos" {
-            let line = data_pos.split(':').next()?;
-            return line.parse::<usize>().ok();
+            return parse_data_pos_start(data_pos);
         }
     }
     None
+}
+
+fn parse_data_pos_start(data_pos: &str) -> Option<(usize, usize)> {
+    let start = data_pos.split('-').next().unwrap_or(data_pos);
+    let mut parts = start.split(':');
+    let line = parts.next()?.parse::<usize>().ok()?;
+    let column = parts
+        .next()
+        .and_then(|part| part.parse::<usize>().ok())
+        .unwrap_or(1);
+    Some((line, column))
 }
 
 fn find_attr_keyvals(value: &Value) -> Option<&Vec<Value>> {
@@ -154,7 +195,11 @@ fn collect_text_parts(value: &Value, parts: &mut Vec<String>) {
     }
 }
 
-fn locate_in_raw_markdown(entry_file: &Path, needles: &[String]) -> Option<String> {
+fn locate_in_raw_markdown(
+    entry_file: &Path,
+    diagnostic: &str,
+    needles: &[String],
+) -> Option<MarkdownDiagnostic> {
     let content = std::fs::read_to_string(entry_file).ok()?;
     for needle in needles {
         let needle = normalize_needle(needle);
@@ -163,19 +208,30 @@ fn locate_in_raw_markdown(entry_file: &Path, needles: &[String]) -> Option<Strin
         }
 
         for (index, line) in content.lines().enumerate() {
-            if line
-                .to_ascii_lowercase()
-                .contains(&needle.to_ascii_lowercase())
-            {
-                return Some(format!(
-                    "Likely Markdown source near line {}: {}",
+            if let Some(column) = find_column(line, &needle) {
+                return Some(build_markdown_diagnostic(
+                    entry_file,
                     index + 1,
-                    compact_snippet(line)
+                    column,
+                    diagnostic,
+                    line,
                 ));
             }
         }
     }
     None
+}
+
+fn find_column(line: &str, needle: &str) -> Option<usize> {
+    if let Some(byte_index) = line.find(needle) {
+        return Some(line[..byte_index].chars().count() + 1);
+    }
+
+    let lower_line = line.to_ascii_lowercase();
+    let lower_needle = needle.to_ascii_lowercase();
+    lower_line
+        .find(&lower_needle)
+        .map(|byte_index| line[..byte_index].chars().count() + 1)
 }
 
 fn extract_needles(diagnostic: &str) -> Vec<String> {
@@ -231,14 +287,101 @@ fn compact_snippet(input: &str) -> String {
     }
 }
 
+fn build_markdown_diagnostic(
+    entry_file: &Path,
+    line: usize,
+    column: usize,
+    diagnostic: &str,
+    snippet: &str,
+) -> MarkdownDiagnostic {
+    MarkdownDiagnostic {
+        file: entry_file.display().to_string(),
+        line,
+        column,
+        kind: classify_diagnostic(diagnostic).to_string(),
+        snippet: compact_snippet(snippet),
+        message: compact_snippet(first_relevant_message(diagnostic)),
+    }
+}
+
+fn classify_diagnostic(diagnostic: &str) -> &'static str {
+    let lower = diagnostic.to_ascii_lowercase();
+    if lower.contains("undefined control sequence") {
+        "undefined_control_sequence"
+    } else if lower.contains("not found")
+        || lower.contains("no such file")
+        || lower.contains("does not exist")
+    {
+        "missing_file"
+    } else if lower.contains("latex error") || diagnostic.trim_start().starts_with('!') {
+        "latex_error"
+    } else if lower.contains("pandoc:") {
+        "pandoc_error"
+    } else if lower.contains("citation") || lower.contains("citeproc") {
+        "citation"
+    } else if lower.contains("table") || lower.contains("tabular") {
+        "table"
+    } else {
+        "unknown"
+    }
+}
+
+fn first_relevant_message(diagnostic: &str) -> &str {
+    diagnostic
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("No diagnostic message available")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::extract_needles;
+    use super::{
+        build_markdown_diagnostic, classify_diagnostic, extract_needles, find_column,
+        parse_data_pos_start,
+    };
+    use std::path::Path;
 
     #[test]
     fn extracts_latex_macro_from_diagnostic() {
         let needles = extract_needles("! Undefined control sequence.\nl.42 \\badmacro");
 
         assert!(needles.iter().any(|needle| needle == "\\badmacro"));
+    }
+
+    #[test]
+    fn parses_sourcepos_line_and_column() {
+        assert_eq!(parse_data_pos_start("12:5-12:20"), Some((12, 5)));
+        assert_eq!(parse_data_pos_start("9"), Some((9, 1)));
+    }
+
+    #[test]
+    fn finds_one_based_column() {
+        assert_eq!(find_column("alpha \\badmacro beta", "\\badmacro"), Some(7));
+        assert_eq!(find_column("Alpha beta", "alpha"), Some(1));
+    }
+
+    #[test]
+    fn renders_structured_markdown_diagnostic() {
+        let diagnostic = build_markdown_diagnostic(
+            Path::new("main.md"),
+            4,
+            3,
+            "! Undefined control sequence.",
+            "  $\\badmacro$",
+        );
+
+        assert_eq!(diagnostic.kind, "undefined_control_sequence");
+        assert!(diagnostic.render().contains("main.md:4:3"));
+        assert!(diagnostic.render().contains("$\\badmacro$"));
+    }
+
+    #[test]
+    fn classifies_common_diagnostics() {
+        assert_eq!(
+            classify_diagnostic("pandoc: image.png: openBinaryFile: does not exist"),
+            "missing_file"
+        );
+        assert_eq!(classify_diagnostic("LaTeX Error: Bad table"), "latex_error");
     }
 }

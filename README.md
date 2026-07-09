@@ -167,7 +167,13 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    omnidoc build --latex-backend engine --pdf-engine xelatex
    ```
 
-   Build failures include a compact Pandoc/LaTeX diagnostic summary so the first relevant error is visible without reading the full `.log` file. For Markdown projects, OmniDoc also tries to map Pandoc/LaTeX errors back to the likely Markdown line using a source-position AST pass.
+   Build failures include a compact Pandoc/LaTeX diagnostic summary so the first relevant error is visible without reading the full `.log` file. For Markdown projects, OmniDoc also maps Pandoc/LaTeX errors back to structured source diagnostics:
+
+   ```text
+   Markdown source diagnostic: main.md:42:7: undefined_control_sequence
+     $ \badmacro $
+     note: ! Undefined control sequence.
+   ```
 
    You can also persist build choices in `.omnidoc.toml`:
 
@@ -623,6 +629,28 @@ description = "A minimal markdown doc template"  # optional
 language = "markdown"             # "markdown" | "latex"
 template_file = "template.md"     # relative to manifest directory
 file_name = "main.md"             # optional; defaults: markdown->main.md, latex->main.tex
+
+[hooks]
+# Commands are executed without a shell. Use an array when arguments are needed.
+asset_provider = ["scripts/assets.sh"]
+pre_build = ["scripts/pre-build.sh"]
+post_build = ["scripts/post-build.sh"]
+lint_rule = ["scripts/lint.sh"]
+```
+
+Hook environment variables:
+- `OMNIDOC_PROJECT_DIR`
+- `OMNIDOC_PLUGIN_DIR`
+- `OMNIDOC_PLUGIN_KEY`
+- `OMNIDOC_HOOK`
+- `OMNIDOC_OUTPUT`
+- `OMNIDOC_TARGET`
+
+`lint_rule` commands can print diagnostics in this format:
+
+```text
+warning:main.md:12:5:message from plugin
+error:chapter.md:3:1:another message
 ```
 
 ### Template files

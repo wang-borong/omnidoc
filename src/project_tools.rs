@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
@@ -95,6 +96,43 @@ struct PluginManifest {
     kind: Option<String>,
     language: Option<String>,
     template_file: Option<String>,
+    hooks: Option<PluginHooks>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PluginHooks {
+    pre_build: Option<HookCommand>,
+    post_build: Option<HookCommand>,
+    lint_rule: Option<HookCommand>,
+    asset_provider: Option<HookCommand>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum HookCommand {
+    String(String),
+    Args(Vec<String>),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PluginHook {
+    PreBuild,
+    PostBuild,
+    LintRule,
+    AssetProvider,
+}
+
+struct LoadedPlugin {
+    info: PluginInfo,
+    manifest: PluginManifest,
+    base_dir: PathBuf,
+}
+
+pub struct PluginContext<'a> {
+    pub project_path: &'a Path,
+    pub config: &'a MergedConfig,
+    pub output: Option<&'a str>,
+    pub target: Option<&'a str>,
 }
 
 pub fn supported_outputs() -> &'static [&'static str] {
@@ -488,6 +526,53 @@ pub fn check_lock(
 }
 
 pub fn discovered_plugins(project_path: &Path, config: &MergedConfig) -> Vec<PluginInfo> {
+    loaded_plugins(project_path, config)
+        .into_iter()
+        .map(|plugin| plugin.info)
+        .collect()
+}
+
+pub fn run_plugin_hook(context: &PluginContext<'_>, hook: PluginHook) -> Result<()> {
+    for plugin in loaded_plugins(context.project_path, context.config)
+        .into_iter()
+        .filter(|plugin| plugin.info.valid)
+    {
+        let Some(command) = plugin_hook_command(&plugin.manifest, hook) else {
+            continue;
+        };
+        run_hook_command(context, &plugin, command, hook)?;
+    }
+    Ok(())
+}
+
+pub fn run_plugin_lint_rules(project_path: &Path, config: &MergedConfig) -> Vec<ProjectIssue> {
+    let context = PluginContext {
+        project_path,
+        config,
+        output: None,
+        target: None,
+    };
+    let mut issues = Vec::new();
+    for plugin in loaded_plugins(project_path, config)
+        .into_iter()
+        .filter(|plugin| plugin.info.valid)
+    {
+        let Some(command) = plugin_hook_command(&plugin.manifest, PluginHook::LintRule) else {
+            continue;
+        };
+        match run_hook_command_capture(&context, &plugin, command, PluginHook::LintRule) {
+            Ok(output) => issues.extend(parse_lint_rule_output(&plugin, &output)),
+            Err(err) => issues.push(error(
+                format!("Plugin lint_rule failed for {}: {}", plugin.info.key, err),
+                Some(plugin.info.path.clone()),
+                None,
+            )),
+        }
+    }
+    issues
+}
+
+fn loaded_plugins(project_path: &Path, config: &MergedConfig) -> Vec<LoadedPlugin> {
     let mut plugins = Vec::new();
     for base in [
         config.template_dir.as_ref().map(PathBuf::from),
@@ -504,11 +589,11 @@ pub fn discovered_plugins(project_path: &Path, config: &MergedConfig) -> Vec<Plu
             continue;
         }
         for manifest_path in plugin_manifest_paths(&base) {
-            plugins.push(read_plugin_manifest(&manifest_path));
+            plugins.push(load_plugin_manifest(&manifest_path));
         }
     }
-    plugins.sort_by(|left, right| left.path.cmp(&right.path));
-    plugins.dedup_by(|left, right| left.path == right.path);
+    plugins.sort_by(|left, right| left.info.path.cmp(&right.info.path));
+    plugins.dedup_by(|left, right| left.info.path == right.info.path);
     plugins
 }
 
@@ -700,7 +785,11 @@ fn plugin_manifest_paths(base: &Path) -> Vec<PathBuf> {
     paths
 }
 
-fn read_plugin_manifest(path: &Path) -> PluginInfo {
+fn load_plugin_manifest(path: &Path) -> LoadedPlugin {
+    let base_dir = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
     let fallback_key = path
         .parent()
         .and_then(|parent| parent.file_name())
@@ -711,8 +800,9 @@ fn read_plugin_manifest(path: &Path) -> PluginInfo {
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(err) => {
-            return invalid_plugin(
+            return invalid_loaded_plugin(
                 path,
+                base_dir,
                 fallback_key,
                 format!("Failed to read manifest: {}", err),
             );
@@ -721,8 +811,9 @@ fn read_plugin_manifest(path: &Path) -> PluginInfo {
     let manifest = match toml::from_str::<PluginManifest>(&content) {
         Ok(manifest) => manifest,
         Err(err) => {
-            return invalid_plugin(
+            return invalid_loaded_plugin(
                 path,
+                base_dir,
                 fallback_key,
                 format!("Failed to parse manifest: {}", err),
             );
@@ -738,28 +829,217 @@ fn read_plugin_manifest(path: &Path) -> PluginInfo {
         }
     });
     let error = validate_plugin_manifest(path, &manifest);
-    PluginInfo {
+    let info = PluginInfo {
         path: path.display().to_string(),
         key,
-        name: manifest.name,
-        version: manifest.version,
-        description: manifest.description,
+        name: manifest.name.clone(),
+        version: manifest.version.clone(),
+        description: manifest.description.clone(),
         kind,
         valid: error.is_none(),
         error,
+    };
+
+    LoadedPlugin {
+        info,
+        manifest,
+        base_dir,
     }
 }
 
-fn invalid_plugin(path: &Path, key: String, error: String) -> PluginInfo {
-    PluginInfo {
-        path: path.display().to_string(),
-        key,
-        name: None,
-        version: None,
-        description: None,
-        kind: "plugin".to_string(),
-        valid: false,
-        error: Some(error),
+fn invalid_loaded_plugin(
+    path: &Path,
+    base_dir: PathBuf,
+    key: String,
+    error: String,
+) -> LoadedPlugin {
+    LoadedPlugin {
+        info: PluginInfo {
+            path: path.display().to_string(),
+            key,
+            name: None,
+            version: None,
+            description: None,
+            kind: "plugin".to_string(),
+            valid: false,
+            error: Some(error),
+        },
+        manifest: PluginManifest {
+            key: None,
+            name: None,
+            version: None,
+            description: None,
+            kind: None,
+            language: None,
+            template_file: None,
+            hooks: None,
+        },
+        base_dir,
+    }
+}
+
+fn plugin_hook_command(manifest: &PluginManifest, hook: PluginHook) -> Option<&HookCommand> {
+    let hooks = manifest.hooks.as_ref()?;
+    match hook {
+        PluginHook::PreBuild => hooks.pre_build.as_ref(),
+        PluginHook::PostBuild => hooks.post_build.as_ref(),
+        PluginHook::LintRule => hooks.lint_rule.as_ref(),
+        PluginHook::AssetProvider => hooks.asset_provider.as_ref(),
+    }
+}
+
+fn run_hook_command(
+    context: &PluginContext<'_>,
+    plugin: &LoadedPlugin,
+    command: &HookCommand,
+    hook: PluginHook,
+) -> Result<()> {
+    run_hook_command_capture(context, plugin, command, hook).map(|_| ())
+}
+
+fn run_hook_command_capture(
+    context: &PluginContext<'_>,
+    plugin: &LoadedPlugin,
+    command: &HookCommand,
+    hook: PluginHook,
+) -> Result<String> {
+    let argv = hook_argv(command);
+    if argv.is_empty() {
+        return Err(OmniDocError::Project(format!(
+            "Plugin hook command is empty: {}",
+            plugin.info.key
+        )));
+    }
+
+    let program = resolve_hook_program(&plugin.base_dir, &argv[0]);
+    let output = Command::new(&program)
+        .args(&argv[1..])
+        .current_dir(context.project_path)
+        .env("OMNIDOC_PROJECT_DIR", context.project_path)
+        .env("OMNIDOC_PLUGIN_DIR", &plugin.base_dir)
+        .env("OMNIDOC_PLUGIN_KEY", &plugin.info.key)
+        .env("OMNIDOC_HOOK", hook_name(hook))
+        .env("OMNIDOC_OUTPUT", context.output.unwrap_or(""))
+        .env("OMNIDOC_TARGET", context.target.unwrap_or(""))
+        .output()
+        .map_err(|err| {
+            OmniDocError::Project(format!(
+                "Failed to execute plugin hook {} for {}: {}",
+                hook_name(hook),
+                plugin.info.key,
+                err
+            ))
+        })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    if output.status.success() {
+        return Ok(stdout);
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(OmniDocError::Project(format!(
+        "Plugin hook {} failed for {} with status {}\nstdout:\n{}\nstderr:\n{}",
+        hook_name(hook),
+        plugin.info.key,
+        output.status,
+        compact_snippet(&stdout),
+        compact_snippet(&stderr)
+    )))
+}
+
+fn hook_argv(command: &HookCommand) -> Vec<String> {
+    match command {
+        HookCommand::String(command) => command.split_whitespace().map(str::to_string).collect(),
+        HookCommand::Args(args) => args.clone(),
+    }
+}
+
+fn resolve_hook_program(base_dir: &Path, program: &str) -> PathBuf {
+    let path = Path::new(program);
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    let local = base_dir.join(path);
+    if local.exists() {
+        local
+    } else {
+        path.to_path_buf()
+    }
+}
+
+fn hook_name(hook: PluginHook) -> &'static str {
+    match hook {
+        PluginHook::PreBuild => "pre_build",
+        PluginHook::PostBuild => "post_build",
+        PluginHook::LintRule => "lint_rule",
+        PluginHook::AssetProvider => "asset_provider",
+    }
+}
+
+fn parse_lint_rule_output(plugin: &LoadedPlugin, output: &str) -> Vec<ProjectIssue> {
+    output
+        .lines()
+        .filter_map(|line| parse_lint_rule_line(plugin, line))
+        .collect()
+}
+
+fn parse_lint_rule_line(plugin: &LoadedPlugin, line: &str) -> Option<ProjectIssue> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+
+    let mut parts = line.splitn(5, ':');
+    let severity = match parts
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "error" => IssueSeverity::Error,
+        "warning" | "warn" => IssueSeverity::Warning,
+        "info" => IssueSeverity::Info,
+        _ => {
+            return Some(warning(
+                format!("Plugin {}: {}", plugin.info.key, line),
+                Some(plugin.info.path.clone()),
+                None,
+            ));
+        }
+    };
+    let path = parts
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let line_no = parts
+        .next()
+        .and_then(|value| value.trim().parse::<usize>().ok());
+    let column = parts.next().map(str::trim).unwrap_or("1");
+    let message = parts.next().map(str::trim).unwrap_or("");
+    let message = if message.is_empty() {
+        format!("Plugin {} reported an issue", plugin.info.key)
+    } else {
+        format!(
+            "Plugin {}: {} (column {})",
+            plugin.info.key, message, column
+        )
+    };
+
+    Some(ProjectIssue {
+        severity,
+        message,
+        path: path.map(str::to_string),
+        line: line_no,
+    })
+}
+
+fn compact_snippet(input: &str) -> String {
+    let snippet = input.split_whitespace().collect::<Vec<_>>().join(" ");
+    if snippet.chars().count() > 500 {
+        snippet.chars().take(497).collect::<String>() + "..."
+    } else {
+        snippet
     }
 }
 
@@ -823,9 +1103,12 @@ fn warning(message: String, path: Option<String>, line: Option<usize>) -> Projec
 
 #[cfg(test)]
 mod tests {
-    use super::{supported_outputs, validate_config};
+    use super::{
+        hook_argv, parse_lint_rule_output, supported_outputs, validate_config, HookCommand,
+        LoadedPlugin, PluginInfo, PluginManifest,
+    };
     use crate::config::MergedConfig;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn validates_unsupported_output() {
@@ -864,5 +1147,127 @@ mod tests {
         assert!(issues
             .iter()
             .any(|issue| issue.message.contains("max_latex_passes")));
+    }
+
+    #[test]
+    fn parses_hook_command_arguments() {
+        assert_eq!(
+            hook_argv(&HookCommand::String("scripts/pre arg".to_string())),
+            vec!["scripts/pre", "arg"]
+        );
+        assert_eq!(
+            hook_argv(&HookCommand::Args(vec![
+                "tool".to_string(),
+                "--flag".to_string()
+            ])),
+            vec!["tool", "--flag"]
+        );
+    }
+
+    #[test]
+    fn parses_plugin_lint_rule_output() {
+        let plugin = LoadedPlugin {
+            info: PluginInfo {
+                path: "plugins/sample/manifest.toml".to_string(),
+                key: "sample".to_string(),
+                name: None,
+                version: None,
+                description: None,
+                kind: "plugin".to_string(),
+                valid: true,
+                error: None,
+            },
+            manifest: PluginManifest {
+                key: Some("sample".to_string()),
+                name: None,
+                version: None,
+                description: None,
+                kind: None,
+                language: None,
+                template_file: None,
+                hooks: None,
+            },
+            base_dir: PathBuf::from("plugins/sample"),
+        };
+
+        let issues = parse_lint_rule_output(
+            &plugin,
+            "warning:main.md:7:3:custom lint warning\ninfo:main.md:9:1:note",
+        );
+
+        assert_eq!(issues.len(), 2);
+        assert_eq!(issues[0].path.as_deref(), Some("main.md"));
+        assert_eq!(issues[0].line, Some(7));
+        assert!(issues[0].message.contains("column 3"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executes_plugin_hook_command() {
+        use super::{run_hook_command_capture, PluginContext, PluginHook};
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let root = std::env::temp_dir().join(format!(
+            "omnidoc-hook-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let plugin_dir = root.join("plugin");
+        fs::create_dir_all(&plugin_dir).expect("plugin dir");
+        let script = plugin_dir.join("hook.sh");
+        fs::write(
+            &script,
+            "#!/bin/sh\nprintf '%s:%s' \"$OMNIDOC_HOOK\" \"$OMNIDOC_OUTPUT\"\n",
+        )
+        .expect("script");
+        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("permissions");
+
+        let plugin = LoadedPlugin {
+            info: PluginInfo {
+                path: plugin_dir.join("manifest.toml").display().to_string(),
+                key: "hook-test".to_string(),
+                name: None,
+                version: None,
+                description: None,
+                kind: "plugin".to_string(),
+                valid: true,
+                error: None,
+            },
+            manifest: PluginManifest {
+                key: Some("hook-test".to_string()),
+                name: None,
+                version: None,
+                description: None,
+                kind: None,
+                language: None,
+                template_file: None,
+                hooks: None,
+            },
+            base_dir: plugin_dir,
+        };
+        let config = MergedConfig::default();
+        let context = PluginContext {
+            project_path: &root,
+            config: &config,
+            output: Some("html"),
+            target: Some("manual"),
+        };
+
+        let output = run_hook_command_capture(
+            &context,
+            &plugin,
+            &HookCommand::Args(vec!["hook.sh".to_string()]),
+            PluginHook::PreBuild,
+        )
+        .expect("hook output");
+
+        assert_eq!(output, "pre_build:html");
+        let _ = fs::remove_dir_all(root);
     }
 }
