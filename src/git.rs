@@ -197,10 +197,10 @@ fn fast_forward(
     lb: &mut git2::Reference,
     rc: &git2::AnnotatedCommit,
 ) -> Result<(), git2::Error> {
-    let name = match lb.name() {
-        Some(s) => s.to_string(),
-        None => String::from_utf8_lossy(lb.name_bytes()).to_string(),
-    };
+    let name = lb
+        .name()
+        .map(str::to_string)
+        .unwrap_or_else(|_| String::from_utf8_lossy(lb.name_bytes()).to_string());
     let msg = format!("Fast-Forward: Setting {} to id: {}", name, rc.id());
     //println!("{}", msg);
     lb.set_target(rc.id(), &msg)?;

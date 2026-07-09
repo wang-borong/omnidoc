@@ -33,23 +33,26 @@ fn build_builtin_tera() -> Tera {
 fn build_external_tera() -> Option<Tera> {
     if let Ok(dir) = env::var("OMNIDOC_TEMPLATE_DIR") {
         let pattern = format!("{}/**/*", dir);
-        match Tera::new(&pattern) {
-            Ok(t) => Some(t),
-            Err(_) => None,
-        }
+        load_tera_from_glob(&pattern)
     } else {
         // Try to read from config if available
         if let Ok(config_manager) = ConfigManager::new(None, CliOverrides::new()) {
             let merged_config = config_manager.get_merged();
             if let Some(dir) = &merged_config.template_dir {
                 let pattern = format!("{}/**/*", dir);
-                if let Ok(t) = Tera::new(&pattern) {
+                if let Some(t) = load_tera_from_glob(&pattern) {
                     return Some(t);
                 }
             }
         }
         None
     }
+}
+
+fn load_tera_from_glob(pattern: &str) -> Option<Tera> {
+    let mut tera = Tera::new();
+    tera.load_from_glob(pattern).ok()?;
+    Some(tera)
 }
 
 #[derive(Debug, Deserialize)]
