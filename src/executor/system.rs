@@ -27,10 +27,10 @@ impl CommandExecutor for SystemCommandExecutor {
 
         io::stdout()
             .write_all(&output.stdout)
-            .map_err(|e| OmniDocError::Io(e))?;
+            .map_err(OmniDocError::Io)?;
         io::stderr()
             .write_all(&output.stderr)
-            .map_err(|e| OmniDocError::Io(e))?;
+            .map_err(OmniDocError::Io)?;
 
         if !output.status.success() {
             let command = format!("{} {}", cmd, args.join(" "));

@@ -22,7 +22,7 @@ impl DocumentTypeRegistry {
         ]
     }
 
-    pub fn from_str(s: &str) -> Result<DocumentType> {
+    pub fn parse(s: &str) -> Result<DocumentType> {
         DocumentTypeRegistry::all()
             .into_iter()
             .find(|dt| dt.as_str() == s)

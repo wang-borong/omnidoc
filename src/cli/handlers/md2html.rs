@@ -16,7 +16,7 @@ pub fn handle_md2html(
     }
 
     let converter = create_converter_service()?;
-    let css_path = css.as_ref().map(|s| Path::new(s));
+    let css_path = css.as_ref().map(Path::new);
 
     // 处理每个输入文件
     for input_str in &inputs {
@@ -49,11 +49,7 @@ pub fn handle_md2html(
 
         // 执行转换
         error::project_err(
-            converter.md_to_html(
-                input_path,
-                output_path.as_ref().map(|p| p.as_path()),
-                css_path,
-            ),
+            converter.md_to_html(input_path, output_path.as_deref(), css_path),
             format!("Failed to convert {}", input_str),
         )?;
 

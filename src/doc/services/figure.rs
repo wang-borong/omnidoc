@@ -110,7 +110,7 @@ impl FigureService {
         // Use default options if not provided
         let bitfield_options = options
             .cloned()
-            .unwrap_or_else(|| crate::cli::handlers::BitfieldOptions::default());
+            .unwrap_or_else(crate::cli::handlers::BitfieldOptions::default);
 
         // Generate SVG from JSON
         let svg_content = render_bitfield_from_json(source, &bitfield_options)
@@ -260,7 +260,7 @@ impl FigureService {
                 .ok_or_else(|| OmniDocError::Other("Invalid source path".to_string()))?,
         );
 
-        let args_str: Vec<&str> = args.iter().map(|s| *s).collect();
+        let args_str: Vec<&str> = args.to_vec();
         self.executor.execute(&dot_path, &args_str, false)?;
 
         Ok(())
@@ -298,7 +298,7 @@ impl FigureService {
                 .ok_or_else(|| OmniDocError::Other("Invalid source path".to_string()))?,
         );
 
-        let args_str: Vec<&str> = args.iter().map(|s| *s).collect();
+        let args_str: Vec<&str> = args.to_vec();
         self.executor.execute(&plantuml_path, &args_str, false)?;
 
         Ok(())

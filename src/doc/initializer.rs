@@ -70,8 +70,8 @@ impl<'a> Doc<'a> {
         ];
 
         // Create markdown directory if needed
-        if !fs::exists(&md) && doctype_chk.ends_with(lang::MARKDOWN) {
-            fs::create_dir_all(&md)?;
+        if !fs::exists(md) && doctype_chk.ends_with(lang::MARKDOWN) {
+            fs::create_dir_all(md)?;
         }
 
         // Create LaTeX directory if needed
@@ -156,14 +156,14 @@ impl<'a> Doc<'a> {
                           and may be used in the document project!\n\
                           If you have no idea where the figures come from,\n\
                           you must not remove them.**";
-        Doc::gen_file(&fig_readme, paths::FIGURE_README)?;
+        Doc::gen_file(fig_readme, paths::FIGURE_README)?;
 
         // Write embedded gitignore template
         let gitignore_content = get_gitignore_template();
         Doc::gen_file(gitignore_content, paths::GITIGNORE)?;
 
         // Write embedded latexmkrc template only for LaTeX document types
-        let doctype = DocumentTypeRegistry::from_str(&self.doctype)
+        let doctype = DocumentTypeRegistry::parse(&self.doctype)
             .map_err(|e| OmniDocError::Project(format!("Invalid document type: {}", e)))?;
         if doctype.file_extension() == lang::LATEX {
             let latexmkrc_content = get_latexmkrc_template();
@@ -210,7 +210,7 @@ impl<'a> Doc<'a> {
         let mut update_files = vec![paths::FIGURE_README, paths::GITIGNORE];
 
         // Only update .latexmkrc for LaTeX document types
-        let doctype = DocumentTypeRegistry::from_str(&self.doctype)
+        let doctype = DocumentTypeRegistry::parse(&self.doctype)
             .map_err(|e| OmniDocError::Project(format!("Invalid document type: {}", e)))?;
         if doctype.file_extension() == lang::LATEX {
             update_files.push(paths::LATEXMKRC);
@@ -237,7 +237,7 @@ impl<'a> Doc<'a> {
             return Ok(());
         }
 
-        let doctype = DocumentTypeRegistry::from_str(doctype_str)?;
+        let doctype = DocumentTypeRegistry::parse(doctype_str)?;
 
         let template_type = map_document_type_to_template(&doctype)?;
         let is_markdown = doctype.file_extension() == lang::MARKDOWN;

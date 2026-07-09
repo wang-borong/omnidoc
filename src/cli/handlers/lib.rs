@@ -15,8 +15,7 @@ pub fn handle_lib(update: bool) -> Result<()> {
     let olib = dld.join("omnidoc");
 
     if update {
-        git_pull(&olib, git_refs::ORIGIN, git_refs::MAIN_BRANCH)
-            .map_err(|e| OmniDocError::Git(e))?;
+        git_pull(&olib, git_refs::ORIGIN, git_refs::MAIN_BRANCH).map_err(OmniDocError::Git)?;
         println!(
             "{} {} '{}'",
             style("✔").green().bold(),
@@ -32,7 +31,7 @@ pub fn handle_lib(update: bool) -> Result<()> {
             .and_then(|l| l.url.clone())
             .unwrap_or_else(|| config_consts::DEFAULT_LIB_URL.to_string());
 
-        git_clone(&lib_url, &olib, true).map_err(|e| OmniDocError::Git(e))?;
+        git_clone(&lib_url, &olib, true).map_err(OmniDocError::Git)?;
         println!(
             "{} {} '{}'",
             style("✔").green().bold(),

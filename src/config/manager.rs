@@ -457,10 +457,8 @@ impl ConfigManager {
 
     /// 获取工具路径（优先使用配置，否则查找系统 PATH）
     pub fn get_tool_path(&self, tool: &str) -> Option<String> {
-        if let Some(path) = self.merged.tool_paths.get(tool) {
-            if let Some(p) = path {
-                return Some(p.clone());
-            }
+        if let Some(Some(path)) = self.merged.tool_paths.get(tool) {
+            return Some(path.clone());
         }
 
         // 检查系统 PATH

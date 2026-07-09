@@ -245,10 +245,8 @@ fn collect_text_parts(value: &Value, parts: &mut Vec<String>) {
                 collect_text_parts(item, parts);
             }
         }
-        Value::String(text) => {
-            if !text.trim().is_empty() {
-                parts.push(text.clone());
-            }
+        Value::String(text) if !text.trim().is_empty() => {
+            parts.push(text.clone());
         }
         _ => {}
     }

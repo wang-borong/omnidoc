@@ -19,8 +19,7 @@ impl<'a> Doc<'a> {
 
         // Determine output directory
         let outdir = self.envs["outdir"]
-            .as_ref()
-            .map(|s| s.as_str())
+            .as_deref()
             .unwrap_or(paths::DEFAULT_BUILD_DIR);
 
         let docname = self.get_docname();

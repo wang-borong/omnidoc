@@ -18,7 +18,7 @@ impl ProjectConfig {
         } else {
             // 从当前目录向上查找
             let mut paths = Vec::new();
-            let mut current = std::env::current_dir().map_err(|e| OmniDocError::Io(e))?;
+            let mut current = std::env::current_dir().map_err(OmniDocError::Io)?;
 
             for _ in 0..10 {
                 // 限制搜索深度

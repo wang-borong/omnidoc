@@ -179,16 +179,16 @@ impl Default for BitfieldRenderer {
 impl BitfieldRenderer {
     pub fn new(options: &crate::cli::handlers::BitfieldOptions) -> Result<Self, String> {
         // 验证参数
-        if options.vspace.map_or(false, |v| v <= 19) {
+        if options.vspace.is_some_and(|v| v <= 19) {
             return Err("vspace must be greater than 19".to_string());
         }
-        if options.hspace.map_or(false, |v| v <= 39) {
+        if options.hspace.is_some_and(|v| v <= 39) {
             return Err("hspace must be greater than 39".to_string());
         }
-        if options.lanes.map_or(false, |v| v == 0) {
+        if options.lanes.is_some_and(|v| v == 0) {
             return Err("lanes must be greater than 0".to_string());
         }
-        if options.bits.map_or(false, |v| v <= 4) {
+        if options.bits.is_some_and(|v| v <= 4) {
             return Err("bits must be greater than 4".to_string());
         }
         if options.fontsize <= 5 {
@@ -228,7 +228,7 @@ impl BitfieldRenderer {
         let total_bits = self.bits.unwrap_or_else(|| self.get_total_bits(desc));
         self.bits = Some(total_bits);
 
-        let mod_bits = (total_bits + self.lanes - 1) / self.lanes;
+        let mod_bits = total_bits.div_ceil(self.lanes);
 
         // 计算每个条目的 LSB/MSB
         let mut lsb = 0;
@@ -247,11 +247,11 @@ impl BitfieldRenderer {
         let max_attr_count = desc
             .iter()
             .filter_map(|e| {
-                e.attr.as_ref().and_then(|a| {
+                e.attr.as_ref().map(|a| {
                     if let Some(arr) = a.as_array() {
-                        Some(arr.len())
+                        arr.len()
                     } else {
-                        Some(1)
+                        1
                     }
                 })
             })
@@ -291,7 +291,7 @@ impl BitfieldRenderer {
             self.render_lane(&mut svg, desc, i, lane_index, mod_bits, vlane)?;
         }
 
-        Ok(svg.to_string())
+        Ok(svg.into_string())
     }
 
     fn render_lane(
@@ -558,7 +558,7 @@ impl BitfieldRenderer {
 
                     if let Some(ref attr) = e.attr {
                         let attr_list: Vec<serde_json::Value> = if attr.is_array() {
-                            attr.as_array().unwrap().iter().cloned().collect()
+                            attr.as_array().unwrap().to_vec()
                         } else {
                             vec![attr.clone()]
                         };
@@ -786,10 +786,7 @@ impl BitfieldRenderer {
                 let x = rpos as f64 * hbit + self.stroke_width / 2.0;
                 svg.add_line(x, 0.0, x, vlane);
             }
-            if bitm == 0 {
-                let x = lpos as f64 * hbit + self.stroke_width / 2.0;
-                svg.add_line(x, 0.0, x, vlane);
-            } else if desc.iter().any(|e| e.lsb == bit) {
+            if bitm == 0 || desc.iter().any(|e| e.lsb == bit) {
                 let x = lpos as f64 * hbit + self.stroke_width / 2.0;
                 svg.add_line(x, 0.0, x, vlane);
             } else {
@@ -997,7 +994,7 @@ impl SvgBuilder {
         Ok(())
     }
 
-    fn to_string(mut self) -> String {
+    fn into_string(mut self) -> String {
         self.content.push_str("</svg>\n");
         self.content
     }
@@ -1024,9 +1021,9 @@ fn hls_to_rgb(h: f64, l: f64, s: f64) -> (u8, u8, u8) {
     };
 
     (
-        ((r + m) * 255.0).min(255.0).max(0.0) as u8,
-        ((g + m) * 255.0).min(255.0).max(0.0) as u8,
-        ((b + m) * 255.0).min(255.0).max(0.0) as u8,
+        ((r + m) * 255.0).clamp(0.0, 255.0) as u8,
+        ((g + m) * 255.0).clamp(0.0, 255.0) as u8,
+        ((b + m) * 255.0).clamp(0.0, 255.0) as u8,
     )
 }
 

@@ -16,6 +16,7 @@ pub struct BuildRunOptions {
 }
 
 /// Handle the 'build' command
+#[allow(clippy::too_many_arguments)]
 pub fn handle_build(
     path: Option<String>,
     to: Option<String>,
@@ -127,9 +128,9 @@ fn build_project_once(
     run_options: BuildRunOptions,
     verbose: bool,
 ) -> Result<project_tools::BuildReport> {
-    check_omnidoc_project(&project_path)?;
+    check_omnidoc_project(project_path)?;
 
-    let config_manager = create_config_manager(Some(&project_path), cli_overrides.clone())?;
+    let config_manager = create_config_manager(Some(project_path), cli_overrides.clone())?;
     let config = config_manager.get_merged().clone();
     config_manager.setup_env()?;
     let asset_context = project_tools::PluginContext {
@@ -290,9 +291,11 @@ mod tests {
 
     #[test]
     fn plain_build_uses_project_to_even_when_all_outputs_are_configured() {
-        let mut config = MergedConfig::default();
-        config.to = Some("html".to_string());
-        config.outputs = vec!["pdf".to_string(), "docx".to_string()];
+        let config = MergedConfig {
+            to: Some("html".to_string()),
+            outputs: vec!["pdf".to_string(), "docx".to_string()],
+            ..Default::default()
+        };
 
         let outputs = resolve_outputs(&config, &CliOverrides::new(), false);
 
@@ -301,9 +304,11 @@ mod tests {
 
     #[test]
     fn cli_to_overrides_configured_outputs() {
-        let mut config = MergedConfig::default();
-        config.to = Some("pdf".to_string());
-        config.outputs = vec!["pdf".to_string(), "docx".to_string()];
+        let config = MergedConfig {
+            to: Some("pdf".to_string()),
+            outputs: vec!["pdf".to_string(), "docx".to_string()],
+            ..Default::default()
+        };
         let cli = CliOverrides::new().with_to(Some("epub".to_string()));
 
         let outputs = resolve_outputs(&config, &cli, true);
@@ -313,9 +318,11 @@ mod tests {
 
     #[test]
     fn cli_outputs_have_highest_priority() {
-        let mut config = MergedConfig::default();
-        config.to = Some("pdf".to_string());
-        config.outputs = vec!["pdf".to_string()];
+        let config = MergedConfig {
+            to: Some("pdf".to_string()),
+            outputs: vec!["pdf".to_string()],
+            ..Default::default()
+        };
         let cli = CliOverrides::new()
             .with_to(Some("html".to_string()))
             .with_outputs(vec!["docx".to_string(), "epub".to_string()]);
@@ -327,8 +334,10 @@ mod tests {
 
     #[test]
     fn all_uses_configured_outputs_or_defaults() {
-        let mut config = MergedConfig::default();
-        config.outputs = vec!["PDF".to_string(), "pdf".to_string(), "html".to_string()];
+        let config = MergedConfig {
+            outputs: vec!["PDF".to_string(), "pdf".to_string(), "html".to_string()],
+            ..Default::default()
+        };
 
         let configured = resolve_outputs(&config, &CliOverrides::new(), true);
         let defaults = resolve_outputs(&MergedConfig::default(), &CliOverrides::new(), true);

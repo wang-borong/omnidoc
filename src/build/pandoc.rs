@@ -181,8 +181,9 @@ impl PandocBuilder {
             self.config.pandoc_resource_path.join(":")
         } else {
             format!(
-                ".:{}{}",
-                format!("{}/{}", omnidoc_lib, pandoc::LIB_PANDOC_CSL),
+                ".:{}/{}{}",
+                omnidoc_lib,
+                pandoc::LIB_PANDOC_CSL,
                 pandoc::RESOURCE_PATH_COMMON_SUFFIX
             )
         };
@@ -477,8 +478,10 @@ mod tests {
 
     #[test]
     fn accepts_common_output_aliases() {
-        let mut config = MergedConfig::default();
-        config.to = Some("html5".to_string());
+        let mut config = MergedConfig {
+            to: Some("html5".to_string()),
+            ..Default::default()
+        };
         assert_eq!(
             PandocOutputKind::from_config(&config).expect("output kind"),
             PandocOutputKind::Html
@@ -493,8 +496,10 @@ mod tests {
 
     #[test]
     fn uses_format_specific_templates_without_docx_template_flag() {
-        let mut html_config = MergedConfig::default();
-        html_config.pandoc_html_template = Some("html-template.html".to_string());
+        let html_config = MergedConfig {
+            pandoc_html_template: Some("html-template.html".to_string()),
+            ..Default::default()
+        };
         let html_builder = PandocBuilder::new(html_config).expect("html builder");
         let mut html_options = Vec::new();
         html_builder.push_template(&mut html_options, PandocOutputKind::Html);
@@ -503,9 +508,11 @@ mod tests {
             vec!["--template".to_string(), "html-template.html".to_string()]
         );
 
-        let mut epub_config = MergedConfig::default();
-        epub_config.pandoc_template = Some("generic-template.html".to_string());
-        epub_config.pandoc_epub_template = Some("epub-template.html".to_string());
+        let epub_config = MergedConfig {
+            pandoc_template: Some("generic-template.html".to_string()),
+            pandoc_epub_template: Some("epub-template.html".to_string()),
+            ..Default::default()
+        };
         let epub_builder = PandocBuilder::new(epub_config).expect("epub builder");
         let mut epub_options = Vec::new();
         epub_builder.push_template(&mut epub_options, PandocOutputKind::Epub);
@@ -514,8 +521,10 @@ mod tests {
             vec!["--template".to_string(), "epub-template.html".to_string()]
         );
 
-        let mut docx_config = MergedConfig::default();
-        docx_config.pandoc_template = Some("generic-template.html".to_string());
+        let docx_config = MergedConfig {
+            pandoc_template: Some("generic-template.html".to_string()),
+            ..Default::default()
+        };
         let docx_builder = PandocBuilder::new(docx_config).expect("docx builder");
         let mut docx_options = Vec::new();
         docx_builder.push_template(&mut docx_options, PandocOutputKind::Docx);

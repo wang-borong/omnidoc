@@ -1170,8 +1170,10 @@ mod tests {
 
     #[test]
     fn validates_unsupported_output() {
-        let mut config = MergedConfig::default();
-        config.to = Some("unknown".to_string());
+        let config = MergedConfig {
+            to: Some("unknown".to_string()),
+            ..Default::default()
+        };
         let issues = validate_config(Path::new("."), &config);
         assert!(issues
             .iter()
@@ -1186,8 +1188,10 @@ mod tests {
 
     #[test]
     fn validates_unsupported_build_outputs() {
-        let mut config = MergedConfig::default();
-        config.outputs = vec!["pdf".to_string(), "unknown".to_string()];
+        let config = MergedConfig {
+            outputs: vec!["pdf".to_string(), "unknown".to_string()],
+            ..Default::default()
+        };
         let issues = validate_config(Path::new("."), &config);
 
         assert!(issues
@@ -1197,9 +1201,11 @@ mod tests {
 
     #[test]
     fn validates_engine_pass_count() {
-        let mut config = MergedConfig::default();
-        config.latex_backend = "engine".to_string();
-        config.max_latex_passes = 0;
+        let config = MergedConfig {
+            latex_backend: "engine".to_string(),
+            max_latex_passes: 0,
+            ..Default::default()
+        };
         let issues = validate_config(Path::new("."), &config);
 
         assert!(issues

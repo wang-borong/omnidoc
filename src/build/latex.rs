@@ -53,7 +53,7 @@ impl LatexBuilder {
             }
 
             // 查找 drawio 文件
-            if path_str == "drawio" || fs::exists(&search_path.join("drawio")) {
+            if path_str == "drawio" || fs::exists(search_path.join("drawio")) {
                 let drawio_dir = if path_str == "drawio" {
                     search_path.clone()
                 } else {
@@ -70,7 +70,7 @@ impl LatexBuilder {
             }
 
             // 查找 dot 和 mmd 文件
-            if path_str == "dac" || fs::exists(&search_path.join("dac")) {
+            if path_str == "dac" || fs::exists(search_path.join("dac")) {
                 let dac_dir = if path_str == "dac" {
                     search_path.clone()
                 } else {
@@ -642,7 +642,7 @@ impl BuildPipeline for LatexBuilder {
             if !use_tectonic && latex_backend == "latexmk" {
                 let jobname_arg = format!("-jobname={}", target_name);
                 let clean_options = ["-c", &jobname_arg, entry_file.to_str().unwrap_or("")];
-                let clean_args: Vec<&str> = clean_options.iter().copied().collect();
+                let clean_args: Vec<&str> = clean_options.to_vec();
                 let _ = self.executor.execute("latexmk", &clean_args[..], false);
             }
 

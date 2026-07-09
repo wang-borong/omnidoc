@@ -24,7 +24,7 @@ fn print_completions<G: Generator>(gen: G, cmd: &mut Command) {
 pub fn cli() -> Result<()> {
     let args = OmniCli::parse();
 
-    let orig_path = env::current_dir().map_err(|e| OmniDocError::Io(e))?;
+    let orig_path = env::current_dir().map_err(OmniDocError::Io)?;
 
     // Ensure omnidoc lib exists for commands that need it.
     // Only perform a one-time install (clone) if missing; do not auto update.
@@ -36,23 +36,22 @@ pub fn cli() -> Result<()> {
         | Commands::Publish { .. }
         | Commands::Ci { .. }
         | Commands::Md2pdf { .. }
-        | Commands::Md2html { .. } => {
-            if !omnidoc_lib_exists() {
-                let dld = data_local_dir().ok_or_else(|| {
-                    OmniDocError::Other("Local data directory not found".to_string())
-                })?;
-                let olib = dld.join("omnidoc");
-                // 从配置获取库 URL，如果没有配置则使用默认值
-                let lib_url = GlobalConfig::load()
-                    .ok()
-                    .and_then(|gc| {
-                        gc.get_config()
-                            .and_then(|c| c.lib.lib.as_ref())
-                            .and_then(|l| l.url.clone())
-                    })
-                    .unwrap_or_else(|| config_consts::DEFAULT_LIB_URL.to_string());
-                let _ = git_clone(&lib_url, &olib, true);
-            }
+        | Commands::Md2html { .. }
+            if !omnidoc_lib_exists() =>
+        {
+            let dld = data_local_dir()
+                .ok_or_else(|| OmniDocError::Other("Local data directory not found".to_string()))?;
+            let olib = dld.join("omnidoc");
+            // 从配置获取库 URL，如果没有配置则使用默认值
+            let lib_url = GlobalConfig::load()
+                .ok()
+                .and_then(|gc| {
+                    gc.get_config()
+                        .and_then(|c| c.lib.lib.as_ref())
+                        .and_then(|l| l.url.clone())
+                })
+                .unwrap_or_else(|| config_consts::DEFAULT_LIB_URL.to_string());
+            let _ = git_clone(&lib_url, &olib, true);
         }
         _ => {}
     }
@@ -70,7 +69,7 @@ pub fn cli() -> Result<()> {
                         path
                     )));
                 }
-                env::set_current_dir(&path).map_err(|e| OmniDocError::Io(e))?;
+                env::set_current_dir(path).map_err(OmniDocError::Io)?;
             }
         }
         _ => {}

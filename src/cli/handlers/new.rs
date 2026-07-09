@@ -31,10 +31,9 @@ pub fn handle_new(
     })?;
 
     // Load config and get envs
-    let config_manager = create_config_manager_default(None).map_err(|e| {
+    let config_manager = create_config_manager_default(None).inspect_err(|_| {
         let _ = env::set_current_dir(orig_path);
         let _ = fs::remove_dir_all(&path);
-        e
     })?;
 
     let merged_config = config_manager.get_merged();
@@ -57,8 +56,8 @@ pub fn handle_new(
 
     // 创建项目配置文件
     // 使用当前目录（已切换到新项目目录）而不是相对路径
-    let project_path = env::current_dir().map_err(|e| OmniDocError::Io(e))?;
-    let doctype = DocumentTypeRegistry::from_str(&doctype_str)
+    let project_path = env::current_dir().map_err(OmniDocError::Io)?;
+    let doctype = DocumentTypeRegistry::parse(&doctype_str)
         .map_err(|e| OmniDocError::Project(format!("Invalid document type: {}", e)))?;
 
     let entry = Some(doctype.file_name());

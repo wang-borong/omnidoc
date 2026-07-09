@@ -50,12 +50,7 @@ impl ConverterService {
             let has_frontmatter = trimmed.starts_with("---\n") || trimmed.starts_with("---\r\n");
             if !has_frontmatter {
                 let title = crate::utils::path::file_stem_str(input).unwrap_or("document");
-                let author = self
-                    .config
-                    .author
-                    .as_ref()
-                    .map(|s| s.as_str())
-                    .unwrap_or("Unknown Author");
+                let author = self.config.author.as_deref().unwrap_or("Unknown Author");
 
                 // 语言：默认中文（保持与 Python 默认一致）；英文时使用更简洁的头部
                 use_cn = match lang {
@@ -217,8 +212,9 @@ impl ConverterService {
             self.config.pandoc_resource_path.join(":")
         } else {
             format!(
-                ".:{}{}",
-                format!("{}/{}", omnidoc_lib, pandoc::LIB_PANDOC_HEADERS),
+                ".:{}/{}{}",
+                omnidoc_lib,
+                pandoc::LIB_PANDOC_HEADERS,
                 pandoc::RESOURCE_PATH_COMMON_SUFFIX
             )
         };
@@ -346,8 +342,9 @@ impl ConverterService {
                 self.config.pandoc_resource_path.join(":")
             } else {
                 format!(
-                    ".:{}{}",
-                    format!("{}/{}", omnidoc_lib, pandoc::LIB_PANDOC_CSL),
+                    ".:{}/{}{}",
+                    omnidoc_lib,
+                    pandoc::LIB_PANDOC_CSL,
                     pandoc::RESOURCE_PATH_COMMON_SUFFIX
                 )
             };

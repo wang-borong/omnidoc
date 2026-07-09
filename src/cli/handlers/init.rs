@@ -41,7 +41,7 @@ pub fn handle_init(
     // 创建项目配置文件（如果不存在）
     let project_path = Path::new(&path);
     if !ProjectConfig::exists(project_path) {
-        let doctype = DocumentTypeRegistry::from_str(&doctype_str)
+        let doctype = DocumentTypeRegistry::parse(&doctype_str)
             .map_err(|e| OmniDocError::Project(format!("Invalid document type: {}", e)))?;
 
         let entry = Some(doctype.file_name());

@@ -25,13 +25,10 @@ pub fn is_omnidoc_project_with_paths(paths: Option<&PathConfig>) -> bool {
     for p in &check_paths {
         let path = Path::new(p.as_str());
         if path.exists() {
-            match path.parent() {
-                Some(parent) => {
-                    if parent.to_str().unwrap_or("") != "" {
-                        let _ = env::set_current_dir(parent);
-                    }
+            if let Some(parent) = path.parent() {
+                if !parent.to_str().unwrap_or("").is_empty() {
+                    let _ = env::set_current_dir(parent);
                 }
-                None => {}
             }
             return true;
         }

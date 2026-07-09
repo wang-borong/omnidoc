@@ -59,13 +59,13 @@ impl GlobalConfig {
     pub fn create_default(path: &PathBuf) -> Result<()> {
         use crate::config::schema::*;
 
-        let mut config = ConfigSchema::default();
-
-        // 设置默认作者
-        config.author = AuthorConfig {
-            author: Some(AuthorSection {
-                name: Some(config_consts::UNKNOWN_AUTHOR.to_string()),
-            }),
+        let mut config = ConfigSchema {
+            author: AuthorConfig {
+                author: Some(AuthorSection {
+                    name: Some(config_consts::UNKNOWN_AUTHOR.to_string()),
+                }),
+            },
+            ..Default::default()
         };
 
         // 设置默认库路径

@@ -10,7 +10,7 @@ pub fn handle_fmt(paths: Vec<String>, backup: bool, semantic: bool, symbol: bool
 
     if paths.is_empty() {
         // 如果没有指定路径，格式化当前目录
-        let current_dir = std::env::current_dir().map_err(|e| OmniDocError::Io(e))?;
+        let current_dir = std::env::current_dir().map_err(OmniDocError::Io)?;
 
         format_service.format_directory(&current_dir, &["md", "tex"])?;
         println!("✓ Formatted all markdown and latex files in current directory");

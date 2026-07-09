@@ -36,10 +36,10 @@ impl<'a> Doc<'a> {
             Ok(dir) => dir,
             Err(_) => return "unknown".to_string(),
         };
-        let docname = match cur_dir.file_name().and_then(|n| n.to_str()) {
-            Some(name) => name,
-            None => "unknown",
-        };
+        let docname = cur_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
         String::from(docname)
     }
 

@@ -26,6 +26,14 @@ pub struct BitfieldOptions {
     pub legend: Vec<(String, String)>,
 }
 
+struct BitfieldRequest {
+    sources: Vec<String>,
+    options: BitfieldOptions,
+    format: String,
+    force: bool,
+    output: Option<String>,
+}
+
 impl Default for BitfieldOptions {
     fn default() -> Self {
         Self {
@@ -81,29 +89,34 @@ pub fn handle_figure(
             format,
             force: subcommand_force,
             output,
-        }) => handle_bitfield(
-            sources,
-            vspace,
-            hspace,
-            lanes,
-            bits,
-            fontfamily,
-            fontweight,
-            fontsize,
-            strokewidth,
-            beautify,
-            json5,
-            no_json5,
-            compact,
-            hflip,
-            vflip,
-            trim,
-            uneven,
-            legend,
-            format,
-            force || subcommand_force,
-            output,
-        ),
+        }) => {
+            let legend = parse_bitfield_legend(&legend);
+            handle_bitfield(BitfieldRequest {
+                sources,
+                options: BitfieldOptions {
+                    vspace,
+                    hspace,
+                    lanes,
+                    bits,
+                    fontfamily,
+                    fontweight,
+                    fontsize,
+                    strokewidth,
+                    beautify,
+                    json5,
+                    no_json5,
+                    compact,
+                    hflip,
+                    vflip,
+                    trim,
+                    uneven,
+                    legend,
+                },
+                format,
+                force: force || subcommand_force,
+                output,
+            })
+        }
         Some(FigureSubcommand::Drawio {
             sources,
             drawio,
@@ -162,11 +175,11 @@ fn execute_figure_generation(
     bitfield_options: Option<BitfieldOptions>,
 ) -> Result<()> {
     use std::env;
-    let source_paths: Vec<PathBuf> = sources.iter().map(|s| PathBuf::from(s)).collect();
+    let source_paths: Vec<PathBuf> = sources.iter().map(PathBuf::from).collect();
     // Use current working directory as project_path, not the parent of the source file
     // This prevents path duplication when source files are relative paths
     let project_path = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let output_dir = output.as_ref().map(|s| PathBuf::from(s));
+    let output_dir = output.as_ref().map(PathBuf::from);
 
     service.generate_figures(
         &project_path,
@@ -178,32 +191,24 @@ fn execute_figure_generation(
     )
 }
 
-fn handle_bitfield(
-    sources: Vec<String>,
-    vspace: Option<u32>,
-    hspace: Option<u32>,
-    lanes: Option<u32>,
-    bits: Option<u32>,
-    fontfamily: String,
-    fontweight: String,
-    fontsize: u32,
-    strokewidth: f32,
-    beautify: bool,
-    json5: bool,
-    no_json5: bool,
-    compact: bool,
-    hflip: bool,
-    vflip: bool,
-    trim: Option<f32>,
-    uneven: bool,
-    legend: Vec<String>,
-    format: String,
-    force: bool,
-    output: Option<String>,
-) -> Result<()> {
+fn handle_bitfield(request: BitfieldRequest) -> Result<()> {
     let figure_service = create_figure_service(vec![])?;
 
-    let legend_parsed: Vec<(String, String)> = legend
+    execute_figure_generation(
+        request.sources,
+        request.output,
+        request.format,
+        request.force,
+        &figure_service,
+        Some(request.options),
+    )?;
+
+    println!("✓ Bitfield generation completed");
+    Ok(())
+}
+
+fn parse_bitfield_legend(legend: &[String]) -> Vec<(String, String)> {
+    legend
         .iter()
         .filter_map(|l| {
             let parts: Vec<&str> = l.splitn(2, ':').collect();
@@ -213,39 +218,7 @@ fn handle_bitfield(
                 None
             }
         })
-        .collect();
-
-    let bitfield_options = BitfieldOptions {
-        vspace,
-        hspace,
-        lanes,
-        bits,
-        fontfamily,
-        fontweight,
-        fontsize,
-        strokewidth,
-        beautify,
-        json5,
-        no_json5,
-        compact,
-        hflip,
-        vflip,
-        trim,
-        uneven,
-        legend: legend_parsed,
-    };
-
-    execute_figure_generation(
-        sources,
-        output,
-        format,
-        force,
-        &figure_service,
-        Some(bitfield_options),
-    )?;
-
-    println!("✓ Bitfield generation completed");
-    Ok(())
+        .collect()
 }
 
 fn handle_drawio(

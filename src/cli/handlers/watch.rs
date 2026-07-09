@@ -8,6 +8,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 /// Handle the 'watch' command using the notify backend.
+#[allow(clippy::too_many_arguments)]
 pub fn handle_watch(
     path: Option<String>,
     to: Option<String>,

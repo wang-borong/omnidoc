@@ -27,13 +27,13 @@ pub fn handle_config(
         )));
     }
 
-    let mut config = ConfigSchema::default();
-
-    // Set author
-    config.author = AuthorConfig {
-        author: Some(AuthorSection {
-            name: Some(authors),
-        }),
+    let mut config = ConfigSchema {
+        author: AuthorConfig {
+            author: Some(AuthorSection {
+                name: Some(authors),
+            }),
+        },
+        ..Default::default()
     };
 
     // Set lib path if provided

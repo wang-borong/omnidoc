@@ -172,7 +172,7 @@ pub mod path {
     ///
     /// 注意：此函数返回的是临时引用，生命周期受参数限制。
     /// 对于静态路径字符串，直接使用 `Path::new()`。
-    pub fn new_path<'a>(path: &'a str) -> &'a Path {
+    pub fn new_path(path: &str) -> &Path {
         Path::new(path)
     }
 

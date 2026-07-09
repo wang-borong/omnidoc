@@ -80,16 +80,12 @@ where
             Err(_) => return 1,
         };
 
-        let ret = if status.contains(git2::Status::WT_MODIFIED)
-            || status.contains(git2::Status::WT_NEW)
-        {
+        if status.contains(git2::Status::WT_MODIFIED) || status.contains(git2::Status::WT_NEW) {
             //println!("add '{}'", path.display());
             0
         } else {
             1
-        };
-
-        ret
+        }
     };
     let cb = if update {
         Some(cb as &mut git2::IndexMatchedPath)
@@ -189,7 +185,7 @@ fn do_fetch<'a>(
     }
 
     let fetch_head = repo.find_reference(git_refs::FETCH_HEAD)?;
-    Ok(repo.reference_to_annotated_commit(&fetch_head)?)
+    repo.reference_to_annotated_commit(&fetch_head)
 }
 
 fn fast_forward(
@@ -291,7 +287,7 @@ fn do_merge<'a>(
     } else if analysis.0.is_normal() {
         // do a normal merge
         let head_commit = repo.reference_to_annotated_commit(&repo.head()?)?;
-        normal_merge(&repo, &head_commit, &fetch_commit)?;
+        normal_merge(repo, &head_commit, &fetch_commit)?;
     } else {
         //println!("Nothing to do...");
     }
@@ -316,11 +312,7 @@ where
     let git_repo = PathBuf::new();
     let dot_git = git_repo.join(repo).join(".git");
 
-    if dot_git.exists() {
-        true
-    } else {
-        false
-    }
+    dot_git.exists()
 }
 
 #[cfg(test)]
