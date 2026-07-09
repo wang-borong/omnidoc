@@ -1,11 +1,11 @@
 [package]
 name = "omnidoc"
-version = "1.1.1"
+version = "1.1.2"
 edition = "2021"
 authors = ["Jason Wang <wang_borong@163.com>"]
 homepage = "https://github.com/wang-borong/omnidoc"
 license = "MIT"
-rust-version = "1.86"
+rust-version = "1.88"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

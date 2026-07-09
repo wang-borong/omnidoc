@@ -26,8 +26,12 @@ impl Fixture {
         fs::create_dir_all(project.join("build")).expect("project build dir");
         fs::create_dir_all(project.join("plugins").join("sample")).expect("plugin dir");
         fs::create_dir_all(&home).expect("fake home dir");
-        fs::create_dir_all(home.join("Library").join("Application Support"))
-            .expect("fake macOS app support dir");
+        fs::create_dir_all(
+            home.join("Library")
+                .join("Application Support")
+                .join("omnidoc"),
+        )
+        .expect("fake macOS app support dir");
         fs::create_dir_all(env_root.join("data").join("omnidoc")).expect("fake lib dir");
         fs::create_dir_all(env_root.join("config")).expect("config dir");
 
