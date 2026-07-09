@@ -260,6 +260,10 @@ pub enum Commands {
         #[arg(value_hint = ValueHint::DirPath)]
         path: Option<String>,
 
+        /// check whether omnidoc.lock matches current project inputs
+        #[arg(long, conflicts_with = "update")]
+        check: bool,
+
         /// rewrite the lock file
         #[arg(long)]
         update: bool,
@@ -270,6 +274,14 @@ pub enum Commands {
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
         path: Option<String>,
+
+        /// emit JSON plugin metadata
+        #[arg(long)]
+        json: bool,
+
+        /// validate discovered plugin/template manifests
+        #[arg(long)]
+        validate: bool,
     },
 
     /// open the built doc

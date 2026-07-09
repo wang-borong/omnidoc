@@ -64,6 +64,39 @@ pub struct LockFile {
     pub dependencies: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LockStatus {
+    pub exists: bool,
+    pub up_to_date: bool,
+    pub expected_hash: u64,
+    pub actual_hash: Option<u64>,
+    pub missing_dependencies: Vec<String>,
+    pub extra_dependencies: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginInfo {
+    pub path: String,
+    pub key: String,
+    pub name: Option<String>,
+    pub version: Option<String>,
+    pub description: Option<String>,
+    pub kind: String,
+    pub valid: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PluginManifest {
+    key: Option<String>,
+    name: Option<String>,
+    version: Option<String>,
+    description: Option<String>,
+    kind: Option<String>,
+    language: Option<String>,
+    template_file: Option<String>,
+}
+
 pub fn supported_outputs() -> &'static [&'static str] {
     &["pdf", "html", "epub", "docx", "latex"]
 }
@@ -302,6 +335,9 @@ pub fn build_input_hash(
     config.pandoc_to_format.hash(&mut hasher);
     config.pandoc_lua_filters.hash(&mut hasher);
     config.pandoc_template.hash(&mut hasher);
+    config.pandoc_html_template.hash(&mut hasher);
+    config.pandoc_latex_template.hash(&mut hasher);
+    config.pandoc_epub_template.hash(&mut hasher);
     config.pandoc_data_dir.hash(&mut hasher);
     config.pandoc_resource_path.hash(&mut hasher);
     config.pandoc_syntax_highlighting.hash(&mut hasher);
@@ -406,7 +442,52 @@ pub fn write_lock(
     Ok(())
 }
 
-pub fn discovered_plugins(project_path: &Path, config: &MergedConfig) -> Vec<String> {
+pub fn check_lock(
+    project_path: &Path,
+    _config: &MergedConfig,
+    graph: &DependencyGraph,
+) -> Result<LockStatus> {
+    let expected_hash = input_hash(project_path, graph)?;
+    let lock_path = project_path.join(LOCK_FILE);
+    if !lock_path.exists() {
+        return Ok(LockStatus {
+            exists: false,
+            up_to_date: false,
+            expected_hash,
+            actual_hash: None,
+            missing_dependencies: graph.files.clone(),
+            extra_dependencies: Vec::new(),
+        });
+    }
+
+    let content = fs::read_to_string(&lock_path)?;
+    let lock: LockFile =
+        toml::from_str(&content).map_err(|err| OmniDocError::Other(err.to_string()))?;
+    let expected_dependencies = graph.files.iter().cloned().collect::<BTreeSet<_>>();
+    let actual_dependencies = lock.dependencies.iter().cloned().collect::<BTreeSet<_>>();
+    let missing_dependencies = expected_dependencies
+        .difference(&actual_dependencies)
+        .cloned()
+        .collect::<Vec<_>>();
+    let extra_dependencies = actual_dependencies
+        .difference(&expected_dependencies)
+        .cloned()
+        .collect::<Vec<_>>();
+    let up_to_date = lock.input_hash == expected_hash
+        && missing_dependencies.is_empty()
+        && extra_dependencies.is_empty();
+
+    Ok(LockStatus {
+        exists: true,
+        up_to_date,
+        expected_hash,
+        actual_hash: Some(lock.input_hash),
+        missing_dependencies,
+        extra_dependencies,
+    })
+}
+
+pub fn discovered_plugins(project_path: &Path, config: &MergedConfig) -> Vec<PluginInfo> {
     let mut plugins = Vec::new();
     for base in [
         config.template_dir.as_ref().map(PathBuf::from),
@@ -422,15 +503,12 @@ pub fn discovered_plugins(project_path: &Path, config: &MergedConfig) -> Vec<Str
         if !base.exists() {
             continue;
         }
-        for entry in WalkDir::new(&base).max_depth(3).into_iter().flatten() {
-            let path = entry.path();
-            if path.file_name().and_then(|name| name.to_str()) == Some("manifest.toml") {
-                plugins.push(path.display().to_string());
-            }
+        for manifest_path in plugin_manifest_paths(&base) {
+            plugins.push(read_plugin_manifest(&manifest_path));
         }
     }
-    plugins.sort();
-    plugins.dedup();
+    plugins.sort_by(|left, right| left.path.cmp(&right.path));
+    plugins.dedup_by(|left, right| left.path == right.path);
     plugins
 }
 
@@ -594,6 +672,115 @@ fn check_configured_path(
         warning(issue_message, Some(configured_path.to_string()), None)
     };
     issues.push(issue);
+}
+
+fn plugin_manifest_paths(base: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for entry in WalkDir::new(base)
+        .max_depth(3)
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry.file_type().is_file())
+    {
+        let path = entry.path();
+        let file_name = path.file_name().and_then(|name| name.to_str());
+        let parent_name = path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str());
+        let is_manifest = file_name == Some("manifest.toml")
+            || (parent_name == Some("manifests")
+                && path.extension().and_then(|ext| ext.to_str()) == Some("toml"));
+        if is_manifest {
+            paths.push(path.to_path_buf());
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn read_plugin_manifest(path: &Path) -> PluginInfo {
+    let fallback_key = path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+        .or_else(|| path.file_stem().and_then(|name| name.to_str()))
+        .unwrap_or("plugin")
+        .to_string();
+    let content = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(err) => {
+            return invalid_plugin(
+                path,
+                fallback_key,
+                format!("Failed to read manifest: {}", err),
+            );
+        }
+    };
+    let manifest = match toml::from_str::<PluginManifest>(&content) {
+        Ok(manifest) => manifest,
+        Err(err) => {
+            return invalid_plugin(
+                path,
+                fallback_key,
+                format!("Failed to parse manifest: {}", err),
+            );
+        }
+    };
+
+    let key = manifest.key.clone().unwrap_or(fallback_key);
+    let kind = manifest.kind.clone().unwrap_or_else(|| {
+        if manifest.template_file.is_some() {
+            "template".to_string()
+        } else {
+            "plugin".to_string()
+        }
+    });
+    let error = validate_plugin_manifest(path, &manifest);
+    PluginInfo {
+        path: path.display().to_string(),
+        key,
+        name: manifest.name,
+        version: manifest.version,
+        description: manifest.description,
+        kind,
+        valid: error.is_none(),
+        error,
+    }
+}
+
+fn invalid_plugin(path: &Path, key: String, error: String) -> PluginInfo {
+    PluginInfo {
+        path: path.display().to_string(),
+        key,
+        name: None,
+        version: None,
+        description: None,
+        kind: "plugin".to_string(),
+        valid: false,
+        error: Some(error),
+    }
+}
+
+fn validate_plugin_manifest(path: &Path, manifest: &PluginManifest) -> Option<String> {
+    if let Some(language) = &manifest.language {
+        if !matches!(language.to_ascii_lowercase().as_str(), "markdown" | "latex") {
+            return Some(format!("Unsupported template language: {}", language));
+        }
+    }
+
+    if let Some(template_file) = &manifest.template_file {
+        let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+        if !base_dir.join(template_file).exists() {
+            return Some(format!("Template file not found: {}", template_file));
+        }
+        if manifest.language.is_none() {
+            return Some("Template plugins must declare language".to_string());
+        }
+    }
+
+    None
 }
 
 fn is_local_path(target: &str) -> bool {

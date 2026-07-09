@@ -198,11 +198,19 @@ pub fn cli() -> Result<()> {
         Commands::Ci { path, outputs } => {
             handle_ci(path, outputs)?;
         }
-        Commands::Lock { path, update } => {
-            handle_lock(path, update)?;
+        Commands::Lock {
+            path,
+            check,
+            update,
+        } => {
+            handle_lock(path, check, update)?;
         }
-        Commands::Plugin { path } => {
-            handle_plugin(path)?;
+        Commands::Plugin {
+            path,
+            json,
+            validate,
+        } => {
+            handle_plugin(path, json, validate)?;
         }
         Commands::Open { path } => {
             handle_open(path)?;

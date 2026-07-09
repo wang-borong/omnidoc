@@ -46,6 +46,9 @@ pub struct MergedConfig {
     pub pandoc_to_format: Option<String>,
     pub pandoc_lua_filters: Vec<String>,
     pub pandoc_template: Option<String>,
+    pub pandoc_html_template: Option<String>,
+    pub pandoc_latex_template: Option<String>,
+    pub pandoc_epub_template: Option<String>,
     pub pandoc_data_dir: Option<String>,
     pub pandoc_resource_path: Vec<String>,
     pub pandoc_syntax_highlighting: Option<String>,
@@ -249,6 +252,9 @@ impl ConfigManager {
             .and_then(|p| p.lua_filters.clone())
             .unwrap_or_default();
         let pandoc_template = pandoc_config.and_then(|p| p.template.clone());
+        let pandoc_html_template = pandoc_config.and_then(|p| p.html_template.clone());
+        let pandoc_latex_template = pandoc_config.and_then(|p| p.latex_template.clone());
+        let pandoc_epub_template = pandoc_config.and_then(|p| p.epub_template.clone());
         let pandoc_data_dir = pandoc_config.and_then(|p| p.data_dir.clone());
         let pandoc_resource_path = pandoc_config
             .and_then(|p| p.resource_path.clone())
@@ -356,6 +362,9 @@ impl ConfigManager {
             pandoc_to_format,
             pandoc_lua_filters,
             pandoc_template,
+            pandoc_html_template,
+            pandoc_latex_template,
+            pandoc_epub_template,
             pandoc_data_dir,
             pandoc_resource_path,
             pandoc_syntax_highlighting,

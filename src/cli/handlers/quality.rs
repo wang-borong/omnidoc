@@ -131,10 +131,23 @@ pub fn handle_ci(path: Option<String>, outputs: Vec<String>) -> Result<()> {
     )
 }
 
-pub fn handle_lock(path: Option<String>, update: bool) -> Result<()> {
+pub fn handle_lock(path: Option<String>, check: bool, update: bool) -> Result<()> {
     let project_path = path::determine_project_path(path)?.canonicalize()?;
     let config_manager = create_config_manager_default(Some(&project_path))?;
     let graph = project_tools::dependency_graph(&project_path, config_manager.get_merged());
+    if check {
+        let status = project_tools::check_lock(&project_path, config_manager.get_merged(), &graph)?;
+        if status.up_to_date {
+            println!("omnidoc.lock is up to date");
+            return Ok(());
+        }
+        let content = serde_json::to_string_pretty(&status)
+            .map_err(|err| OmniDocError::Other(err.to_string()))?;
+        println!("{}", content);
+        return Err(OmniDocError::Project(
+            "omnidoc.lock is missing or out of date".to_string(),
+        ));
+    }
     if !update && project_path.join("omnidoc.lock").exists() {
         println!("omnidoc.lock already exists; use --update to rewrite it");
         return Ok(());
@@ -144,16 +157,31 @@ pub fn handle_lock(path: Option<String>, update: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_plugin(path: Option<String>) -> Result<()> {
+pub fn handle_plugin(path: Option<String>, json: bool, validate: bool) -> Result<()> {
     let project_path = path::determine_project_path(path)?.canonicalize()?;
     let config_manager = create_config_manager(Some(&project_path), CliOverrides::new())?;
     let plugins = project_tools::discovered_plugins(&project_path, config_manager.get_merged());
-    if plugins.is_empty() {
+    if json {
+        let content = serde_json::to_string_pretty(&plugins)
+            .map_err(|err| OmniDocError::Other(err.to_string()))?;
+        println!("{}", content);
+    } else if plugins.is_empty() {
         println!("No plugins or external templates discovered.");
     } else {
-        for plugin in plugins {
-            println!("{}", plugin);
+        for plugin in &plugins {
+            let status = if plugin.valid { "ok" } else { "fail" };
+            if let Some(error) = &plugin.error {
+                println!("{} {} ({}) - {}", status, plugin.key, plugin.path, error);
+            } else {
+                println!("{} {} ({})", status, plugin.key, plugin.path);
+            }
         }
+    }
+
+    if validate && plugins.iter().any(|plugin| !plugin.valid) {
+        return Err(OmniDocError::Project(
+            "plugin validation failed".to_string(),
+        ));
     }
     Ok(())
 }

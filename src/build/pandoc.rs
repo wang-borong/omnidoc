@@ -244,12 +244,24 @@ impl PandocBuilder {
     }
 
     fn push_template(&self, options: &mut Vec<String>, output_kind: PandocOutputKind) {
-        let template = if let Some(template) = &self.config.pandoc_template {
-            Some(template.clone())
-        } else if output_kind == PandocOutputKind::Pdf {
-            Some(pandoc::DEFAULT_TEMPLATE_LATEX.to_string())
-        } else {
-            None
+        let template = match output_kind {
+            PandocOutputKind::Pdf | PandocOutputKind::Latex => self
+                .config
+                .pandoc_latex_template
+                .clone()
+                .or_else(|| self.config.pandoc_template.clone())
+                .or_else(|| Some(pandoc::DEFAULT_TEMPLATE_LATEX.to_string())),
+            PandocOutputKind::Html => self
+                .config
+                .pandoc_html_template
+                .clone()
+                .or_else(|| self.config.pandoc_template.clone()),
+            PandocOutputKind::Epub => self
+                .config
+                .pandoc_epub_template
+                .clone()
+                .or_else(|| self.config.pandoc_template.clone()),
+            PandocOutputKind::Docx => None,
         };
 
         if let Some(template) = template {
@@ -450,6 +462,7 @@ impl BuildPipeline for PandocBuilder {
 #[cfg(test)]
 mod tests {
     use super::PandocOutputKind;
+    use crate::build::pandoc::PandocBuilder;
     use crate::config::MergedConfig;
 
     #[test]
@@ -476,5 +489,36 @@ mod tests {
             PandocOutputKind::from_config(&config).expect("output kind"),
             PandocOutputKind::Latex
         );
+    }
+
+    #[test]
+    fn uses_format_specific_templates_without_docx_template_flag() {
+        let mut html_config = MergedConfig::default();
+        html_config.pandoc_html_template = Some("html-template.html".to_string());
+        let html_builder = PandocBuilder::new(html_config).expect("html builder");
+        let mut html_options = Vec::new();
+        html_builder.push_template(&mut html_options, PandocOutputKind::Html);
+        assert_eq!(
+            html_options,
+            vec!["--template".to_string(), "html-template.html".to_string()]
+        );
+
+        let mut epub_config = MergedConfig::default();
+        epub_config.pandoc_template = Some("generic-template.html".to_string());
+        epub_config.pandoc_epub_template = Some("epub-template.html".to_string());
+        let epub_builder = PandocBuilder::new(epub_config).expect("epub builder");
+        let mut epub_options = Vec::new();
+        epub_builder.push_template(&mut epub_options, PandocOutputKind::Epub);
+        assert_eq!(
+            epub_options,
+            vec!["--template".to_string(), "epub-template.html".to_string()]
+        );
+
+        let mut docx_config = MergedConfig::default();
+        docx_config.pandoc_template = Some("generic-template.html".to_string());
+        let docx_builder = PandocBuilder::new(docx_config).expect("docx builder");
+        let mut docx_options = Vec::new();
+        docx_builder.push_template(&mut docx_options, PandocOutputKind::Docx);
+        assert!(docx_options.is_empty());
     }
 }

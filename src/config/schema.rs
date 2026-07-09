@@ -147,8 +147,14 @@ pub struct PandocSection {
     pub to_format: Option<String>,
     /// Lua filters 列表（相对于 omnidoc-libs/pandoc/lua/）
     pub lua_filters: Option<Vec<String>>,
-    /// 模板文件名（相对于 omnidoc-libs/pandoc/data/templates/）
+    /// Generic Pandoc template fallback for template-capable outputs
     pub template: Option<String>,
+    /// HTML output template
+    pub html_template: Option<String>,
+    /// LaTeX/PDF output template
+    pub latex_template: Option<String>,
+    /// EPUB output template
+    pub epub_template: Option<String>,
     /// 数据目录（默认使用 omnidoc-libs/pandoc/data）
     pub data_dir: Option<String>,
     /// 资源路径（用冒号分隔的路径列表）

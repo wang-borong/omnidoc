@@ -189,9 +189,14 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
    [pandoc]
    css = "styles/manual.css"
+   html_template = "templates/page.html"
+   latex_template = "templates/report.tex"
+   epub_template = "templates/book.html"
    reference_doc = "templates/reference.docx"
    epub_css = "styles/epub.css"
    ```
+
+   `template` is still accepted as a generic fallback for template-capable outputs. DOCX uses `reference_doc` instead of Pandoc `--template`.
 
 4. **Watch and rebuild while editing**
 
@@ -318,7 +323,10 @@ Create or refresh the lock file:
 ```bash
 omnidoc lock [PATH]
 omnidoc lock --update
+omnidoc lock --check
 ```
+
+`lock --check` exits with an error when `omnidoc.lock` is missing or stale.
 
 Run CI-mode validation and builds:
 
@@ -332,7 +340,11 @@ List discovered local plugins and external template manifests:
 
 ```bash
 omnidoc plugin [PATH]
+omnidoc plugin --json
+omnidoc plugin --validate
 ```
+
+`plugin --validate` parses discovered `manifest.toml` files and checks template plugin fields such as `language` and `template_file`.
 
 ### Document Formatting Commands
 
