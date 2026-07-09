@@ -171,9 +171,19 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
    ```text
    Markdown source diagnostic: main.md:42:7: undefined_control_sequence
-     $ \badmacro $
+     |
+   41 | Intro text before the equation.
+   42 | $ \badmacro $
+      |       ^
+   43 | Follow-up paragraph.
      note: ! Undefined control sequence.
+     help: Check raw LaTeX commands, math macros, and required packages near this Markdown location.
    ```
+
+   The mapper understands direct `file:line:column` diagnostics, Pandoc `line/column`
+   parse errors, common LaTeX log fragments such as `l.<line>`, missing resources,
+   citation keys, missing packages, and Unicode-character failures. It searches the
+   entry file first, then project Markdown files while skipping build/cache outputs.
 
    You can also persist build choices in `.omnidoc.toml`:
 
