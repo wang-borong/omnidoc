@@ -56,7 +56,50 @@ pub enum Commands {
         #[arg(long = "pdf-engine")]
         pdf_engine: Option<String>,
 
+        /// LaTeX project backend (latexmk or engine)
+        #[arg(long = "latex-backend", default_value = "latexmk")]
+        latex_backend: String,
+
+        /// maximum direct LaTeX engine passes for --latex-backend engine
+        #[arg(long = "max-latex-passes")]
+        max_latex_passes: Option<usize>,
+
         /// show verbose message
+        #[arg(short = 'v', long)]
+        verbose: bool,
+    },
+
+    /// watch a document project and rebuild on source changes
+    Watch {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// override output format (pdf, html, epub, docx, latex)
+        #[arg(long)]
+        to: Option<String>,
+
+        /// override PDF engine (xelatex, lualatex, pdflatex, tectonic, or executable path)
+        #[arg(long = "pdf-engine")]
+        pdf_engine: Option<String>,
+
+        /// LaTeX project backend (latexmk or engine)
+        #[arg(long = "latex-backend", default_value = "latexmk")]
+        latex_backend: String,
+
+        /// maximum direct LaTeX engine passes for --latex-backend engine
+        #[arg(long = "max-latex-passes")]
+        max_latex_passes: Option<usize>,
+
+        /// polling interval in milliseconds
+        #[arg(long = "interval-ms", default_value_t = 1000)]
+        interval_ms: u64,
+
+        /// run the initial build and exit after one scan cycle
+        #[arg(long)]
+        once: bool,
+
+        /// show verbose build messages
         #[arg(short = 'v', long)]
         verbose: bool,
     },

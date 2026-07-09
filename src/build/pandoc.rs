@@ -1,5 +1,6 @@
 use crate::build::executor::BuildExecutor;
 use crate::build::pipeline::{BuildPipeline, ProjectType};
+use crate::build::source_map::locate_markdown_error;
 use crate::config::MergedConfig;
 use crate::constants::pandoc;
 use crate::error::{OmniDocError, Result};
@@ -370,7 +371,15 @@ impl BuildPipeline for PandocBuilder {
         let options = self.build_pandoc_options(&entry_file, &output_file, output_kind)?;
 
         let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
-        self.executor.execute(pandoc::CMD, &args[..], verbose)?;
+        if let Err(err) = self.executor.execute(pandoc::CMD, &args[..], verbose) {
+            let mut message = err.to_string();
+            if let Some(source_hint) = locate_markdown_error(&self.executor, &entry_file, &message)
+            {
+                message.push_str("\n\n");
+                message.push_str(&source_hint);
+            }
+            return Err(OmniDocError::Project(message));
+        }
 
         if verbose {
             println!("✓ Built {}: {}", output_kind.label(), output_file.display());

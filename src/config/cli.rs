@@ -9,6 +9,8 @@ pub struct CliOverrides {
     pub from: Option<String>,
     pub to: Option<String>,
     pub verbose: Option<bool>,
+    pub latex_backend: Option<String>,
+    pub max_latex_passes: Option<usize>,
     pub tool_paths: HashMap<String, Option<String>>,
 }
 
@@ -51,6 +53,16 @@ impl CliOverrides {
 
     pub fn with_verbose(mut self, verbose: bool) -> Self {
         self.verbose = Some(verbose);
+        self
+    }
+
+    pub fn with_latex_backend(mut self, latex_backend: Option<String>) -> Self {
+        self.latex_backend = latex_backend;
+        self
+    }
+
+    pub fn with_max_latex_passes(mut self, max_latex_passes: Option<usize>) -> Self {
+        self.max_latex_passes = max_latex_passes;
         self
     }
 

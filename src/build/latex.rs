@@ -5,6 +5,8 @@ use crate::diagnostics::summarize_latex_log;
 use crate::error::{OmniDocError, Result};
 use crate::utils::fs;
 use dirs::data_local_dir;
+use std::collections::BTreeMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 /// LaTeX 构建器
@@ -158,6 +160,23 @@ impl LatexBuilder {
         ]
     }
 
+    fn build_engine_options(
+        &self,
+        entry_file: &Path,
+        outdir: &Path,
+        target_name: &str,
+    ) -> Vec<String> {
+        vec![
+            "-interaction=nonstopmode".to_string(),
+            "-halt-on-error".to_string(),
+            "-file-line-error".to_string(),
+            "-shell-escape".to_string(),
+            format!("-output-directory={}", outdir.display()),
+            format!("-jobname={}", target_name),
+            entry_file.to_string_lossy().to_string(),
+        ]
+    }
+
     fn is_tectonic_engine(engine: &str) -> bool {
         Path::new(engine)
             .file_stem()
@@ -215,6 +234,96 @@ impl LatexBuilder {
         }
 
         Ok(())
+    }
+
+    fn run_engine_until_stable(
+        &self,
+        entry_file: &Path,
+        outdir: &Path,
+        target_name: &str,
+        verbose: bool,
+    ) -> Result<()> {
+        let options = self.build_engine_options(entry_file, outdir, target_name);
+        let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
+        let max_passes = self.config.max_latex_passes.max(1);
+        let mut previous_hashes: Option<BTreeMap<String, u64>> = None;
+
+        for pass in 1..=max_passes {
+            if verbose {
+                println!("LaTeX engine pass {}/{}", pass, max_passes);
+            }
+
+            self.executor.execute("latex_engine", &args[..], verbose)?;
+            let current_hashes = self.collect_aux_hashes(outdir)?;
+
+            if current_hashes.is_empty() {
+                if verbose {
+                    println!("No tracked LaTeX auxiliary files found; stopping after one pass.");
+                }
+                return Ok(());
+            }
+
+            if previous_hashes
+                .as_ref()
+                .map(|previous| previous == &current_hashes)
+                .unwrap_or(false)
+            {
+                if verbose {
+                    println!("LaTeX auxiliary files stabilized after {} passes.", pass);
+                }
+                return Ok(());
+            }
+
+            previous_hashes = Some(current_hashes);
+        }
+
+        if verbose {
+            println!(
+                "Reached max LaTeX passes ({}); continuing with latest output.",
+                max_passes
+            );
+        }
+        Ok(())
+    }
+
+    fn collect_aux_hashes(&self, outdir: &Path) -> Result<BTreeMap<String, u64>> {
+        let mut hashes = BTreeMap::new();
+        if !fs::exists(outdir) {
+            return Ok(hashes);
+        }
+
+        for entry in fs::read_dir(outdir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if !fs::is_file(&path) || !Self::is_tracked_aux_file(&path) {
+                continue;
+            }
+
+            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            let bytes = std::fs::read(&path)?;
+            let mut hasher = DefaultHasher::new();
+            bytes.hash(&mut hasher);
+            hashes.insert(name.to_string(), hasher.finish());
+        }
+
+        Ok(hashes)
+    }
+
+    fn is_tracked_aux_file(path: &Path) -> bool {
+        let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+            return false;
+        };
+
+        matches!(
+            extension.to_ascii_lowercase().as_str(),
+            "aux" | "toc" | "lof" | "lot" | "out" | "bcf"
+        ) || path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(|name| name.ends_with(".run.xml"))
+            .unwrap_or(false)
     }
 
     /// 设置 LaTeX 环境变量
@@ -340,33 +449,43 @@ impl BuildPipeline for LatexBuilder {
 
         let latex_engine = self.executor.check_tool("latex_engine")?;
         let use_tectonic = Self::is_tectonic_engine(&latex_engine);
-        let options = if use_tectonic {
-            self.build_tectonic_options(&entry_file, &outdir)
+        let latex_backend = if self.config.latex_backend.trim().is_empty() {
+            "latexmk".to_string()
         } else {
-            self.build_latexmk_options(&entry_file, &target_name, verbose)
+            self.config.latex_backend.to_ascii_lowercase()
         };
+        if latex_backend != "latexmk" && latex_backend != "engine" {
+            return Err(OmniDocError::Config(format!(
+                "Unsupported LaTeX backend '{}'. Supported values: latexmk, engine",
+                self.config.latex_backend
+            )));
+        }
 
         // 切换到项目目录执行（latexmk 需要相对路径）
         let original_dir = std::env::current_dir()?;
         std::env::set_current_dir(project_path)?;
 
-        let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
-        let command = if use_tectonic {
-            "latex_engine"
+        let result = if use_tectonic {
+            let options = self.build_tectonic_options(&entry_file, &outdir);
+            let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
+            self.executor.execute("latex_engine", &args[..], verbose)
+        } else if latex_backend == "engine" {
+            self.run_engine_until_stable(&entry_file, &outdir, &target_name, verbose)
         } else {
-            "latexmk"
+            let options = self.build_latexmk_options(&entry_file, &target_name, verbose);
+            let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
+            self.executor.execute("latexmk", &args[..], verbose)
         };
-        let result = self.executor.execute(command, &args[..], verbose);
 
         // 恢复原目录
         std::env::set_current_dir(original_dir)?;
 
         // 如果构建失败，尝试清理
         if let Err(err) = result {
-            if verbose && !use_tectonic {
+            if verbose && !use_tectonic && latex_backend == "latexmk" {
                 println!("⚠ Build failed, attempting to clean...");
             }
-            if !use_tectonic {
+            if !use_tectonic && latex_backend == "latexmk" {
                 let jobname_arg = format!("-jobname={}", target_name);
                 let clean_options = ["-c", &jobname_arg, entry_file.to_str().unwrap_or("")];
                 let clean_args: Vec<&str> = clean_options.iter().copied().collect();

@@ -99,6 +99,10 @@ pub struct BuildSection {
     pub outdir: Option<String>,
     pub metadata_file: Option<String>,
     pub verbose: Option<bool>,
+    /// LaTeX project backend: latexmk (default) or engine (hash-stabilized direct engine)
+    pub latex_backend: Option<String>,
+    /// Maximum direct LaTeX engine passes when latex_backend = "engine"
+    pub max_latex_passes: Option<usize>,
 }
 
 /// 图片配置

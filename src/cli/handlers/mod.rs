@@ -13,6 +13,7 @@ pub mod new;
 pub mod open;
 pub mod template;
 pub mod update;
+pub mod watch;
 
 pub use build::handle_build;
 pub use clean::handle_clean;
@@ -27,3 +28,4 @@ pub use new::handle_new;
 pub use open::handle_open;
 pub use template::handle_template_validate;
 pub use update::handle_update;
+pub use watch::handle_watch;

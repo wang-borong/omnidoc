@@ -32,6 +32,7 @@ pub fn cli() -> Result<()> {
         Commands::New { .. }
         | Commands::Init { .. }
         | Commands::Build { .. }
+        | Commands::Watch { .. }
         | Commands::Md2pdf { .. }
         | Commands::Md2html { .. } => {
             if !omnidoc_lib_exists() {
@@ -57,7 +58,6 @@ pub fn cli() -> Result<()> {
     // Handle directory changes for commands that need it
     match args.command {
         Commands::Init { ref path, .. }
-        | Commands::Build { ref path, .. }
         | Commands::Open { ref path }
         | Commands::Clean { ref path, .. }
         | Commands::Update { ref path } => {
@@ -94,9 +94,39 @@ pub fn cli() -> Result<()> {
             path,
             to,
             pdf_engine,
+            latex_backend,
+            max_latex_passes,
             verbose,
         } => {
-            handle_build(path, to, pdf_engine, verbose)?;
+            handle_build(
+                path,
+                to,
+                pdf_engine,
+                latex_backend,
+                max_latex_passes,
+                verbose,
+            )?;
+        }
+        Commands::Watch {
+            path,
+            to,
+            pdf_engine,
+            latex_backend,
+            max_latex_passes,
+            interval_ms,
+            once,
+            verbose,
+        } => {
+            handle_watch(
+                path,
+                to,
+                pdf_engine,
+                latex_backend,
+                max_latex_passes,
+                interval_ms,
+                once,
+                verbose,
+            )?;
         }
         Commands::Open { path } => {
             handle_open(path)?;

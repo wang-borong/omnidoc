@@ -33,6 +33,8 @@ pub struct MergedConfig {
     pub target: Option<String>,
     pub metadata_file: Option<String>,
     pub verbose: bool,
+    pub latex_backend: String,
+    pub max_latex_passes: usize,
     pub figure_paths: Vec<String>,
     pub figure_output: Option<String>,
     pub pandoc_options: Vec<String>,
@@ -182,6 +184,27 @@ impl ConfigManager {
             })
             .unwrap_or(false);
 
+        let latex_backend = cli
+            .latex_backend
+            .clone()
+            .or_else(|| {
+                project_config
+                    .and_then(|c| c.build.as_ref())
+                    .and_then(|b| b.build.as_ref())
+                    .and_then(|b| b.latex_backend.clone())
+            })
+            .unwrap_or_else(|| "latexmk".to_string());
+
+        let max_latex_passes = cli
+            .max_latex_passes
+            .or_else(|| {
+                project_config
+                    .and_then(|c| c.build.as_ref())
+                    .and_then(|b| b.build.as_ref())
+                    .and_then(|b| b.max_latex_passes)
+            })
+            .unwrap_or(5);
+
         // 合并图片配置
         let figure_paths = project_config
             .and_then(|c| c.figure.as_ref())
@@ -305,6 +328,8 @@ impl ConfigManager {
             target,
             metadata_file,
             verbose,
+            latex_backend,
+            max_latex_passes,
             figure_paths,
             figure_output,
             pandoc_options,

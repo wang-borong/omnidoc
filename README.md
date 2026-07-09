@@ -138,12 +138,14 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    Build your content. Markdown projects can output `pdf`, `html`, `epub`, `docx`, or `latex`; LaTeX projects output PDF.
 
    ```bash
-   omnidoc build [PATH] [--to <FORMAT>] [--pdf-engine <ENGINE>] [--verbose]
+   omnidoc build [PATH] [--to <FORMAT>] [--pdf-engine <ENGINE>] [--latex-backend <BACKEND>] [--verbose]
    ```
 
    - If `PATH` is not specified, the current directory is used
    - Use `--to html`, `--to epub`, `--to docx`, or `--to latex` for Markdown project builds
    - Use `--pdf-engine tectonic` to compile PDFs with Tectonic instead of XeLaTeX
+   - Use `--latex-backend engine --max-latex-passes 5` for direct XeLaTeX/LuaLaTeX/PDFLaTeX builds that stop when `.aux/.toc`-style files stop changing
+   - Keep the default `--latex-backend latexmk` when you need bibliography/glossary automation or custom `.latexmkrc` rules
    - Use `--verbose` to show detailed build messages
    - The build directory is `build/` (configurable via config), and the output file is named after the repository directory
 
@@ -154,9 +156,10 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    omnidoc build --to html
    omnidoc build --to docx
    omnidoc build --pdf-engine tectonic
+   omnidoc build --latex-backend engine --pdf-engine xelatex
    ```
 
-   Build failures include a compact Pandoc/LaTeX diagnostic summary so the first relevant error is visible without reading the full `.log` file.
+   Build failures include a compact Pandoc/LaTeX diagnostic summary so the first relevant error is visible without reading the full `.log` file. For Markdown projects, OmniDoc also tries to map Pandoc/LaTeX errors back to the likely Markdown line using a source-position AST pass.
 
    You can also persist build choices in `.omnidoc.toml`:
 
@@ -170,9 +173,21 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    [tools]
    latex_engine = "tectonic"
    # tectonic = "/custom/path/to/tectonic"
+
+   [build]
+   latex_backend = "engine"
+   max_latex_passes = 5
    ```
 
-4. **Open the built PDF document**
+4. **Watch and rebuild while editing**
+
+   ```bash
+   omnidoc watch [PATH] [--to <FORMAT>] [--interval-ms 1000]
+   ```
+
+   `watch` rebuilds once immediately, then polls source files such as `.md`, `.tex`, `.bib`, `.drawio`, `.dot`, `.json`, and common image assets. Build failures are printed and the watcher keeps running.
+
+5. **Open the built PDF document**
 
    ```bash
    omnidoc open [PATH]
@@ -180,7 +195,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
    Opens the built PDF document using the system's default PDF viewer.
 
-5. **Clean the repository**
+6. **Clean the repository**
 
    Remove build artifacts:
 
@@ -193,7 +208,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
 ### Project Management Commands
 
-6. **Update a document repository**
+7. **Update a document repository**
 
    Update an existing omnidoc project structure:
 
@@ -203,7 +218,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
    This command updates the project structure, template files, and configuration to match the current omnidoc version.
 
-7. **List all supported document types**
+8. **List all supported document types**
 
    Preview available built-in types and external templates:
 
@@ -215,7 +230,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
 ### Configuration Commands
 
-8. **Generate default configuration**
+9. **Generate default configuration**
 
    Create or update the global configuration file:
 
@@ -237,7 +252,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    omnidoc config --authors "John Doe" --outdir "output" --lib "$HOME/.local/share/omnidoc"
    ```
 
-9. **Maintain the OmniDoc library**
+10. **Maintain the OmniDoc library**
 
    Install or update the OmniDoc library files:
 
@@ -250,7 +265,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
 ### Document Formatting Commands
 
-10. **Format documents**
+11. **Format documents**
 
     Format markdown or LaTeX documents recursively:
 
@@ -272,7 +287,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
 ### Figure Generation Commands
 
-11. **Generate figures from source files**
+12. **Generate figures from source files**
 
     Generate figures from various diagram source formats:
 
@@ -391,7 +406,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
 ### Document Conversion Commands
 
-12. **Convert markdown to PDF**
+13. **Convert markdown to PDF**
 
     Convert markdown files directly to PDF without creating a full project:
 
@@ -409,7 +424,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
     omnidoc md2pdf file1.md file2.md --output combined.pdf
     ```
 
-13. **Convert markdown to HTML**
+14. **Convert markdown to HTML**
 
     Convert markdown files to HTML:
 
@@ -429,7 +444,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
 ### Template Management Commands
 
-14. **Template toolkit**
+15. **Template toolkit**
 
     Validate external template manifests and files:
 
@@ -444,7 +459,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
 ### Utility Commands
 
-15. **Generate shell completion**
+16. **Generate shell completion**
 
     Generate shell completion scripts for bash, zsh, fish, elvish, or PowerShell:
 

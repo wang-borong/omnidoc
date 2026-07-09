@@ -86,6 +86,8 @@ impl ProjectConfig {
                 outdir: Some("build".to_string()),
                 metadata_file: None,
                 verbose: Some(false),
+                latex_backend: None,
+                max_latex_passes: None,
             }),
         });
 
