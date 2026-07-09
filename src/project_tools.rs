@@ -83,6 +83,7 @@ pub struct PluginInfo {
     pub version: Option<String>,
     pub description: Option<String>,
     pub kind: String,
+    pub hooks: Vec<String>,
     pub valid: bool,
     pub error: Option<String>,
 }
@@ -829,6 +830,7 @@ fn load_plugin_manifest(path: &Path) -> LoadedPlugin {
         }
     });
     let error = validate_plugin_manifest(path, &manifest);
+    let hooks = manifest_hook_names(&manifest);
     let info = PluginInfo {
         path: path.display().to_string(),
         key,
@@ -836,6 +838,7 @@ fn load_plugin_manifest(path: &Path) -> LoadedPlugin {
         version: manifest.version.clone(),
         description: manifest.description.clone(),
         kind,
+        hooks,
         valid: error.is_none(),
         error,
     };
@@ -861,6 +864,7 @@ fn invalid_loaded_plugin(
             version: None,
             description: None,
             kind: "plugin".to_string(),
+            hooks: Vec::new(),
             valid: false,
             error: Some(error),
         },
@@ -886,6 +890,26 @@ fn plugin_hook_command(manifest: &PluginManifest, hook: PluginHook) -> Option<&H
         PluginHook::LintRule => hooks.lint_rule.as_ref(),
         PluginHook::AssetProvider => hooks.asset_provider.as_ref(),
     }
+}
+
+fn manifest_hook_names(manifest: &PluginManifest) -> Vec<String> {
+    let Some(hooks) = &manifest.hooks else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    if hooks.asset_provider.is_some() {
+        names.push("asset_provider".to_string());
+    }
+    if hooks.pre_build.is_some() {
+        names.push("pre_build".to_string());
+    }
+    if hooks.post_build.is_some() {
+        names.push("post_build".to_string());
+    }
+    if hooks.lint_rule.is_some() {
+        names.push("lint_rule".to_string());
+    }
+    names
 }
 
 fn run_hook_command(
@@ -1060,7 +1084,41 @@ fn validate_plugin_manifest(path: &Path, manifest: &PluginManifest) -> Option<St
         }
     }
 
+    if let Some(hooks) = &manifest.hooks {
+        for (name, command) in [
+            ("asset_provider", hooks.asset_provider.as_ref()),
+            ("pre_build", hooks.pre_build.as_ref()),
+            ("post_build", hooks.post_build.as_ref()),
+            ("lint_rule", hooks.lint_rule.as_ref()),
+        ] {
+            let Some(command) = command else {
+                continue;
+            };
+            if let Some(error) = validate_hook_command(path, command) {
+                return Some(format!("Invalid {} hook: {}", name, error));
+            }
+        }
+    }
+
     None
+}
+
+fn validate_hook_command(manifest_path: &Path, command: &HookCommand) -> Option<String> {
+    let argv = hook_argv(command);
+    if argv.is_empty() {
+        return Some("command is empty".to_string());
+    }
+    let program = Path::new(&argv[0]);
+    if program.components().count() <= 1 && !program.is_absolute() {
+        return None;
+    }
+    let base_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    let resolved = resolve_hook_program(base_dir, &argv[0]);
+    if resolved.exists() {
+        None
+    } else {
+        Some(format!("command not found: {}", argv[0]))
+    }
 }
 
 fn is_local_path(target: &str) -> bool {
@@ -1104,8 +1162,8 @@ fn warning(message: String, path: Option<String>, line: Option<usize>) -> Projec
 #[cfg(test)]
 mod tests {
     use super::{
-        hook_argv, parse_lint_rule_output, supported_outputs, validate_config, HookCommand,
-        LoadedPlugin, PluginInfo, PluginManifest,
+        hook_argv, manifest_hook_names, parse_lint_rule_output, supported_outputs, validate_config,
+        validate_hook_command, HookCommand, LoadedPlugin, PluginHooks, PluginInfo, PluginManifest,
     };
     use crate::config::MergedConfig;
     use std::path::{Path, PathBuf};
@@ -1165,6 +1223,40 @@ mod tests {
     }
 
     #[test]
+    fn lists_and_validates_hook_metadata() {
+        let manifest = PluginManifest {
+            key: Some("sample".to_string()),
+            name: None,
+            version: None,
+            description: None,
+            kind: None,
+            language: None,
+            template_file: None,
+            hooks: Some(PluginHooks {
+                pre_build: Some(HookCommand::Args(vec!["tool".to_string()])),
+                post_build: None,
+                lint_rule: Some(HookCommand::String("lint-tool".to_string())),
+                asset_provider: None,
+            }),
+        };
+
+        assert_eq!(
+            manifest_hook_names(&manifest),
+            vec!["pre_build".to_string(), "lint_rule".to_string()]
+        );
+        assert!(validate_hook_command(
+            Path::new("plugins/sample/manifest.toml"),
+            &HookCommand::String("tool".to_string())
+        )
+        .is_none());
+        assert!(validate_hook_command(
+            Path::new("plugins/sample/manifest.toml"),
+            &HookCommand::String("scripts/missing.sh".to_string())
+        )
+        .is_some());
+    }
+
+    #[test]
     fn parses_plugin_lint_rule_output() {
         let plugin = LoadedPlugin {
             info: PluginInfo {
@@ -1174,6 +1266,7 @@ mod tests {
                 version: None,
                 description: None,
                 kind: "plugin".to_string(),
+                hooks: Vec::new(),
                 valid: true,
                 error: None,
             },
@@ -1236,6 +1329,7 @@ mod tests {
                 version: None,
                 description: None,
                 kind: "plugin".to_string(),
+                hooks: Vec::new(),
                 valid: true,
                 error: None,
             },

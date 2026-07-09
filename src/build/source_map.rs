@@ -46,6 +46,10 @@ pub fn locate_markdown_diagnostic(
     entry_file: &Path,
     diagnostic: &str,
 ) -> Option<MarkdownDiagnostic> {
+    if let Some(diagnostic) = locate_direct_markdown_location(entry_file, diagnostic) {
+        return Some(diagnostic);
+    }
+
     let needles = extract_needles(diagnostic);
     if needles.is_empty() {
         return None;
@@ -222,6 +226,50 @@ fn locate_in_raw_markdown(
     None
 }
 
+fn locate_direct_markdown_location(
+    entry_file: &Path,
+    diagnostic: &str,
+) -> Option<MarkdownDiagnostic> {
+    let location_re =
+        Regex::new(r"(?m)(?P<file>[^\s:]+\.m(?:d|arkdown)):(?P<line>\d+):(?P<column>\d+)")
+            .expect("location regex");
+    let entry_content = std::fs::read_to_string(entry_file).ok()?;
+    for capture in location_re.captures_iter(diagnostic) {
+        let file = capture.name("file")?.as_str();
+        let line = capture.name("line")?.as_str().parse::<usize>().ok()?;
+        let column = capture
+            .name("column")
+            .and_then(|value| value.as_str().parse::<usize>().ok())
+            .unwrap_or(1);
+        if !diagnostic_path_matches_entry(file, entry_file) {
+            continue;
+        }
+        let snippet = entry_content
+            .lines()
+            .nth(line.saturating_sub(1))
+            .unwrap_or("");
+        return Some(build_markdown_diagnostic(
+            entry_file, line, column, diagnostic, snippet,
+        ));
+    }
+    None
+}
+
+fn diagnostic_path_matches_entry(diagnostic_path: &str, entry_file: &Path) -> bool {
+    let path = Path::new(diagnostic_path);
+    if path.is_absolute() {
+        return path == entry_file;
+    }
+    if path == entry_file {
+        return true;
+    }
+    entry_file
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| diagnostic_path.ends_with(name))
+        .unwrap_or(false)
+}
+
 fn find_column(line: &str, needle: &str) -> Option<usize> {
     if let Some(byte_index) = line.find(needle) {
         return Some(line[..byte_index].chars().count() + 1);
@@ -238,11 +286,19 @@ fn extract_needles(diagnostic: &str) -> Vec<String> {
     let mut needles = Vec::new();
     let macro_re = Regex::new(r"\\[A-Za-z@]+").expect("macro regex");
     let quoted_re = Regex::new(r#"[`'"]([^`'"]{3,80})[`'"]"#).expect("quoted regex");
+    let resource_re =
+        Regex::new(r#"(?i)(?:pandoc:\s*)?([^\s:'"`]+?\.(?:png|jpg|jpeg|svg|pdf|bib|csl|md|markdown|tex|csv|tsv|yaml|yml|json))"#)
+            .expect("resource regex");
 
     for capture in macro_re.find_iter(diagnostic) {
         push_needle(&mut needles, capture.as_str());
     }
     for capture in quoted_re.captures_iter(diagnostic) {
+        if let Some(value) = capture.get(1) {
+            push_needle(&mut needles, value.as_str());
+        }
+    }
+    for capture in resource_re.captures_iter(diagnostic) {
         if let Some(value) = capture.get(1) {
             push_needle(&mut needles, value.as_str());
         }
@@ -337,16 +393,25 @@ fn first_relevant_message(diagnostic: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_markdown_diagnostic, classify_diagnostic, extract_needles, find_column,
-        parse_data_pos_start,
+        build_markdown_diagnostic, classify_diagnostic, diagnostic_path_matches_entry,
+        extract_needles, find_column, locate_direct_markdown_location, parse_data_pos_start,
     };
+    use std::fs;
     use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn extracts_latex_macro_from_diagnostic() {
         let needles = extract_needles("! Undefined control sequence.\nl.42 \\badmacro");
 
         assert!(needles.iter().any(|needle| needle == "\\badmacro"));
+    }
+
+    #[test]
+    fn extracts_resource_paths_from_pandoc_diagnostic() {
+        let needles = extract_needles("pandoc: images/missing.png: openBinaryFile: does not exist");
+
+        assert!(needles.iter().any(|needle| needle == "images/missing.png"));
     }
 
     #[test]
@@ -383,5 +448,29 @@ mod tests {
             "missing_file"
         );
         assert_eq!(classify_diagnostic("LaTeX Error: Bad table"), "latex_error");
+    }
+
+    #[test]
+    fn recognizes_direct_file_line_column_diagnostics() {
+        let root = std::env::temp_dir().join(format!(
+            "omnidoc-source-map-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("root");
+        let entry = root.join("main.md");
+        fs::write(&entry, "# Title\n\n![x](missing.png)\n").expect("entry");
+
+        let diagnostic =
+            locate_direct_markdown_location(&entry, "pandoc: main.md:3:5: resource missing")
+                .expect("diagnostic");
+
+        assert_eq!(diagnostic.line, 3);
+        assert_eq!(diagnostic.column, 5);
+        assert!(diagnostic.snippet.contains("missing.png"));
+        assert!(diagnostic_path_matches_entry("main.md", &entry));
+        let _ = fs::remove_dir_all(root);
     }
 }

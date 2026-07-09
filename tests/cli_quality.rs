@@ -164,3 +164,42 @@ fn publish_no_build_copies_existing_artifacts() {
     assert!(manifest.contains("\"tag\": \"release/1\""));
     assert!(manifest.contains("smoke.html"));
 }
+
+#[cfg(unix)]
+#[test]
+fn plugin_lint_rule_runs_from_cli() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = Fixture::new("plugin-lint");
+    let plugin_dir = fixture.project.join("plugins").join("sample");
+    let lint_script = plugin_dir.join("lint.sh");
+    fs::write(
+        &lint_script,
+        "#!/bin/sh\nprintf 'warning:main.md:2:1:plugin warning\\n'\n",
+    )
+    .expect("lint hook");
+    let mut permissions = fs::metadata(&lint_script).expect("metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&lint_script, permissions).expect("permissions");
+    fs::write(
+        plugin_dir.join("manifest.toml"),
+        r#"key = "sample"
+name = "Sample Plugin"
+version = "0.1.0"
+kind = "template"
+language = "markdown"
+template_file = "template.md"
+
+[hooks]
+lint_rule = ["lint.sh"]
+"#,
+    )
+    .expect("plugin manifest");
+
+    let project = fixture.project_arg();
+    let lint = assert_success(fixture.command(&["lint", &project]));
+    assert!(lint.contains("Plugin sample: plugin warning"));
+
+    let plugins = assert_success(fixture.command(&["plugin", "--json", "--validate", &project]));
+    assert!(plugins.contains("\"lint_rule\""));
+}

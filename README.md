@@ -351,6 +351,7 @@ omnidoc plugin --validate
 ```
 
 `plugin --validate` parses discovered `manifest.toml` files and checks template plugin fields such as `language` and `template_file`.
+`plugin --json` also reports declared hooks, and validation checks local hook command paths when the command contains a path separator.
 
 ### Document Formatting Commands
 
