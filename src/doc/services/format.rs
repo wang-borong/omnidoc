@@ -19,9 +19,7 @@ struct RegexCache {
     han_to_ascii: Regex,
     ascii_to_han: Regex,
     punct_pattern: Regex,
-    digit_hyphen: Regex,
     digit_equal: Regex,
-    date_format: Regex,
     han_space_han: Regex,
     #[allow(dead_code)] // May be used in future versions
     math_pattern: Regex,
@@ -76,9 +74,7 @@ fn get_regex_cache() -> &'static RegexCache {
                 r#"[ \t]*([，。？！：、；…．～￥""（）「」《》——【】〈〉〔〕''])[ \t]*"#,
             )
             .unwrap(),
-            digit_hyphen: Regex::new(r"(\d) *- *(\d)").unwrap(),
             digit_equal: Regex::new(r"(\d) *= *(\d)").unwrap(),
-            date_format: Regex::new(r"([12][90]\d\d) *- *([01]\d)").unwrap(),
             // 移除中文字符之间的空格（包括中文标点）
             han_space_han: Regex::new(
                 r#"([\p{Han}，。？！：、；…．～￥""（）「」《》——【】〈〉〔〕''])[ \t]+([\p{Han}，。？！：、；…．～￥""（）「」《》——【】〈〉〔〕''])"#,
@@ -108,7 +104,7 @@ fn get_regex_cache() -> &'static RegexCache {
             sentence_break: Regex::new(r"([。；])([^\n\\\*）])\s*").unwrap(),
             indent_simple: Regex::new(r"^(\s*)(.*)").unwrap(),
             numbered_list_pattern: Regex::new(r"^(\s*)([0-9]+\.)(\s*)").unwrap(),
-            comment_line_pattern: Regex::new(r"^(\s*)([\*\#\@]+)(\s*)").unwrap(),
+            comment_line_pattern: Regex::new(r"^(\s*)([\*\@]+)(\s+)").unwrap(),
             c_comment_pattern: Regex::new(r"^(\s*)(/\*+)(\s*)").unwrap(),
             lua_comment_pattern: Regex::new(r"^(\s*)(\-\-+)(\s*)").unwrap(),
 
@@ -149,11 +145,7 @@ impl FormatService {
 
         // 读取文件
         let content = fs::read_to_string(file_path)?;
-        let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-
-        // 格式化每一行
-        let formatted_lines: Vec<String> =
-            lines.iter().map(|line| self.format_line(line)).collect();
+        let formatted_content = self.format_content(&content);
 
         // 备份文件（如果需要）
         if self.backup {
@@ -163,7 +155,6 @@ impl FormatService {
 
         // 写入格式化后的内容
         // 注意：需要保留原始文件的换行符处理方式，并在文件末尾添加换行符
-        let formatted_content = formatted_lines.join("\n");
         let mut content_bytes = formatted_content.as_bytes().to_vec();
         // 如果原始文件以换行符结尾，或者格式化后内容不为空，添加换行符
         if content.ends_with('\n') || !content_bytes.is_empty() {
@@ -172,6 +163,58 @@ impl FormatService {
         fs::write(file_path, &content_bytes)?;
 
         Ok(())
+    }
+
+    /// Format Markdown content while preserving structural regions that must be byte-stable.
+    fn format_content(&self, content: &str) -> String {
+        let mut formatted_lines = Vec::new();
+        let mut in_front_matter = false;
+        let mut in_fenced_code = false;
+        let mut fence_marker = "";
+
+        for (index, line) in content.lines().enumerate() {
+            let trimmed = line.trim_start();
+
+            if index == 0 && line.trim() == "---" {
+                in_front_matter = true;
+                formatted_lines.push(line.to_string());
+                continue;
+            }
+            if in_front_matter {
+                formatted_lines.push(line.to_string());
+                if index > 0 && line.trim() == "---" {
+                    in_front_matter = false;
+                }
+                continue;
+            }
+
+            let current_fence = if trimmed.starts_with("```") {
+                Some("```")
+            } else if trimmed.starts_with("~~~") {
+                Some("~~~")
+            } else {
+                None
+            };
+            if let Some(marker) = current_fence {
+                formatted_lines.push(line.to_string());
+                if in_fenced_code && marker == fence_marker {
+                    in_fenced_code = false;
+                    fence_marker = "";
+                } else if !in_fenced_code {
+                    in_fenced_code = true;
+                    fence_marker = marker;
+                }
+                continue;
+            }
+            if in_fenced_code {
+                formatted_lines.push(line.to_string());
+                continue;
+            }
+
+            formatted_lines.push(self.format_line(line));
+        }
+
+        formatted_lines.join("\n")
     }
 
     /// 递归格式化目录
@@ -349,20 +392,11 @@ impl FormatService {
         result = cache.han_to_ascii.replace_all(&result, "$1 $2").to_string();
         result = cache.ascii_to_han.replace_all(&result, "$1 $2").to_string();
 
-        // 数字之间的连字符
-        result = cache
-            .digit_hyphen
-            .replace_all(&result, "$1 - $2")
-            .to_string();
-
         // 数字之间的等号
         result = cache
             .digit_equal
             .replace_all(&result, "$1 = $2")
             .to_string();
-
-        // 日期格式（YYYY-MM-DD）
-        result = cache.date_format.replace_all(&result, "$1-$2").to_string();
 
         // 恢复图片路径（不格式化路径部分）
         for (index, path) in image_paths.iter().enumerate() {
@@ -446,6 +480,18 @@ impl FormatService {
         let mut result = line.to_string();
         let cache = get_regex_cache();
 
+        let trimmed = result.trim_start();
+        if trimmed.starts_with('#')
+            || trimmed.starts_with('|')
+            || trimmed.starts_with("```")
+            || trimmed.starts_with("~~~")
+            || trimmed == "---"
+            || trimmed == "***"
+            || trimmed.starts_with('<')
+        {
+            return result;
+        }
+
         // 查找行首缩进和标记，按照 Perl 脚本的逻辑顺序匹配
         let replacement = if let Some(caps) = cache.numbered_list_pattern.captures(&result) {
             // markdown list (numbered)
@@ -457,11 +503,12 @@ impl FormatService {
             let spaces = " ".repeat(marker_len);
             format!("$1\n{}{}{}$2", indent, spaces, after_marker)
         } else if let Some(caps) = cache.comment_line_pattern.captures(&result) {
-            // comment line
+            // Markdown bullet/comment continuation: keep the marker only on the first line.
             let indent = caps.get(1).map(|m| m.as_str()).unwrap_or("");
             let marker = caps.get(2).map(|m| m.as_str()).unwrap_or("");
             let after_marker = caps.get(3).map(|m| m.as_str()).unwrap_or("");
-            format!("$1\n{}{}{}$2", indent, marker, after_marker)
+            let spaces = " ".repeat(marker.chars().count() + after_marker.chars().count());
+            format!("$1\n{}{}$2", indent, spaces)
         } else if let Some(caps) = cache.c_comment_pattern.captures(&result) {
             // c-style comment
             let indent = caps.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -538,5 +585,41 @@ impl FormatService {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FormatService;
+
+    #[test]
+    fn preserves_front_matter_fenced_code_dates_and_leading_emphasis() {
+        let service = FormatService::new(false, true, true, true);
+        let input = concat!(
+            "---\n",
+            "title: 中文标题\n",
+            "date: 2026-07-14 15:38:13\n",
+            "---\n\n",
+            "**本书的范围。** 第一项；第二项。\n\n",
+            "```yaml\n",
+            "title: 中文标题\n",
+            "date: 2026-07-14\n",
+            "```\n",
+        );
+
+        let output = service.format_content(input);
+
+        assert!(output.starts_with("---\ntitle: 中文标题\ndate: 2026-07-14 15:38:13\n---\n"));
+        assert!(output.contains("**本书的范围。** 第一项；\n第二项。"));
+        assert!(output.contains("```yaml\ntitle: 中文标题\ndate: 2026-07-14\n```"));
+        assert!(!output.contains("**第二项"));
+    }
+
+    #[test]
+    fn semantic_format_does_not_turn_sentence_continuations_into_new_bullets() {
+        let service = FormatService::new(false, true, false, true);
+        let output = service.format_content("* 第一项；第二句。\n");
+
+        assert_eq!(output, "* 第一项；\n  第二句。");
     }
 }
