@@ -311,14 +311,19 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
 10. **Maintain the OmniDoc library**
 
-   Install or update the OmniDoc library files:
+   Install, update, inspect, or verify the OmniDoc library files (`libs` is a
+   visible alias of `lib`):
 
    ```bash
-   omnidoc lib --install    # Install library to XDG_DATA_DIR
-   omnidoc lib --update     # Update the library
+   omnidoc lib --install       # Install to the configured library path
+   omnidoc lib --update        # Pull main, then verify the installed payload
+   omnidoc libs --status       # Show version, revision and compatibility
+   omnidoc libs --verify       # Verify required files and every SHA-256 entry
+   omnidoc libs --verify --json
    ```
 
-   The library contains templates, LaTeX classes, and other resources used by omnidoc.
+   Install and update fail if the downloaded manifest, compatibility contract,
+   required resources, or payload checksums do not verify.
 
 ### Project Quality and CI Commands
 

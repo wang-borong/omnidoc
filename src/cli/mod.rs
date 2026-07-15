@@ -231,8 +231,14 @@ pub fn cli() -> Result<()> {
         } => {
             handle_config(authors, lib, outdir, texmfhome, bibinputs, texinputs, force)?;
         }
-        Commands::Lib { update, .. } => {
-            handle_lib(update)?;
+        Commands::Lib {
+            install,
+            update,
+            status,
+            verify,
+            json,
+        } => {
+            handle_lib(install, update, status, verify, json)?;
         }
         Commands::List => {
             print_doctypes();

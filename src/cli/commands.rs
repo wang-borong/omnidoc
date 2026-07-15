@@ -336,14 +336,27 @@ pub enum Commands {
     },
 
     /// maintain the OmniDoc library
+    #[command(visible_alias = "libs")]
     Lib {
         /// install the OmniDoc library to XDG_DATA_DIR
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with_all = ["update", "status", "verify"])]
         install: bool,
 
         /// update the OmniDoc library
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with_all = ["install", "status", "verify"])]
         update: bool,
+
+        /// show installed library version, revision, compatibility, and integrity
+        #[arg(long, conflicts_with_all = ["install", "update", "verify"])]
+        status: bool,
+
+        /// verify the installed manifest, required resources, and checksums
+        #[arg(long, conflicts_with_all = ["install", "update", "status"])]
+        verify: bool,
+
+        /// emit status or verification details as JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// list all supported document types

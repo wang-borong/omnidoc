@@ -1,3 +1,4 @@
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -149,6 +150,48 @@ fn lock_check_detects_stale_inputs() {
 
     let stdout = assert_failure(fixture.command(&["lock", "--check", &project]));
     assert!(stdout.contains("\"up_to_date\": false"));
+}
+
+#[test]
+fn library_status_and_verify_use_the_versioned_manifest() {
+    let fixture = Fixture::new("library-verify");
+    let library = fixture.env_root.join("library");
+    fs::create_dir_all(library.join("payload")).expect("payload dir");
+    let payload = b"verified payload\n";
+    fs::write(library.join("payload/resource.txt"), payload).expect("payload");
+    let checksum = format!("{:x}", Sha256::digest(payload));
+    fs::write(
+        library.join("manifest.toml"),
+        r#"manifest_version = 1
+version = "1.0.0"
+compatible_omnidoc = ">=1.3.0,<2.0.0"
+compatible_pandoc = ">=0.0.0"
+checksum_algorithm = "sha256"
+checksum_file = "checksums.sha256"
+payload_roots = ["payload"]
+required_resources = ["payload/resource.txt"]
+"#,
+    )
+    .expect("manifest");
+    fs::write(
+        library.join("checksums.sha256"),
+        format!("{}  payload/resource.txt\n", checksum),
+    )
+    .expect("checksums");
+    fs::write(
+        fixture.env_root.join("config/omnidoc.toml"),
+        format!("[lib]\npath = {:?}\n", library.to_string_lossy()),
+    )
+    .expect("global config");
+
+    let verified = assert_success(fixture.command(&["libs", "--verify", "--json"]));
+    assert!(verified.contains("\"version\": \"1.0.0\""));
+    assert!(verified.contains("\"integrity_verified\": true"));
+
+    fs::write(library.join("payload/resource.txt"), b"tampered\n").expect("tamper");
+    let failed = assert_failure(fixture.command(&["lib", "--verify", "--json"]));
+    assert!(failed.contains("\"integrity_verified\": false"));
+    assert!(failed.contains("checksum mismatch"));
 }
 
 #[test]
