@@ -305,17 +305,6 @@ where
     do_merge(&repo, branch, fetch_commit)
 }
 
-/// Fetch a branch and all advertised tags without changing the working tree.
-pub fn git_fetch<P>(repo: P, remote: &str, branch: &str) -> Result<(), git2::Error>
-where
-    P: AsRef<Path>,
-{
-    let repo = Repository::open(repo)?;
-    let mut remote = repo.find_remote(remote)?;
-    do_fetch(&repo, &[branch], &mut remote)?;
-    Ok(())
-}
-
 /// Resolve and check out a tag, branch, or commit as a detached HEAD.
 pub fn git_checkout_revision<P>(repo: P, revision: &str) -> Result<git2::Oid, git2::Error>
 where

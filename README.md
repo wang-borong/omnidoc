@@ -354,7 +354,9 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    required resources, payload checksums, or requested revision do not verify.
    Set `revision = "v1.0.0"` under `[lib]` in the global configuration to pin
    all subsequent install, update, status, and verify operations. Updates also
-   refuse to overwrite a dirty library checkout.
+   refuse to overwrite a dirty library checkout. Install and update are
+   transactional: OmniDoc clones into a sibling staging directory, validates
+   the complete bundle, and only then replaces the active library.
 
 11. **Inspect versioned theme bundles**
 
