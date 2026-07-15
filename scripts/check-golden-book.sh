@@ -39,6 +39,7 @@ rg -q 'display="block"' "$html"
 rg -q 'id="本章小结-1"|id="本章小结-2"' "$html"
 rg -q 'omnidoc-base-css' "$lock"
 rg -q 'lua-filter:display-math.lua' "$lock"
+rg -q 'theme-manifest:engineering-book' "$lock"
 jq -e '.reports | length == 2 and all(.artifact_digest | startswith("blake3:"))' "$report" >/dev/null
 python3 - "$lock" <<'PY'
 import pathlib
@@ -89,6 +90,10 @@ if r"\int_0^1" in visible:
 PY
 
 printf '\n/* cache invalidation probe */\n' >> "$work/data/omnidoc/pandoc/css/omnidoc-base.css"
+"$bin" build "$work/book" --to html --report
+jq -e '.reports[0].skipped == false and .reports[0].cache_reason == "input_digest_changed"' "$report" >/dev/null
+
+printf '\n# theme contract invalidation probe\n' >> "$work/data/omnidoc/themes/engineering-book.toml"
 "$bin" build "$work/book" --to html --report
 jq -e '.reports[0].skipped == false and .reports[0].cache_reason == "input_digest_changed"' "$report" >/dev/null
 

@@ -7,10 +7,10 @@ target = "golden-book"
 outdir = "build"
 outputs = ["html", "epub"]
 
-[pandoc]
-css = "engineering-book.css"
-epub_css = "engineering-book.css"
-lang = "zh-CN"
+[theme]
+name = "engineering-book"
+version = "1"
+compatibility = "readium"
 
 [pandoc.format_options]
 html = ["--toc", "--toc-depth=3"]

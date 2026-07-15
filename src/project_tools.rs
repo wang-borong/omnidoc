@@ -1,3 +1,4 @@
+use crate::build::pandoc::load_selected_theme;
 use crate::build::pandoc_policy::{is_supported_format_key, PandocOutputKind};
 use crate::config::MergedConfig;
 use crate::constants::pandoc;
@@ -316,6 +317,22 @@ pub fn validate_config(project_path: &Path, config: &MergedConfig) -> Vec<Projec
         }
     }
 
+    if config.theme_name.is_some() {
+        if let Err(theme_error) = load_selected_theme(config) {
+            issues.push(error(
+                format!("Invalid theme configuration: {}", theme_error),
+                Some(".omnidoc.toml".to_string()),
+                None,
+            ));
+        }
+    } else if config.theme_version.is_some() || config.theme_compatibility.is_some() {
+        issues.push(error(
+            "theme.version and theme.compatibility require theme.name".to_string(),
+            Some(".omnidoc.toml".to_string()),
+            None,
+        ));
+    }
+
     if let Some(metadata_file) = &config.metadata_file {
         check_configured_path(
             project_path,
@@ -465,6 +482,7 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
     let library_root = omnidoc_library_root(config);
     let mut resources = BTreeMap::<String, ResolvedResource>::new();
     let output_kind = PandocOutputKind::from_config(config).unwrap_or(PandocOutputKind::Pdf);
+    let theme = load_selected_theme(config).ok().flatten();
 
     let manifest_path = library_root.join("manifest.toml");
     if let Some(path) = existing_path(manifest_path.clone()) {
@@ -488,12 +506,28 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
         }
     }
 
+    if let (Some(name), Some(_)) = (config.theme_name.as_deref(), theme.as_ref()) {
+        if let Some(path) =
+            existing_path(library_root.join("themes").join(format!("{}.toml", name)))
+        {
+            add_resolved_resource(
+                &mut resources,
+                project_path,
+                &library_root,
+                format!("theme-manifest:{}", name),
+                path,
+            );
+        }
+    }
+
+    let mut resolved_filter_paths = BTreeSet::new();
     for filter in output_kind.filters(config) {
         // Keep this resolution identical to PandocBuilder::push_lua_filters:
         // filter names are relative to the shared filter directory.
         if let Some(path) =
             existing_path(library_root.join(pandoc::LIB_PANDOC_FILTERS).join(filter))
         {
+            resolved_filter_paths.insert(path.clone());
             add_resolved_resource(
                 &mut resources,
                 project_path,
@@ -501,6 +535,49 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
                 format!("lua-filter:{filter}"),
                 path,
             );
+        }
+    }
+    if let Some(theme) = &theme {
+        for relative in &theme.resources.lua_filters {
+            if let Some(path) = existing_path(library_root.join(relative)) {
+                if !resolved_filter_paths.insert(path.clone()) {
+                    continue;
+                }
+                add_resolved_resource(
+                    &mut resources,
+                    project_path,
+                    &library_root,
+                    format!("theme-lua-filter:{}", relative),
+                    path,
+                );
+            }
+        }
+    }
+
+    if output_kind.uses_latex_defaults() {
+        if let Some(theme) = &theme {
+            for relative in &theme.resources.latex_headers {
+                if let Some(path) = existing_path(library_root.join(relative)) {
+                    add_resolved_resource(
+                        &mut resources,
+                        project_path,
+                        &library_root,
+                        format!("theme-latex-header:{}", relative),
+                        path,
+                    );
+                }
+            }
+            for relative in &theme.resources.latex_packages {
+                if let Some(path) = existing_path(library_root.join(relative)) {
+                    add_resolved_resource(
+                        &mut resources,
+                        project_path,
+                        &library_root,
+                        format!("theme-latex-package:{}", relative),
+                        path,
+                    );
+                }
+            }
         }
     }
 
@@ -531,10 +608,18 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
         }
     }
 
+    let theme_css = theme.as_ref().and_then(|theme| match output_kind {
+        PandocOutputKind::Html => theme.resources.html_css.first(),
+        PandocOutputKind::Epub => theme.resources.epub_css.first(),
+        _ => None,
+    });
     let css = match output_kind {
         PandocOutputKind::Html => Some((
             "html-css",
-            config.pandoc_css.as_deref(),
+            config
+                .pandoc_css
+                .as_deref()
+                .or(theme_css.map(String::as_str)),
             pandoc::LIB_PANDOC_CSS_DEFAULT,
         )),
         PandocOutputKind::Epub => Some((
@@ -542,7 +627,8 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
             config
                 .pandoc_epub_css
                 .as_deref()
-                .or(config.pandoc_css.as_deref()),
+                .or(config.pandoc_css.as_deref())
+                .or(theme_css.map(String::as_str)),
             "pandoc/data/epub.css",
         )),
         _ => None,
@@ -875,6 +961,12 @@ pub fn build_input_digest(
         ("max_latex_passes", format!("{:?}", config.max_latex_passes)),
         ("figure_paths", format!("{:?}", config.figure_paths)),
         ("figure_output", format!("{:?}", config.figure_output)),
+        ("theme_name", format!("{:?}", config.theme_name)),
+        ("theme_version", format!("{:?}", config.theme_version)),
+        (
+            "theme_compatibility",
+            format!("{:?}", config.theme_compatibility),
+        ),
         ("pandoc_options", format!("{:?}", config.pandoc_options)),
         (
             "pandoc_format_options",

@@ -240,6 +240,25 @@ lang = "zh-CN"
 "#,
     )
     .expect("theme manifest");
+    fs::write(
+        fixture.project.join(".omnidoc.toml"),
+        r#"[project]
+entry = "main.md"
+from = "markdown"
+to = "html"
+target = "smoke"
+
+[build]
+outdir = "build"
+outputs = ["html"]
+
+[theme]
+name = "engineering-book"
+version = "1"
+compatibility = "readium"
+"#,
+    )
+    .expect("themed project config");
 
     let listed = assert_success(fixture.command(&["theme", "list", "--json"]));
     assert!(listed.contains("engineering-book"));
@@ -250,6 +269,7 @@ lang = "zh-CN"
     assert!(inspected.contains("\"compatibility\": \"readium\""));
     assert!(inspected.contains("Noto Serif CJK SC"));
     assert_success(fixture.command(&["theme", "validate", "engineering-book"]));
+    assert_success(fixture.command(&["config-validate", &fixture.project_arg()]));
 
     fs::remove_file(library.join("pandoc/css/engineering-book.css")).expect("remove css");
     let failed =

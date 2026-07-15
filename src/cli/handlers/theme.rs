@@ -11,47 +11,49 @@ use std::path::{Component, Path, PathBuf};
 const THEME_MANIFEST_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-struct ThemeManifest {
-    manifest_version: u32,
-    name: String,
-    version: String,
+pub(crate) struct ThemeManifest {
+    pub(crate) manifest_version: u32,
+    pub(crate) name: String,
+    pub(crate) version: String,
     #[serde(default)]
-    description: Option<String>,
-    compatible_omnidoc: String,
+    pub(crate) description: Option<String>,
+    pub(crate) compatible_omnidoc: String,
     #[serde(default)]
-    compatibility: Option<String>,
+    pub(crate) compatibility: Option<String>,
     #[serde(default)]
-    resources: ThemeResources,
+    pub(crate) resources: ThemeResources,
     #[serde(default)]
-    requirements: ThemeRequirements,
+    pub(crate) requirements: ThemeRequirements,
     #[serde(default)]
-    metadata: ThemeMetadata,
+    pub(crate) metadata: ThemeMetadata,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-struct ThemeResources {
+pub(crate) struct ThemeResources {
     #[serde(default)]
-    html_css: Vec<String>,
+    pub(crate) html_css: Vec<String>,
     #[serde(default)]
-    epub_css: Vec<String>,
+    pub(crate) epub_css: Vec<String>,
     #[serde(default)]
-    latex_packages: Vec<String>,
+    pub(crate) latex_packages: Vec<String>,
     #[serde(default)]
-    lua_filters: Vec<String>,
+    pub(crate) latex_headers: Vec<String>,
     #[serde(default)]
-    templates: Vec<String>,
+    pub(crate) lua_filters: Vec<String>,
+    #[serde(default)]
+    pub(crate) templates: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-struct ThemeRequirements {
+pub(crate) struct ThemeRequirements {
     #[serde(default)]
-    fonts: Vec<String>,
+    pub(crate) fonts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-struct ThemeMetadata {
+pub(crate) struct ThemeMetadata {
     #[serde(default)]
-    defaults: std::collections::BTreeMap<String, String>,
+    pub(crate) defaults: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -101,6 +103,20 @@ fn load_named_theme(library: &Path, name: &str) -> Result<ThemeReport> {
         )));
     }
     Ok(inspect_manifest(library, &path))
+}
+
+pub(crate) fn load_theme_manifest(library: &Path, name: &str) -> Result<ThemeManifest> {
+    let report = load_named_theme(library, name)?;
+    if !report.valid {
+        return Err(OmniDocError::Other(format!(
+            "theme '{}' is invalid: {}",
+            name,
+            report.errors.join("; ")
+        )));
+    }
+    report.theme.ok_or_else(|| {
+        OmniDocError::Other(format!("theme '{}' manifest could not be loaded", name))
+    })
 }
 
 fn load_theme_reports(library: &Path) -> Result<Vec<ThemeReport>> {
@@ -227,6 +243,7 @@ fn validate_manifest(
     if manifest.resources.html_css.is_empty()
         && manifest.resources.epub_css.is_empty()
         && manifest.resources.latex_packages.is_empty()
+        && manifest.resources.latex_headers.is_empty()
         && manifest.resources.lua_filters.is_empty()
         && manifest.resources.templates.is_empty()
     {
@@ -240,6 +257,7 @@ fn validate_manifest(
         ("html_css", &manifest.resources.html_css),
         ("epub_css", &manifest.resources.epub_css),
         ("latex_packages", &manifest.resources.latex_packages),
+        ("latex_headers", &manifest.resources.latex_headers),
         ("lua_filters", &manifest.resources.lua_filters),
         ("templates", &manifest.resources.templates),
     ] {
@@ -347,6 +365,10 @@ fn print_reports(reports: &[ThemeReport], json: bool, detailed: bool) -> Result<
                 println!(
                     "  LaTeX packages: {}",
                     theme.resources.latex_packages.join(", ")
+                );
+                println!(
+                    "  LaTeX headers: {}",
+                    theme.resources.latex_headers.join(", ")
                 );
                 println!("  Lua filters: {}", theme.resources.lua_filters.join(", "));
                 println!("  fonts: {}", theme.requirements.fonts.join(", "));

@@ -19,11 +19,28 @@ pub struct ConfigSchema {
     #[serde(flatten)]
     pub pandoc: Option<PandocConfig>,
     #[serde(flatten)]
+    pub theme: Option<ThemeConfig>,
+    #[serde(flatten)]
     pub tools: Option<ToolsConfig>,
     #[serde(flatten)]
     pub paths: Option<PathsConfig>,
     pub download: Option<Vec<DownloadConfig>>,
     pub template_dir: Option<String>,
+}
+
+/// Versioned theme bundle selection.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub struct ThemeConfig {
+    #[serde(rename = "theme")]
+    pub theme: Option<ThemeSection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ThemeSection {
+    pub name: Option<String>,
+    pub version: Option<String>,
+    pub compatibility: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

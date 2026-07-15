@@ -207,6 +207,11 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    latex_backend = "engine"
    max_latex_passes = 5
 
+   [theme]
+   name = "engineering-book"
+   version = "1"
+   compatibility = "readium"
+
    [pandoc]
    css = "styles/manual.css"
    html_template = "templates/page.html"
@@ -223,6 +228,11 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    ```
 
    `template` is still accepted as a generic fallback for template-capable outputs. DOCX uses `reference_doc` instead of Pandoc `--template`.
+
+   A selected theme supplies default HTML/EPUB CSS and required Lua filters.
+   Explicit `[pandoc]` resource settings retain higher priority. The selected
+   theme manifest and every resource actually consumed by the output are part
+   of the lock/cache input digest; changing the bundle invalidates the cache.
 
    HTML and EPUB builds also load OmniDoc's portable base stylesheet before
    the selected theme. It provides semantic layout primitives such as centered
@@ -349,6 +359,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    html_css = ["pandoc/css/engineering-book.css"]
    epub_css = ["pandoc/css/engineering-book.css"]
    latex_packages = ["texmf/tex/common/omni-engineering-book.sty"]
+   latex_headers = ["pandoc/headers/engineering-book.tex"]
    lua_filters = ["pandoc/data/filters/admonition.lua"]
 
    [requirements]

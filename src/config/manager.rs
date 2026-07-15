@@ -38,6 +38,9 @@ pub struct MergedConfig {
     pub max_latex_passes: usize,
     pub figure_paths: Vec<String>,
     pub figure_output: Option<String>,
+    pub theme_name: Option<String>,
+    pub theme_version: Option<String>,
+    pub theme_compatibility: Option<String>,
     pub pandoc_options: Vec<String>,
     pub pandoc_format_options: BTreeMap<String, Vec<String>>,
     pub pandoc_css: Option<String>,
@@ -234,6 +237,17 @@ impl ConfigManager {
             .and_then(|f| f.figure.as_ref())
             .and_then(|f| f.output.clone());
 
+        let project_theme = project_config
+            .and_then(|config| config.theme.as_ref())
+            .and_then(|theme| theme.theme.as_ref());
+        let global_theme = global_config
+            .and_then(|config| config.theme.as_ref())
+            .and_then(|theme| theme.theme.as_ref());
+        let selected_theme = project_theme.or(global_theme);
+        let theme_name = selected_theme.and_then(|theme| theme.name.clone());
+        let theme_version = selected_theme.and_then(|theme| theme.version.clone());
+        let theme_compatibility = selected_theme.and_then(|theme| theme.compatibility.clone());
+
         // 合并 Pandoc 配置
         let pandoc_config = project_config
             .and_then(|c| c.pandoc.as_ref())
@@ -361,6 +375,9 @@ impl ConfigManager {
             max_latex_passes,
             figure_paths,
             figure_output,
+            theme_name,
+            theme_version,
+            theme_compatibility,
             pandoc_options,
             pandoc_format_options,
             pandoc_css,
