@@ -325,6 +325,42 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    Install and update fail if the downloaded manifest, compatibility contract,
    required resources, or payload checksums do not verify.
 
+11. **Inspect versioned theme bundles**
+
+   Theme bundles are declared by `themes/<name>.toml` inside omnidoc-libs and
+   can bind matching HTML CSS, EPUB CSS, LaTeX packages, Lua filters, font
+   requirements, metadata defaults, and an OmniDoc compatibility range:
+
+   ```bash
+   omnidoc theme list
+   omnidoc theme inspect engineering-book
+   omnidoc theme validate engineering-book
+   omnidoc theme validate --json       # validate every installed theme
+   ```
+
+   ```toml
+   manifest_version = 1
+   name = "engineering-book"
+   version = "1.0.0"
+   compatible_omnidoc = ">=1.3.0,<2.0.0"
+   compatibility = "readium"
+
+   [resources]
+   html_css = ["pandoc/css/engineering-book.css"]
+   epub_css = ["pandoc/css/engineering-book.css"]
+   latex_packages = ["texmf/tex/common/omni-engineering-book.sty"]
+   lua_filters = ["pandoc/data/filters/admonition.lua"]
+
+   [requirements]
+   fonts = ["Noto Serif CJK SC"]
+
+   [metadata.defaults]
+   lang = "zh-CN"
+   ```
+
+   Validation rejects incompatible versions, missing or duplicate resources,
+   unsafe paths, and symbolic links in the bundle contract.
+
 ### Project Quality and CI Commands
 
 Run environment diagnostics:

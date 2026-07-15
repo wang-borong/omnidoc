@@ -14,6 +14,7 @@ pub mod open;
 pub mod publish;
 pub mod quality;
 pub mod template;
+pub mod theme;
 pub mod update;
 pub mod watch;
 
@@ -34,5 +35,6 @@ pub use quality::{
     handle_plugin,
 };
 pub use template::handle_template_validate;
+pub use theme::handle_theme;
 pub use update::handle_update;
 pub use watch::handle_watch;

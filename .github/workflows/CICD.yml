@@ -95,6 +95,7 @@ jobs:
           cargo run --locked -- publish --help
           cargo run --locked -- lock --help
           cargo run --locked -- lib --help
+          cargo run --locked -- theme --help
           cargo run --locked -- plugin --help
 
   golden-book:

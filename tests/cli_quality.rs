@@ -195,6 +195,69 @@ required_resources = ["payload/resource.txt"]
 }
 
 #[test]
+fn theme_commands_discover_inspect_and_validate_bundles() {
+    let fixture = Fixture::new("theme-bundle");
+    let library = fixture.env_root.join("data/omnidoc");
+    fs::create_dir_all(library.join("themes")).expect("theme manifests");
+    fs::create_dir_all(library.join("pandoc/css")).expect("theme css");
+    fs::create_dir_all(library.join("pandoc/data/filters")).expect("theme filters");
+    fs::create_dir_all(library.join("texmf/tex/common")).expect("theme latex");
+    fs::write(
+        library.join("pandoc/css/engineering-book.css"),
+        "body { max-width: 56rem; }\n",
+    )
+    .expect("css");
+    fs::write(
+        library.join("pandoc/data/filters/admonition.lua"),
+        "return {}\n",
+    )
+    .expect("filter");
+    fs::write(
+        library.join("texmf/tex/common/omni-engineering-book.sty"),
+        "% engineering book\n",
+    )
+    .expect("latex package");
+    fs::write(
+        library.join("themes/engineering-book.toml"),
+        r#"manifest_version = 1
+name = "engineering-book"
+version = "1.0.0"
+description = "Matching engineering book output styles"
+compatible_omnidoc = ">=1.3.0,<2.0.0"
+compatibility = "readium"
+
+[resources]
+html_css = ["pandoc/css/engineering-book.css"]
+epub_css = ["pandoc/css/engineering-book.css"]
+latex_packages = ["texmf/tex/common/omni-engineering-book.sty"]
+lua_filters = ["pandoc/data/filters/admonition.lua"]
+
+[requirements]
+fonts = ["Noto Serif CJK SC"]
+
+[metadata.defaults]
+lang = "zh-CN"
+"#,
+    )
+    .expect("theme manifest");
+
+    let listed = assert_success(fixture.command(&["theme", "list", "--json"]));
+    assert!(listed.contains("engineering-book"));
+    assert!(listed.contains("\"valid\": true"));
+
+    let inspected =
+        assert_success(fixture.command(&["theme", "inspect", "engineering-book", "--json"]));
+    assert!(inspected.contains("\"compatibility\": \"readium\""));
+    assert!(inspected.contains("Noto Serif CJK SC"));
+    assert_success(fixture.command(&["theme", "validate", "engineering-book"]));
+
+    fs::remove_file(library.join("pandoc/css/engineering-book.css")).expect("remove css");
+    let failed =
+        assert_failure(fixture.command(&["theme", "validate", "engineering-book", "--json"]));
+    assert!(failed.contains("missing theme resource"));
+}
+
+#[test]
 fn publish_no_build_copies_existing_artifacts() {
     let fixture = Fixture::new("publish");
     let project = fixture.project_arg();

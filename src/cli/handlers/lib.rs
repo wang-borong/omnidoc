@@ -102,7 +102,7 @@ pub fn handle_lib(
     Ok(())
 }
 
-fn configured_library_path(global_config: &GlobalConfig) -> Result<PathBuf> {
+pub(crate) fn configured_library_path(global_config: &GlobalConfig) -> Result<PathBuf> {
     if let Some(path) = global_config
         .get_config()
         .and_then(|config| config.lib.lib.as_ref())

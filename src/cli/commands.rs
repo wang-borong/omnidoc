@@ -359,6 +359,12 @@ pub enum Commands {
         json: bool,
     },
 
+    /// discover and validate versioned theme bundles
+    Theme {
+        #[command(subcommand)]
+        subcommand: ThemeSubcommand,
+    },
+
     /// list all supported document types
     List,
 
@@ -444,6 +450,36 @@ pub enum Commands {
         /// source figure files (auto-detect type if no subcommand specified)
         #[arg(value_hint = ValueHint::FilePath)]
         sources: Vec<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ThemeSubcommand {
+    /// list installed theme bundles
+    List {
+        /// emit JSON theme metadata
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// inspect one installed theme bundle
+    Inspect {
+        /// theme name
+        name: String,
+
+        /// emit JSON theme metadata
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// validate one theme, or every installed theme when NAME is omitted
+    Validate {
+        /// optional theme name
+        name: Option<String>,
+
+        /// emit JSON validation results
+        #[arg(long)]
+        json: bool,
     },
 }
 

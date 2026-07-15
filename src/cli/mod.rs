@@ -240,6 +240,9 @@ pub fn cli() -> Result<()> {
         } => {
             handle_lib(install, update, status, verify, json)?;
         }
+        Commands::Theme { subcommand } => {
+            handle_theme(subcommand)?;
+        }
         Commands::List => {
             print_doctypes();
         }
