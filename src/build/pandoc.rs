@@ -462,7 +462,8 @@ impl BuildPipeline for PandocBuilder {
         let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
         if let Err(err) = self.executor.execute(pandoc::CMD, &args[..], verbose) {
             let mut message = err.to_string();
-            if let Some(source_hint) = locate_markdown_error(&self.executor, &entry_file, &message)
+            if let Some(source_hint) =
+                locate_markdown_error(&self.executor, project_path, &entry_file, &message)
             {
                 message.push_str("\n\n");
                 message.push_str(&source_hint);

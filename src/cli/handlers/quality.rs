@@ -108,8 +108,14 @@ pub fn handle_deps(path: Option<String>, json: bool) -> Result<()> {
             .map_err(|err| OmniDocError::Other(err.to_string()))?;
         println!("{}", content);
     } else {
-        for file in graph.files {
+        for file in &graph.files {
             println!("{}", file);
+        }
+        for resource in &graph.resources {
+            println!(
+                "resource {} [{}] {}",
+                resource.logical_name, resource.resolved_from, resource.path
+            );
         }
     }
 

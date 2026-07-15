@@ -84,19 +84,22 @@ impl MarkdownDiagnostic {
 
 pub fn locate_markdown_error(
     executor: &BuildExecutor,
+    project_root: &Path,
     entry_file: &Path,
     diagnostic: &str,
 ) -> Option<String> {
-    locate_markdown_diagnostic(executor, entry_file, diagnostic)
+    locate_markdown_diagnostic(executor, project_root, entry_file, diagnostic)
         .map(|diagnostic| diagnostic.render())
 }
 
 pub fn locate_markdown_diagnostic(
     executor: &BuildExecutor,
+    project_root: &Path,
     entry_file: &Path,
     diagnostic: &str,
 ) -> Option<MarkdownDiagnostic> {
-    if let Some(diagnostic) = locate_direct_markdown_location(entry_file, diagnostic) {
+    if let Some(diagnostic) = locate_direct_markdown_location(project_root, entry_file, diagnostic)
+    {
         return Some(diagnostic);
     }
 
@@ -105,7 +108,8 @@ pub fn locate_markdown_diagnostic(
         return None;
     }
 
-    if let Some(line_hint) = locate_in_raw_markdown(entry_file, diagnostic, &needles) {
+    if let Some(line_hint) = locate_in_raw_markdown(project_root, entry_file, diagnostic, &needles)
+    {
         return Some(line_hint);
     }
 
@@ -253,11 +257,12 @@ fn collect_text_parts(value: &Value, parts: &mut Vec<String>) {
 }
 
 fn locate_in_raw_markdown(
+    project_root: &Path,
     entry_file: &Path,
     diagnostic: &str,
     needles: &[String],
 ) -> Option<MarkdownDiagnostic> {
-    let candidates = markdown_candidates(entry_file);
+    let candidates = markdown_candidates(project_root, entry_file);
     for needle in needles {
         let needle = normalize_needle(needle);
         if !is_searchable_needle(&needle) {
@@ -285,6 +290,7 @@ fn locate_in_raw_markdown(
 }
 
 fn locate_direct_markdown_location(
+    project_root: &Path,
     entry_file: &Path,
     diagnostic: &str,
 ) -> Option<MarkdownDiagnostic> {
@@ -299,7 +305,8 @@ fn locate_direct_markdown_location(
             .name("column")
             .and_then(|value| value.as_str().parse::<usize>().ok())
             .unwrap_or(1);
-        let Some(source_file) = resolve_diagnostic_markdown_path(entry_file, file) else {
+        let Some(source_file) = resolve_diagnostic_markdown_path(project_root, entry_file, file)
+        else {
             continue;
         };
         let source_content = std::fs::read_to_string(&source_file).ok()?;
@@ -339,25 +346,28 @@ fn locate_direct_markdown_location(
     None
 }
 
-fn resolve_diagnostic_markdown_path(entry_file: &Path, diagnostic_path: &str) -> Option<PathBuf> {
+fn resolve_diagnostic_markdown_path(
+    project_root: &Path,
+    entry_file: &Path,
+    diagnostic_path: &str,
+) -> Option<PathBuf> {
     let path = Path::new(diagnostic_path);
     if path.is_absolute() {
         if path.exists() {
             return Some(path.to_path_buf());
         }
 
-        return markdown_candidates(entry_file)
+        return markdown_candidates(project_root, entry_file)
             .into_iter()
             .find(|candidate| path_suffix_matches(candidate, diagnostic_path));
     }
 
-    let root = project_root(entry_file);
-    let relative_to_root = root.join(path);
+    let relative_to_root = project_root.join(path);
     if relative_to_root.exists() {
         return Some(relative_to_root);
     }
 
-    markdown_candidates(entry_file)
+    markdown_candidates(project_root, entry_file)
         .into_iter()
         .find(|candidate| path_suffix_matches(candidate, diagnostic_path))
 }
@@ -624,7 +634,8 @@ fn source_context_line(
     }
 }
 
-fn project_root(entry_file: &Path) -> PathBuf {
+#[cfg(test)]
+fn configured_project_root(entry_file: &Path) -> PathBuf {
     let start = if entry_file.is_dir() {
         entry_file
     } else {
@@ -632,7 +643,7 @@ fn project_root(entry_file: &Path) -> PathBuf {
     };
     let mut current = start.to_path_buf();
     loop {
-        if current.join(".omnidoc.toml").exists() || current.join(".git").exists() {
+        if current.join(".omnidoc.toml").exists() {
             return current;
         }
         if !current.pop() {
@@ -642,15 +653,15 @@ fn project_root(entry_file: &Path) -> PathBuf {
     start.to_path_buf()
 }
 
-fn markdown_candidates(entry_file: &Path) -> Vec<PathBuf> {
-    let root = project_root(entry_file);
+fn markdown_candidates(project_root: &Path, entry_file: &Path) -> Vec<PathBuf> {
+    let root = project_root;
     let mut candidates = Vec::new();
     if entry_file.exists() {
         candidates.push(entry_file.to_path_buf());
     }
-    let mut discovered = WalkDir::new(&root)
+    let mut discovered = WalkDir::new(root)
         .into_iter()
-        .filter_entry(|entry| should_descend(entry.path(), &root))
+        .filter_entry(|entry| should_descend(entry.path(), root))
         .flatten()
         .filter(|entry| entry.file_type().is_file() && is_markdown_file(entry.path()))
         .map(|entry| entry.into_path())
@@ -773,8 +784,8 @@ fn diagnostic_help(diagnostic: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_markdown_diagnostic, classify_diagnostic, extract_needles, find_column,
-        locate_direct_markdown_location, locate_in_raw_markdown, markdown_candidates,
+        build_markdown_diagnostic, classify_diagnostic, configured_project_root, extract_needles,
+        find_column, locate_direct_markdown_location, locate_in_raw_markdown, markdown_candidates,
         parse_data_pos_start, path_suffix_matches, source_context_line,
     };
     use std::fs;
@@ -869,7 +880,7 @@ mod tests {
         fs::write(&entry, "# Title\n\n![x](missing.png)\n").expect("entry");
 
         let diagnostic =
-            locate_direct_markdown_location(&entry, "pandoc: main.md:3:5: resource missing")
+            locate_direct_markdown_location(&root, &entry, "pandoc: main.md:3:5: resource missing")
                 .expect("diagnostic");
 
         assert_eq!(diagnostic.line, 3);
@@ -895,6 +906,7 @@ mod tests {
         fs::write(&entry, "---\ntitle: [broken\n---\n").expect("entry");
 
         let diagnostic = locate_direct_markdown_location(
+            &root,
             &entry,
             "YAML parse exception at line 2, column 8: did not find expected node content",
         )
@@ -924,13 +936,14 @@ mod tests {
         fs::write(&chapter, "# Intro\n\n$\\badmacro$\n").expect("chapter");
         fs::write(root.join("build").join("ignored.md"), "$\\badmacro$\n").expect("ignored");
 
-        let candidates = markdown_candidates(&entry);
+        let candidates = markdown_candidates(&root, &entry);
         assert!(candidates.iter().any(|path| path == &chapter));
         assert!(!candidates
             .iter()
             .any(|path| path.ends_with("build/ignored.md")));
 
         let diagnostic = locate_in_raw_markdown(
+            &root,
             &entry,
             "! Undefined control sequence.\nl.42 \\badmacro",
             &["\\badmacro".to_string()],
@@ -964,10 +977,28 @@ mod tests {
         fs::write(&entry, "# Main\n").expect("entry");
         fs::write(&chapter, "Text with \\badmacro here\n").expect("chapter");
 
-        let candidates = markdown_candidates(&entry);
+        let candidates = markdown_candidates(&root, &entry);
 
         assert!(candidates.iter().any(|path| path == &chapter));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unrelated_parent_git_does_not_expand_single_file_project_root() {
+        let parent = tempfile::tempdir().expect("parent tempdir");
+        fs::create_dir(parent.path().join(".git")).expect("unrelated git marker");
+        let project = parent.path().join("single-file");
+        fs::create_dir(&project).expect("project");
+        let unrelated = parent.path().join("unrelated.md");
+        fs::write(&unrelated, "text with \\badmacro\n").expect("unrelated markdown");
+        let entry = project.join("main.md");
+        fs::write(&entry, "# Main\n").expect("entry");
+
+        let inferred = configured_project_root(&entry);
+        let candidates = markdown_candidates(&inferred, &entry);
+
+        assert_eq!(inferred, project);
+        assert!(!candidates.iter().any(|path| path == &unrelated));
     }
 
     #[test]

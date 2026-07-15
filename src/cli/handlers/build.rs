@@ -166,12 +166,12 @@ fn build_project_once(
             .unwrap_or("document")
             .to_string()
     });
-    let input_hash = project_tools::build_input_hash(project_path, &graph, &config, &output)?;
+    let input_digest = project_tools::build_input_digest(project_path, &graph, &config, &output)?;
 
     let output_file = expected_output_file(project_path, &config, &output, &target);
     if !run_options.force
         && output_file.exists()
-        && project_tools::cache_hit(project_path, &output, input_hash)
+        && project_tools::cache_hit(project_path, &output, &input_digest)
     {
         if verbose {
             println!("Skipping {} build; input cache is unchanged.", output);
@@ -180,7 +180,7 @@ fn build_project_once(
             output,
             target,
             true,
-            input_hash,
+            input_digest,
             graph.files.clone(),
             issues,
         ));
@@ -200,7 +200,7 @@ fn build_project_once(
         .map_err(|e| OmniDocError::Project(format!("Failed to build project: {}", e)))?;
     project_tools::run_plugin_hook(&build_context, project_tools::PluginHook::PostBuild)?;
 
-    project_tools::write_cache(project_path, &output, input_hash)?;
+    project_tools::write_cache(project_path, &output, &input_digest)?;
     if run_options.write_lock {
         project_tools::write_lock(project_path, &config, &graph)?;
     }
@@ -208,7 +208,7 @@ fn build_project_once(
         output,
         target,
         false,
-        input_hash,
+        input_digest,
         graph.files.clone(),
         issues,
     ))

@@ -1,9 +1,10 @@
 use crate::config::MergedConfig;
+use crate::constants::pandoc;
 use crate::error::{OmniDocError, Result};
+use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -12,6 +13,7 @@ use walkdir::WalkDir;
 const CACHE_DIR: &str = ".omnidoc-cache";
 const LOCK_FILE: &str = "omnidoc.lock";
 const REPORT_FILE: &str = "omnidoc-report.json";
+const LOCK_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum IssueSeverity {
@@ -31,6 +33,14 @@ pub struct ProjectIssue {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DependencyGraph {
     pub files: Vec<String>,
+    pub resources: Vec<ResolvedResource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ResolvedResource {
+    pub logical_name: String,
+    pub resolved_from: String,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,7 +48,7 @@ pub struct BuildReport {
     pub output: String,
     pub target: String,
     pub skipped: bool,
-    pub input_hash: u64,
+    pub input_digest: String,
     pub dependencies: Vec<String>,
     pub issues: Vec<ProjectIssue>,
     pub timestamp_unix: u64,
@@ -53,24 +63,40 @@ pub struct BuildReportDocument {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BuildCache {
-    input_hash: u64,
+    cache_version: u32,
+    input_digest: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockFile {
+    pub lock_version: u32,
     pub omnidoc_version: String,
-    pub lib_path: Option<String>,
-    pub lib_url: Option<String>,
-    pub input_hash: u64,
+    pub input_digest: String,
+    pub library: Option<LockedLibrary>,
+    pub toolchain: BTreeMap<String, String>,
+    pub resources: Vec<LockedResource>,
     pub dependencies: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LockedLibrary {
+    pub revision: Option<String>,
+    pub digest: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LockedResource {
+    pub logical_name: String,
+    pub resolved_from: String,
+    pub digest: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockStatus {
     pub exists: bool,
     pub up_to_date: bool,
-    pub expected_hash: u64,
-    pub actual_hash: Option<u64>,
+    pub expected_digest: String,
+    pub actual_digest: Option<String>,
     pub missing_dependencies: Vec<String>,
     pub extra_dependencies: Vec<String>,
 }
@@ -374,7 +400,242 @@ pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> Dependenc
 
     DependencyGraph {
         files: files.into_iter().collect(),
+        resources: resolved_build_resources(project_path, config),
     }
+}
+
+fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<ResolvedResource> {
+    let library_root = omnidoc_library_root(config);
+    let mut resources = BTreeMap::<String, ResolvedResource>::new();
+
+    let filters = if config.pandoc_lua_filters.is_empty() {
+        vec![
+            "include-files.lua",
+            "include-code-files.lua",
+            "diagram-generator.lua",
+            "admonition.lua",
+            "ltblr.lua",
+            "latex-patch.lua",
+            "fonts-and-alignment.lua",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>()
+    } else {
+        config.pandoc_lua_filters.clone()
+    };
+    for filter in filters {
+        // Keep this resolution identical to PandocBuilder::push_lua_filters:
+        // filter names are relative to the shared filter directory.
+        if let Some(path) =
+            existing_path(library_root.join(pandoc::LIB_PANDOC_FILTERS).join(&filter))
+        {
+            add_resolved_resource(
+                &mut resources,
+                project_path,
+                &library_root,
+                format!("lua-filter:{filter}"),
+                path,
+            );
+        }
+    }
+
+    let data_dir = config
+        .pandoc_data_dir
+        .as_deref()
+        .and_then(|path| resolve_resource_path(project_path, &library_root, path, None))
+        .or_else(|| existing_path(library_root.join(pandoc::LIB_PANDOC_DATA)));
+    if let Some(path) = data_dir {
+        add_resolved_resource(
+            &mut resources,
+            project_path,
+            &library_root,
+            "pandoc-data-dir".to_string(),
+            path,
+        );
+    }
+
+    let configured_css = config.pandoc_css.as_deref();
+    for (logical_name, configured, fallback) in [
+        ("html-css", configured_css, pandoc::LIB_PANDOC_CSS_DEFAULT),
+        (
+            "epub-css",
+            config.pandoc_epub_css.as_deref().or(configured_css),
+            "pandoc/data/epub.css",
+        ),
+    ] {
+        let path = configured
+            .and_then(|value| {
+                resolve_resource_path(project_path, &library_root, value, Some("pandoc/css"))
+            })
+            .or_else(|| existing_path(library_root.join(fallback)));
+        if let Some(path) = path {
+            add_resolved_resource(
+                &mut resources,
+                project_path,
+                &library_root,
+                logical_name.to_string(),
+                path,
+            );
+        }
+    }
+
+    for (logical_name, configured, fallback) in [
+        (
+            "latex-template",
+            config
+                .pandoc_latex_template
+                .as_deref()
+                .or(config.pandoc_template.as_deref()),
+            Some(pandoc::DEFAULT_TEMPLATE_LATEX),
+        ),
+        (
+            "html-template",
+            config.pandoc_html_template.as_deref(),
+            None,
+        ),
+        (
+            "epub-template",
+            config.pandoc_epub_template.as_deref(),
+            None,
+        ),
+    ] {
+        let selected = configured.or(fallback);
+        if let Some(selected) = selected {
+            if let Some(path) = resolve_resource_path(
+                project_path,
+                &library_root,
+                selected,
+                Some("pandoc/data/templates"),
+            ) {
+                add_resolved_resource(
+                    &mut resources,
+                    project_path,
+                    &library_root,
+                    logical_name.to_string(),
+                    path,
+                );
+            }
+        }
+    }
+
+    if let Some(reference_doc) = config.pandoc_reference_doc.as_deref() {
+        if let Some(path) = resolve_resource_path(project_path, &library_root, reference_doc, None)
+        {
+            add_resolved_resource(
+                &mut resources,
+                project_path,
+                &library_root,
+                "reference-doc".to_string(),
+                path,
+            );
+        }
+    }
+
+    for (index, resource_path) in config.pandoc_resource_path.iter().enumerate() {
+        if let Some(path) = resolve_resource_path(project_path, &library_root, resource_path, None)
+        {
+            add_resolved_resource(
+                &mut resources,
+                project_path,
+                &library_root,
+                format!("pandoc-resource-path:{index}"),
+                path,
+            );
+        }
+    }
+
+    for (logical_name, path) in [
+        (
+            "crossref-yaml",
+            config
+                .pandoc_crossref_yaml
+                .as_deref()
+                .and_then(|value| resolve_resource_path(project_path, &library_root, value, None))
+                .or_else(|| existing_path(library_root.join(pandoc::LIB_PANDOC_CROSSREF_YAML))),
+        ),
+        ("texmf", existing_path(library_root.join("texmf"))),
+    ] {
+        if let Some(path) = path {
+            add_resolved_resource(
+                &mut resources,
+                project_path,
+                &library_root,
+                logical_name.to_string(),
+                path,
+            );
+        }
+    }
+
+    resources.into_values().collect()
+}
+
+fn omnidoc_library_root(config: &MergedConfig) -> PathBuf {
+    config
+        .lib_path
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::data_local_dir()
+                .map(|path| path.join("omnidoc"))
+                .unwrap_or_else(|| PathBuf::from(".local/share/omnidoc"))
+        })
+}
+
+fn resolve_resource_path(
+    project_path: &Path,
+    library_root: &Path,
+    configured: &str,
+    library_subdir: Option<&str>,
+) -> Option<PathBuf> {
+    let configured_path = PathBuf::from(configured);
+    let candidates = if configured_path.is_absolute() {
+        vec![configured_path]
+    } else {
+        let mut candidates = vec![project_path.join(&configured_path)];
+        if let Some(subdir) = library_subdir {
+            candidates.push(library_root.join(subdir).join(&configured_path));
+        }
+        candidates.push(library_root.join(&configured_path));
+        candidates
+    };
+    candidates.into_iter().find_map(existing_path)
+}
+
+fn existing_path(path: PathBuf) -> Option<PathBuf> {
+    path.exists().then_some(path)
+}
+
+fn add_resolved_resource(
+    resources: &mut BTreeMap<String, ResolvedResource>,
+    project_path: &Path,
+    library_root: &Path,
+    logical_name: String,
+    path: PathBuf,
+) {
+    let path = path.canonicalize().unwrap_or(path);
+    let canonical_project = project_path
+        .canonicalize()
+        .unwrap_or_else(|_| project_path.to_path_buf());
+    let canonical_library = library_root
+        .canonicalize()
+        .unwrap_or_else(|_| library_root.to_path_buf());
+    let resolved_from = if path.starts_with(&canonical_project) {
+        "project"
+    } else if path.starts_with(&canonical_library) {
+        "omnidoc-libs"
+    } else {
+        "external"
+    };
+    let key = format!("{logical_name}:{}", path.display());
+    resources.insert(
+        key,
+        ResolvedResource {
+            logical_name,
+            resolved_from: resolved_from.to_string(),
+            path: path.to_string_lossy().to_string(),
+        },
+    );
 }
 
 fn track_dependency(
@@ -468,67 +729,160 @@ fn referenced_local_files(content: &str) -> Vec<String> {
     references.into_iter().collect()
 }
 
-pub fn input_hash(project_path: &Path, graph: &DependencyGraph) -> Result<u64> {
-    let mut hasher = DefaultHasher::new();
+pub fn input_digest(project_path: &Path, graph: &DependencyGraph) -> Result<String> {
+    let mut hasher = Hasher::new();
     hash_dependency_files(project_path, graph, &mut hasher)?;
-    Ok(hasher.finish())
+    hash_resolved_resources(graph, &mut hasher)?;
+    Ok(format_digest(hasher.finalize()))
 }
 
-pub fn build_input_hash(
+pub fn build_input_digest(
     project_path: &Path,
     graph: &DependencyGraph,
     config: &MergedConfig,
     output: &str,
-) -> Result<u64> {
-    let mut hasher = DefaultHasher::new();
+) -> Result<String> {
+    let mut hasher = Hasher::new();
     hash_dependency_files(project_path, graph, &mut hasher)?;
-    output.hash(&mut hasher);
-    config.from.hash(&mut hasher);
-    config.to.hash(&mut hasher);
-    config.target.hash(&mut hasher);
-    config.outdir.hash(&mut hasher);
-    config.author.hash(&mut hasher);
-    config.metadata_file.hash(&mut hasher);
-    config.latex_backend.hash(&mut hasher);
-    config.max_latex_passes.hash(&mut hasher);
-    config.figure_paths.hash(&mut hasher);
-    config.figure_output.hash(&mut hasher);
-    config.pandoc_options.hash(&mut hasher);
-    config.pandoc_css.hash(&mut hasher);
-    config.pandoc_reference_doc.hash(&mut hasher);
-    config.pandoc_epub_css.hash(&mut hasher);
-    config.pandoc_from_format.hash(&mut hasher);
-    config.pandoc_to_format.hash(&mut hasher);
-    config.pandoc_lua_filters.hash(&mut hasher);
-    config.pandoc_template.hash(&mut hasher);
-    config.pandoc_html_template.hash(&mut hasher);
-    config.pandoc_latex_template.hash(&mut hasher);
-    config.pandoc_epub_template.hash(&mut hasher);
-    config.pandoc_data_dir.hash(&mut hasher);
-    config.pandoc_resource_path.hash(&mut hasher);
-    config.pandoc_syntax_highlighting.hash(&mut hasher);
-    config.pandoc_crossref_yaml.hash(&mut hasher);
-    config.pandoc_python_path.hash(&mut hasher);
-    config.pandoc_standalone.hash(&mut hasher);
-    config.pandoc_embed_resources.hash(&mut hasher);
-    config.pandoc_lang.hash(&mut hasher);
-    sorted_tool_paths(&config.tool_paths).hash(&mut hasher);
-    Ok(hasher.finish())
+    hash_resolved_resources(graph, &mut hasher)?;
+    for (label, value) in [
+        ("output", format!("{output:?}")),
+        ("from", format!("{:?}", config.from)),
+        ("to", format!("{:?}", config.to)),
+        ("target", format!("{:?}", config.target)),
+        ("outdir", format!("{:?}", config.outdir)),
+        ("author", format!("{:?}", config.author)),
+        ("metadata_file", format!("{:?}", config.metadata_file)),
+        ("latex_backend", format!("{:?}", config.latex_backend)),
+        ("max_latex_passes", format!("{:?}", config.max_latex_passes)),
+        ("figure_paths", format!("{:?}", config.figure_paths)),
+        ("figure_output", format!("{:?}", config.figure_output)),
+        ("pandoc_options", format!("{:?}", config.pandoc_options)),
+        ("pandoc_css", format!("{:?}", config.pandoc_css)),
+        (
+            "pandoc_reference_doc",
+            format!("{:?}", config.pandoc_reference_doc),
+        ),
+        ("pandoc_epub_css", format!("{:?}", config.pandoc_epub_css)),
+        (
+            "pandoc_from_format",
+            format!("{:?}", config.pandoc_from_format),
+        ),
+        ("pandoc_to_format", format!("{:?}", config.pandoc_to_format)),
+        (
+            "pandoc_lua_filters",
+            format!("{:?}", config.pandoc_lua_filters),
+        ),
+        ("pandoc_template", format!("{:?}", config.pandoc_template)),
+        (
+            "pandoc_html_template",
+            format!("{:?}", config.pandoc_html_template),
+        ),
+        (
+            "pandoc_latex_template",
+            format!("{:?}", config.pandoc_latex_template),
+        ),
+        (
+            "pandoc_epub_template",
+            format!("{:?}", config.pandoc_epub_template),
+        ),
+        ("pandoc_data_dir", format!("{:?}", config.pandoc_data_dir)),
+        (
+            "pandoc_resource_path",
+            format!("{:?}", config.pandoc_resource_path),
+        ),
+        (
+            "pandoc_syntax_highlighting",
+            format!("{:?}", config.pandoc_syntax_highlighting),
+        ),
+        (
+            "pandoc_crossref_yaml",
+            format!("{:?}", config.pandoc_crossref_yaml),
+        ),
+        (
+            "pandoc_python_path",
+            format!("{:?}", config.pandoc_python_path),
+        ),
+        (
+            "pandoc_standalone",
+            format!("{:?}", config.pandoc_standalone),
+        ),
+        (
+            "pandoc_embed_resources",
+            format!("{:?}", config.pandoc_embed_resources),
+        ),
+        ("pandoc_lang", format!("{:?}", config.pandoc_lang)),
+        (
+            "tool_paths",
+            format!("{:?}", sorted_tool_paths(&config.tool_paths)),
+        ),
+    ] {
+        hash_field(&mut hasher, label, value.as_bytes());
+    }
+    Ok(format_digest(hasher.finalize()))
 }
 
 fn hash_dependency_files(
     project_path: &Path,
     graph: &DependencyGraph,
-    hasher: &mut DefaultHasher,
+    hasher: &mut Hasher,
 ) -> Result<()> {
     for file in &graph.files {
-        file.hash(hasher);
+        hash_field(hasher, "dependency", file.as_bytes());
         let path = project_path.join(file);
         if path.is_file() {
-            fs::read(&path)?.hash(hasher);
+            hash_field(hasher, "content", &fs::read(&path)?);
         }
     }
     Ok(())
+}
+
+fn hash_resolved_resources(graph: &DependencyGraph, hasher: &mut Hasher) -> Result<()> {
+    for resource in &graph.resources {
+        hash_field(hasher, "resource-name", resource.logical_name.as_bytes());
+        hash_field(hasher, "resource-origin", resource.resolved_from.as_bytes());
+        hash_path(Path::new(&resource.path), hasher)?;
+    }
+    Ok(())
+}
+
+fn hash_path(path: &Path, hasher: &mut Hasher) -> Result<()> {
+    if path.is_file() {
+        hash_field(hasher, "file", &fs::read(path)?);
+        return Ok(());
+    }
+    if path.is_dir() {
+        let mut files = WalkDir::new(path)
+            .into_iter()
+            .flatten()
+            .filter(|entry| entry.file_type().is_file())
+            .map(|entry| entry.into_path())
+            .collect::<Vec<_>>();
+        files.sort();
+        for file in files {
+            let relative = display_relative(path, &file);
+            hash_field(hasher, "relative-path", relative.as_bytes());
+            hash_field(hasher, "file", &fs::read(file)?);
+        }
+    }
+    Ok(())
+}
+
+fn content_digest(path: &Path) -> Result<String> {
+    let mut hasher = Hasher::new();
+    hash_path(path, &mut hasher)?;
+    Ok(format_digest(hasher.finalize()))
+}
+
+fn hash_field(hasher: &mut Hasher, label: &str, value: &[u8]) {
+    hasher.update(&(label.len() as u64).to_le_bytes());
+    hasher.update(label.as_bytes());
+    hasher.update(&(value.len() as u64).to_le_bytes());
+    hasher.update(value);
+}
+
+fn format_digest(digest: blake3::Hash) -> String {
+    format!("blake3:{digest}")
 }
 
 fn sorted_tool_paths(
@@ -540,19 +894,22 @@ fn sorted_tool_paths(
         .collect()
 }
 
-pub fn cache_hit(project_path: &Path, output: &str, hash: u64) -> bool {
+pub fn cache_hit(project_path: &Path, output: &str, digest: &str) -> bool {
     let path = cache_path(project_path, output);
     let Ok(content) = fs::read_to_string(path) else {
         return false;
     };
     serde_json::from_str::<BuildCache>(&content)
-        .map(|cache| cache.input_hash == hash)
+        .map(|cache| cache.cache_version == LOCK_VERSION && cache.input_digest == digest)
         .unwrap_or(false)
 }
 
-pub fn write_cache(project_path: &Path, output: &str, hash: u64) -> Result<()> {
+pub fn write_cache(project_path: &Path, output: &str, digest: &str) -> Result<()> {
     fs::create_dir_all(project_path.join(CACHE_DIR))?;
-    let cache = BuildCache { input_hash: hash };
+    let cache = BuildCache {
+        cache_version: LOCK_VERSION,
+        input_digest: digest.to_string(),
+    };
     let content =
         serde_json::to_string_pretty(&cache).map_err(|err| OmniDocError::Other(err.to_string()))?;
     fs::write(cache_path(project_path, output), content)?;
@@ -594,12 +951,15 @@ pub fn write_lock(
     config: &MergedConfig,
     graph: &DependencyGraph,
 ) -> Result<()> {
-    let hash = input_hash(project_path, graph)?;
+    let digest = input_digest(project_path, graph)?;
+    let resources = locked_resources(graph)?;
     let lock = LockFile {
+        lock_version: LOCK_VERSION,
         omnidoc_version: env!("CARGO_PKG_VERSION").to_string(),
-        lib_path: config.lib_path.clone(),
-        lib_url: config.lib_url.clone(),
-        input_hash: hash,
+        input_digest: digest,
+        library: locked_library(config, &resources),
+        toolchain: toolchain_versions(config),
+        resources,
         dependencies: graph.files.clone(),
     };
     let content =
@@ -610,17 +970,17 @@ pub fn write_lock(
 
 pub fn check_lock(
     project_path: &Path,
-    _config: &MergedConfig,
+    config: &MergedConfig,
     graph: &DependencyGraph,
 ) -> Result<LockStatus> {
-    let expected_hash = input_hash(project_path, graph)?;
+    let expected_digest = input_digest(project_path, graph)?;
     let lock_path = project_path.join(LOCK_FILE);
     if !lock_path.exists() {
         return Ok(LockStatus {
             exists: false,
             up_to_date: false,
-            expected_hash,
-            actual_hash: None,
+            expected_digest,
+            actual_digest: None,
             missing_dependencies: graph.files.clone(),
             extra_dependencies: Vec::new(),
         });
@@ -639,18 +999,115 @@ pub fn check_lock(
         .difference(&expected_dependencies)
         .cloned()
         .collect::<Vec<_>>();
-    let up_to_date = lock.input_hash == expected_hash
+    let expected_resources = locked_resources(graph)?;
+    let up_to_date = lock.lock_version == LOCK_VERSION
+        && lock.input_digest == expected_digest
+        && lock.resources == expected_resources
+        && lock.library == locked_library(config, &expected_resources)
+        && lock.toolchain == toolchain_versions(config)
         && missing_dependencies.is_empty()
         && extra_dependencies.is_empty();
 
     Ok(LockStatus {
         exists: true,
         up_to_date,
-        expected_hash,
-        actual_hash: Some(lock.input_hash),
+        expected_digest,
+        actual_digest: Some(lock.input_digest),
         missing_dependencies,
         extra_dependencies,
     })
+}
+
+fn locked_resources(graph: &DependencyGraph) -> Result<Vec<LockedResource>> {
+    graph
+        .resources
+        .iter()
+        .map(|resource| {
+            Ok(LockedResource {
+                logical_name: resource.logical_name.clone(),
+                resolved_from: resource.resolved_from.clone(),
+                digest: content_digest(Path::new(&resource.path))?,
+            })
+        })
+        .collect()
+}
+
+fn locked_library(config: &MergedConfig, resources: &[LockedResource]) -> Option<LockedLibrary> {
+    let library_resources = resources
+        .iter()
+        .filter(|resource| resource.resolved_from == "omnidoc-libs")
+        .collect::<Vec<_>>();
+    if library_resources.is_empty() {
+        return None;
+    }
+    let mut hasher = Hasher::new();
+    for resource in library_resources {
+        hash_field(
+            &mut hasher,
+            "logical-name",
+            resource.logical_name.as_bytes(),
+        );
+        hash_field(&mut hasher, "digest", resource.digest.as_bytes());
+    }
+    Some(LockedLibrary {
+        revision: git_revision(&omnidoc_library_root(config)),
+        digest: format_digest(hasher.finalize()),
+    })
+}
+
+fn git_revision(path: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .args(["-C", &path.to_string_lossy(), "rev-parse", "HEAD"])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn toolchain_versions(config: &MergedConfig) -> BTreeMap<String, String> {
+    let latex_engine = config
+        .tool_paths
+        .get("latex_engine")
+        .and_then(|value| value.clone())
+        .unwrap_or_else(|| "xelatex".to_string());
+    [
+        ("pandoc", configured_tool(config, "pandoc", "pandoc")),
+        (
+            "pandoc_crossref",
+            configured_tool(config, "pandoc_crossref", "pandoc-crossref"),
+        ),
+        ("latex_engine", latex_engine),
+    ]
+    .into_iter()
+    .map(|(name, program)| (name.to_string(), command_version(&program)))
+    .collect()
+}
+
+fn configured_tool(config: &MergedConfig, key: &str, fallback: &str) -> String {
+    config
+        .tool_paths
+        .get(key)
+        .and_then(|value| value.clone())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn command_version(program: &str) -> String {
+    Command::new(program)
+        .arg("--version")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .next()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "unavailable".to_string())
 }
 
 pub fn discovered_plugins(project_path: &Path, config: &MergedConfig) -> Vec<PluginInfo> {
@@ -760,7 +1217,7 @@ pub fn build_report(
     output: String,
     target: String,
     skipped: bool,
-    input_hash: u64,
+    input_digest: String,
     dependencies: Vec<String>,
     issues: Vec<ProjectIssue>,
 ) -> BuildReport {
@@ -768,7 +1225,7 @@ pub fn build_report(
         output,
         target,
         skipped,
-        input_hash,
+        input_digest,
         dependencies,
         issues,
         timestamp_unix: current_timestamp_unix(),
@@ -1318,9 +1775,10 @@ fn warning(message: String, path: Option<String>, line: Option<usize>) -> Projec
 #[cfg(test)]
 mod tests {
     use super::{
-        dependency_graph, hook_argv, manifest_hook_names, parse_lint_rule_output,
-        supported_outputs, validate_config, validate_hook_command, HookCommand, LoadedPlugin,
-        PluginHooks, PluginInfo, PluginManifest,
+        build_input_digest, cache_hit, dependency_graph, hook_argv, manifest_hook_names,
+        parse_lint_rule_output, supported_outputs, validate_config, validate_hook_command,
+        write_cache, write_lock, HookCommand, LoadedPlugin, LockFile, PluginHooks, PluginInfo,
+        PluginManifest,
     };
     use crate::config::MergedConfig;
     use std::fs;
@@ -1423,6 +1881,58 @@ mod tests {
         assert!(!graph.files.iter().any(|path| path.starts_with("tmp/")));
 
         fs::remove_dir_all(project).expect("cleanup");
+    }
+
+    #[test]
+    fn shared_resources_invalidate_cache_and_lock_uses_portable_digests() {
+        let project = tempfile::tempdir().expect("project tempdir");
+        let library = tempfile::tempdir().expect("library tempdir");
+        let css_dir = library.path().join("pandoc/css");
+        fs::create_dir_all(&css_dir).expect("css dir");
+        let css = css_dir.join("engineering-book.css");
+        fs::write(&css, "body { color: black; }\n").expect("css");
+        fs::write(
+            project.path().join(".omnidoc.toml"),
+            "[project]\nentry='main.md'\n",
+        )
+        .expect("config");
+        fs::write(project.path().join("main.md"), "# Book\n").expect("entry");
+        let config = MergedConfig {
+            entry: Some("main.md".to_string()),
+            lib_path: Some(library.path().to_string_lossy().to_string()),
+            pandoc_css: Some("engineering-book.css".to_string()),
+            ..Default::default()
+        };
+
+        let graph = dependency_graph(project.path(), &config);
+        assert!(graph.resources.iter().any(|resource| {
+            resource.logical_name == "html-css"
+                && resource.resolved_from == "omnidoc-libs"
+                && resource.path == css.to_string_lossy()
+        }));
+
+        let before =
+            build_input_digest(project.path(), &graph, &config, "html").expect("initial digest");
+        write_cache(project.path(), "html", &before).expect("cache");
+        assert!(cache_hit(project.path(), "html", &before));
+
+        fs::write(&css, "body { color: navy; }\n").expect("updated css");
+        let after =
+            build_input_digest(project.path(), &graph, &config, "html").expect("updated digest");
+        assert_ne!(before, after);
+        assert!(!cache_hit(project.path(), "html", &after));
+
+        write_lock(project.path(), &config, &graph).expect("lock");
+        let lock_text = fs::read_to_string(project.path().join("omnidoc.lock")).expect("lock text");
+        let lock: LockFile = toml::from_str(&lock_text).expect("lock v2");
+        assert_eq!(lock.lock_version, 2);
+        assert!(lock.input_digest.starts_with("blake3:"));
+        assert!(lock.resources.iter().any(|resource| {
+            resource.logical_name == "html-css"
+                && resource.resolved_from == "omnidoc-libs"
+                && resource.digest.starts_with("blake3:")
+        }));
+        assert!(!lock_text.contains(&library.path().to_string_lossy().to_string()));
     }
 
     #[test]
