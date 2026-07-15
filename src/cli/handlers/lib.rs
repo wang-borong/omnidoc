@@ -3,7 +3,7 @@ use crate::constants::config as config_consts;
 use crate::constants::git_refs;
 use crate::doc::templates::get_latexmkrc_template;
 use crate::error::{OmniDocError, Result};
-use crate::git::{git_clone, git_pull};
+use crate::git::{git_checkout_revision, git_clone, git_fetch, git_pull};
 use crate::utils::fs;
 use console::style;
 use dirs::{config_local_dir, data_local_dir};
@@ -36,6 +36,8 @@ struct LibraryStatus {
     integrity_verified: bool,
     version: Option<String>,
     revision: Option<String>,
+    requested_revision: Option<String>,
+    revision_matches: Option<bool>,
     dirty: Option<bool>,
     compatible_omnidoc: Option<String>,
     omnidoc_compatible: Option<bool>,
@@ -53,16 +55,21 @@ pub fn handle_lib(
     status: bool,
     verify: bool,
     json: bool,
+    revision: Option<String>,
 ) -> Result<()> {
     let global_config = GlobalConfig::load()?;
     let library_path = configured_library_path(&global_config)?;
+    let requested_revision = revision.or_else(|| configured_library_revision(&global_config));
     let requested_install = install || (!update && !status && !verify);
 
     if requested_install {
         let lib_url = configured_library_url(&global_config);
         git_clone(&lib_url, &library_path, true).map_err(OmniDocError::Git)?;
+        if let Some(revision) = requested_revision.as_deref() {
+            git_checkout_revision(&library_path, revision).map_err(OmniDocError::Git)?;
+        }
         ensure_latexmkrc()?;
-        let result = inspect_library(&library_path);
+        let result = inspect_library(&library_path, requested_revision.as_deref());
         print_library_status(&result, json)?;
         ensure_verified(&result)?;
         if !json {
@@ -77,10 +84,17 @@ pub fn handle_lib(
     }
 
     if update {
-        git_pull(&library_path, git_refs::ORIGIN, git_refs::MAIN_BRANCH)
-            .map_err(OmniDocError::Git)?;
+        ensure_clean_repository(&library_path)?;
+        if let Some(revision) = requested_revision.as_deref() {
+            git_fetch(&library_path, git_refs::ORIGIN, git_refs::MAIN_BRANCH)
+                .map_err(OmniDocError::Git)?;
+            git_checkout_revision(&library_path, revision).map_err(OmniDocError::Git)?;
+        } else {
+            git_pull(&library_path, git_refs::ORIGIN, git_refs::MAIN_BRANCH)
+                .map_err(OmniDocError::Git)?;
+        }
         ensure_latexmkrc()?;
-        let result = inspect_library(&library_path);
+        let result = inspect_library(&library_path, requested_revision.as_deref());
         print_library_status(&result, json)?;
         ensure_verified(&result)?;
         if !json {
@@ -94,7 +108,7 @@ pub fn handle_lib(
         return Ok(());
     }
 
-    let result = inspect_library(&library_path);
+    let result = inspect_library(&library_path, requested_revision.as_deref());
     print_library_status(&result, json)?;
     if verify {
         ensure_verified(&result)?;
@@ -123,6 +137,32 @@ fn configured_library_url(global_config: &GlobalConfig) -> String {
         .unwrap_or_else(|| config_consts::DEFAULT_LIB_URL.to_string())
 }
 
+fn configured_library_revision(global_config: &GlobalConfig) -> Option<String> {
+    global_config
+        .get_config()
+        .and_then(|config| config.lib.lib.as_ref())
+        .and_then(|library| library.revision.clone())
+}
+
+fn ensure_clean_repository(path: &Path) -> Result<()> {
+    let repository = Repository::open(path).map_err(OmniDocError::Git)?;
+    let mut options = StatusOptions::new();
+    options.include_untracked(true).recurse_untracked_dirs(true);
+    let dirty = repository
+        .statuses(Some(&mut options))
+        .map_err(OmniDocError::Git)?
+        .iter()
+        .next()
+        .is_some();
+    if dirty {
+        return Err(OmniDocError::Other(format!(
+            "refusing to update dirty OmniDoc library: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
 fn ensure_latexmkrc() -> Result<()> {
     let mut latexmkrc = config_local_dir().ok_or_else(|| {
         OmniDocError::Other("Local configuration directory not found".to_string())
@@ -138,7 +178,7 @@ fn ensure_latexmkrc() -> Result<()> {
     Ok(())
 }
 
-fn inspect_library(path: &Path) -> LibraryStatus {
+fn inspect_library(path: &Path, requested_revision: Option<&str>) -> LibraryStatus {
     let mut status = LibraryStatus {
         path: path.display().to_string(),
         exists: path.is_dir(),
@@ -146,6 +186,8 @@ fn inspect_library(path: &Path) -> LibraryStatus {
         integrity_verified: false,
         version: None,
         revision: None,
+        requested_revision: requested_revision.map(str::to_string),
+        revision_matches: None,
         dirty: None,
         compatible_omnidoc: None,
         omnidoc_compatible: None,
@@ -174,6 +216,23 @@ fn inspect_library(path: &Path) -> LibraryStatus {
             .statuses(Some(&mut options))
             .ok()
             .map(|statuses| !statuses.is_empty());
+        if let (Some(requested), Some(actual)) = (requested_revision, status.revision.as_deref()) {
+            status.revision_matches = repository
+                .revparse_single(requested)
+                .ok()
+                .and_then(|object| object.peel_to_commit().ok())
+                .map(|commit| commit.id().to_string() == actual);
+            if status.revision_matches == Some(false) {
+                status.errors.push(format!(
+                    "installed revision {} does not match requested revision {}",
+                    actual, requested
+                ));
+            } else if status.revision_matches.is_none() {
+                status
+                    .errors
+                    .push(format!("cannot resolve requested revision {}", requested));
+            }
+        }
     }
 
     let manifest = match read_manifest(path) {
@@ -440,6 +499,17 @@ fn print_library_status(status: &LibraryStatus, json: bool) -> Result<()> {
             ""
         }
     );
+    if let Some(requested) = status.requested_revision.as_deref() {
+        println!(
+            "requested revision: {} ({})",
+            requested,
+            match status.revision_matches {
+                Some(true) => "matched",
+                Some(false) => "mismatched",
+                None => "unresolved",
+            }
+        );
+    }
     println!(
         "manifest: {}",
         if status.manifest_valid {
@@ -487,6 +557,8 @@ fn ensure_verified(status: &LibraryStatus) -> Result<()> {
         && status.manifest_valid
         && status.omnidoc_compatible != Some(false)
         && status.pandoc_compatible != Some(false)
+        && status.revision_matches != Some(false)
+        && !(status.requested_revision.is_some() && status.revision_matches.is_none())
     {
         return Ok(());
     }

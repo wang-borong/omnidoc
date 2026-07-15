@@ -42,6 +42,7 @@ pub fn handle_config(
             lib: Some(LibSection {
                 path: Some(lib_path),
                 url: Some(config_consts::DEFAULT_LIB_URL.to_string()),
+                revision: None,
             }),
         };
     }

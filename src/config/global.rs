@@ -80,6 +80,7 @@ impl GlobalConfig {
             lib: Some(LibSection {
                 path: Some(lib_path_str.to_string()),
                 url: Some(config_consts::DEFAULT_LIB_URL.to_string()),
+                revision: None,
             }),
         };
 

@@ -305,6 +305,58 @@ where
     do_merge(&repo, branch, fetch_commit)
 }
 
+/// Fetch a branch and all advertised tags without changing the working tree.
+pub fn git_fetch<P>(repo: P, remote: &str, branch: &str) -> Result<(), git2::Error>
+where
+    P: AsRef<Path>,
+{
+    let repo = Repository::open(repo)?;
+    let mut remote = repo.find_remote(remote)?;
+    do_fetch(&repo, &[branch], &mut remote)?;
+    Ok(())
+}
+
+/// Resolve and check out a tag, branch, or commit as a detached HEAD.
+pub fn git_checkout_revision<P>(repo: P, revision: &str) -> Result<git2::Oid, git2::Error>
+where
+    P: AsRef<Path>,
+{
+    let repo = Repository::open(repo)?;
+    let mut status_options = git2::StatusOptions::new();
+    status_options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true);
+    if !repo.statuses(Some(&mut status_options))?.is_empty() {
+        return Err(git2::Error::from_str(
+            "refusing to check out a revision in a dirty repository",
+        ));
+    }
+    let object = resolve_revision(&repo, revision)?;
+    let commit = object.peel_to_commit()?;
+    repo.checkout_tree(
+        commit.as_object(),
+        Some(git2::build::CheckoutBuilder::new().safe()),
+    )?;
+    repo.set_head_detached(commit.id())?;
+    Ok(commit.id())
+}
+
+fn resolve_revision<'repo>(
+    repo: &'repo Repository,
+    revision: &str,
+) -> Result<git2::Object<'repo>, git2::Error> {
+    for candidate in [
+        revision.to_string(),
+        format!("refs/tags/{revision}"),
+        format!("refs/remotes/origin/{revision}"),
+    ] {
+        if let Ok(object) = repo.revparse_single(&candidate) {
+            return Ok(object);
+        }
+    }
+    repo.revparse_single(revision)
+}
+
 pub fn is_git_repo<P>(repo: P) -> bool
 where
     P: AsRef<Path>,
@@ -381,5 +433,34 @@ mod tests {
         assert!(target.join(".git").exists());
 
         let _ = fs::remove_dir_all(target);
+    }
+
+    #[test]
+    fn checks_out_named_revision_without_overwriting_dirty_files() {
+        let root = temp_dir_path("git_checkout_revision");
+        let source = root.join("source");
+        let target = root.join("target");
+        create_source_repo(&source);
+        let source_repo = Repository::open(&source).expect("source repository");
+        let first = source_repo
+            .head()
+            .expect("source head")
+            .target()
+            .expect("source commit");
+        let first_object = source_repo.find_object(first, None).expect("source object");
+        source_repo
+            .tag_lightweight("v1.0.0", &first_object, false)
+            .expect("create tag");
+
+        git_clone(source.to_str().expect("source path"), &target, false).expect("clone repo");
+        let checked_out = git_checkout_revision(&target, "v1.0.0").expect("checkout tag");
+        assert_eq!(checked_out, first);
+        let target_repo = Repository::open(&target).expect("target repository");
+        assert!(target_repo.head_detached().expect("detached status"));
+
+        fs::write(target.join("README.md"), b"dirty\n").expect("dirty file");
+        assert!(git_checkout_revision(&target, "v1.0.0").is_err());
+
+        let _ = fs::remove_dir_all(root);
     }
 }

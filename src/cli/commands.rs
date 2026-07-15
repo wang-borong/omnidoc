@@ -357,6 +357,10 @@ pub enum Commands {
         /// emit status or verification details as JSON
         #[arg(long)]
         json: bool,
+
+        /// install, update, or verify a specific library tag, branch, or commit
+        #[arg(long, value_name = "REVISION")]
+        revision: Option<String>,
     },
 
     /// discover and validate versioned theme bundles

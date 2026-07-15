@@ -237,8 +237,9 @@ pub fn cli() -> Result<()> {
             status,
             verify,
             json,
+            revision,
         } => {
-            handle_lib(install, update, status, verify, json)?;
+            handle_lib(install, update, status, verify, json, revision)?;
         }
         Commands::Theme { subcommand } => {
             handle_theme(subcommand)?;
