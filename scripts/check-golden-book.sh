@@ -49,6 +49,15 @@ rg -q 'chapters/chapter-one.md' "$include_depfile"
 rg -q 'chapters/nested/details.md' "$include_depfile"
 rg -q 'assets/example.rs' "$include_code_depfile"
 jq -e '.reports | length == 2 and all(.artifact_digest | startswith("blake3:"))' "$report" >/dev/null
+jq -e '
+  .reports
+  | map(select(.output == "epub"))[0].compatibility
+  | .profile == "readium"
+    and .profile_version == 1
+    and .valid == true
+    and (.reader_matrix | length >= 3)
+    and all(.checks[]; .passed == true)
+' "$report" >/dev/null
 python3 - "$lock" <<'PY'
 import pathlib
 import sys
@@ -74,6 +83,24 @@ PY
 "$bin" lock --check "$work/book"
 "$bin" build "$work/book" --to html --report
 jq -e '.reports[0].skipped == true and .reports[0].cache_reason == "input_digest_match"' "$report" >/dev/null
+python3 - "$epub" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+content = path.read_bytes()
+if b"application/epub+zip" not in content:
+    raise SystemExit("cannot locate EPUB mimetype content")
+path.write_bytes(content.replace(b"application/epub+zip", b"application/epub-bad", 1))
+PY
+"$bin" build "$work/book" --to epub --report
+jq -e '
+  .reports[0]
+  | .skipped == false
+    and .cache_reason == "artifact_compatibility_failed"
+    and .compatibility.profile == "readium"
+    and .compatibility.valid == true
+' "$report" >/dev/null
 
 unzip -tq "$epub" >/dev/null
 test "$(zipinfo -1 "$epub" | rg -c '\.svg$')" -ge 2

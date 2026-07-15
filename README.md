@@ -240,6 +240,15 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    theme manifest and every resource actually consumed by the output are part
    of the lock/cache input digest; changing the bundle invalidates the cache.
 
+   `compatibility = "readium"` activates the versioned Readium EPUB profile.
+   Every EPUB build then validates the ZIP/mimetype contract, normalized and
+   unique entry paths, EPUB 3 package/navigation documents, packaged CSS and
+   local resources, MathML namespaces, and hidden TeX annotations. Validation
+   results and the Readium/Thorium, Calibre, and Apple Books target matrix are
+   written to `omnidoc-report.json`; an invalid artifact is never cached. This
+   deterministic profile gate complements EPUBCheck, which remains mandatory
+   in the Golden Book GitHub Actions job.
+
    HTML and EPUB builds also load OmniDoc's portable base stylesheet before
    the selected theme. It provides semantic layout primitives such as centered
    standalone formulas while leaving inline math unchanged.

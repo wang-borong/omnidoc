@@ -2,6 +2,7 @@ use crate::build::pandoc::load_selected_theme;
 use crate::build::pandoc_policy::{is_supported_format_key, PandocOutputKind};
 use crate::config::MergedConfig;
 use crate::constants::pandoc;
+use crate::epub::{is_supported_epub_profile, EpubCompatibilityReport};
 use crate::error::{OmniDocError, Result};
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
@@ -57,6 +58,7 @@ pub struct BuildReport {
     pub duration_ms: u64,
     pub input_digest: String,
     pub artifact_digest: Option<String>,
+    pub compatibility: Option<EpubCompatibilityReport>,
     pub dependencies: Vec<String>,
     pub resources: Vec<LockedResource>,
     pub toolchain: BTreeMap<String, String>,
@@ -81,6 +83,7 @@ pub struct BuildReportContext<'a> {
     pub graph: &'a DependencyGraph,
     pub config: &'a MergedConfig,
     pub artifact: &'a Path,
+    pub compatibility: Option<EpubCompatibilityReport>,
     pub issues: Vec<ProjectIssue>,
 }
 
@@ -333,6 +336,18 @@ pub fn validate_config(project_path: &Path, config: &MergedConfig) -> Vec<Projec
             Some(".omnidoc.toml".to_string()),
             None,
         ));
+    }
+    if let Some(profile) = config.theme_compatibility.as_deref() {
+        if !is_supported_epub_profile(profile) {
+            issues.push(error(
+                format!(
+                    "Unsupported EPUB compatibility profile '{}'. Supported profiles: readium",
+                    profile
+                ),
+                Some(".omnidoc.toml".to_string()),
+                None,
+            ));
+        }
     }
 
     if let Some(metadata_file) = &config.metadata_file {
@@ -1692,6 +1707,7 @@ pub fn build_report(context: BuildReportContext<'_>) -> BuildReport {
             .is_file()
             .then(|| content_digest(context.artifact).ok())
             .flatten(),
+        compatibility: context.compatibility,
         dependencies: context.graph.files.clone(),
         resources: locked_resources(context.graph).unwrap_or_default(),
         toolchain: toolchain_versions(context.config),
@@ -2543,6 +2559,7 @@ mod tests {
             graph: &graph,
             config: &config,
             artifact: &artifact,
+            compatibility: None,
             issues: Vec::new(),
         });
 

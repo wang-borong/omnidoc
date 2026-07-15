@@ -2,6 +2,8 @@ use crate::cli::handlers::common::{
     check_omnidoc_project, create_build_service, create_config_manager,
 };
 use crate::config::CliOverrides;
+use crate::config::MergedConfig;
+use crate::epub::{validate_epub, EpubCompatibilityReport};
 use crate::error::{OmniDocError, Result};
 use crate::project_tools;
 use crate::utils::path;
@@ -171,10 +173,22 @@ fn build_project_once(
     let input_digest = project_tools::build_input_digest(project_path, &graph, &config, &output)?;
 
     let output_file = expected_output_file(project_path, &config, &output, &target);
-    if !run_options.force
+    let cache_candidate = !run_options.force
         && output_file.exists()
-        && project_tools::cache_hit(project_path, &output, &input_digest)
-    {
+        && project_tools::cache_hit(project_path, &output, &input_digest);
+    let cached_compatibility = if cache_candidate {
+        validate_output_compatibility(&output, &config, &output_file)
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+    let compatibility_required = configured_epub_profile(&output, &config).is_some();
+    let cached_compatibility_valid = !compatibility_required
+        || cached_compatibility
+            .as_ref()
+            .is_some_and(|report| report.valid);
+    if cache_candidate && cached_compatibility_valid {
         if verbose {
             println!("Skipping {} build; input cache is unchanged.", output);
         }
@@ -189,12 +203,15 @@ fn build_project_once(
                 graph: &graph,
                 config: &config,
                 artifact: &output_file,
+                compatibility: cached_compatibility,
                 issues,
             },
         ));
     }
 
-    let cache_reason = if run_options.force {
+    let cache_reason = if cache_candidate && !cached_compatibility_valid {
+        "artifact_compatibility_failed"
+    } else if run_options.force {
         "forced_rebuild"
     } else if !output_file.exists() {
         "artifact_missing"
@@ -222,6 +239,22 @@ fn build_project_once(
     let final_graph = project_tools::dependency_graph(project_path, &config);
     let final_input_digest =
         project_tools::build_input_digest(project_path, &final_graph, &config, &output)?;
+    let compatibility = validate_output_compatibility(&output, &config, &output_file)?;
+    if let Some(report) = &compatibility {
+        if !report.valid {
+            let failures = report
+                .checks
+                .iter()
+                .filter(|check| !check.passed)
+                .map(|check| format!("{}: {}", check.name, check.detail))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(OmniDocError::Project(format!(
+                "EPUB compatibility validation failed for profile '{}': {}",
+                report.profile, failures
+            )));
+        }
+    }
     project_tools::write_cache(project_path, &output, &final_input_digest)?;
     Ok(project_tools::build_report(
         project_tools::BuildReportContext {
@@ -234,9 +267,30 @@ fn build_project_once(
             graph: &final_graph,
             config: &config,
             artifact: &output_file,
+            compatibility,
             issues,
         },
     ))
+}
+
+fn configured_epub_profile<'a>(output: &str, config: &'a MergedConfig) -> Option<&'a str> {
+    matches!(
+        output.to_ascii_lowercase().as_str(),
+        "epub" | "epub2" | "epub3"
+    )
+    .then(|| config.theme_compatibility.as_deref())
+    .flatten()
+}
+
+fn validate_output_compatibility(
+    output: &str,
+    config: &MergedConfig,
+    artifact: &Path,
+) -> Result<Option<EpubCompatibilityReport>> {
+    let Some(profile) = configured_epub_profile(output, config) else {
+        return Ok(None);
+    };
+    validate_epub(artifact, profile).map(Some)
 }
 
 fn write_lock_for_reports(

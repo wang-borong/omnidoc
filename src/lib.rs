@@ -6,6 +6,7 @@ pub mod context;
 pub mod diagnostics;
 pub mod doc;
 pub mod doctype;
+pub mod epub;
 pub mod error;
 pub mod executor;
 pub mod fs;
