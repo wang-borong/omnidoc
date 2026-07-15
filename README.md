@@ -473,6 +473,16 @@ toolchain rather than only the Rust command-construction layer.
 The heavier PDF gate runs weekly, for version tags, and when manually
 dispatched.
 
+Official OmniDoc archives and Debian packages include
+`omnidoc-libs.toml`, a machine-readable release contract declaring the matching
+library version/tag, release archive URL, and external SHA-256 URL. CI compares
+that contract with OmniDoc's Cargo version and the checked-out
+`omnidoc-libs/manifest.toml` before packaging. Verify it locally with:
+
+```bash
+python3 scripts/check-library-contract.py ../omnidoc-libs
+```
+
 List discovered local plugins and external template manifests:
 
 ```bash
