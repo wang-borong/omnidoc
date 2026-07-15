@@ -47,12 +47,14 @@ lock="$work/book/omnidoc.lock"
 include_depfile="$work/book/.omnidoc-cache/include-files.d"
 include_code_depfile="$work/book/.omnidoc-cache/include-code-files.d"
 
-"$bin" theme validate engineering-book --check-fonts --json > "$work/theme.json"
+"$bin" theme validate engineering-book --check-fonts --check-latex --json > "$work/theme.json"
 jq -e '
   .[0]
   | .valid == true
     and .font_check_performed == true
     and (.missing_fonts | length == 0)
+    and .latex_check_performed == true
+    and (.missing_latex_packages | length == 0)
 ' "$work/theme.json" >/dev/null
 
 "$bin" build "$work/book" --to pdf --force --report --write-lock
@@ -85,6 +87,9 @@ jq -e '
     and (.toolchain["font:Noto Serif CJK SC"] | contains("digest=blake3:"))
     and (.toolchain["font:Noto Sans CJK SC"] | contains("digest=blake3:"))
     and (.toolchain["font:Noto Sans Mono CJK SC"] | contains("digest=blake3:"))
+    and (.toolchain["latex-package:fontspec"] | contains("digest=blake3:"))
+    and (.toolchain["latex-package:xeCJK"] | contains("digest=blake3:"))
+    and (.toolchain.tex_kpathsea | startswith("kpathsea version "))
 ' "$report" >/dev/null
 
 python3 - "$lock" <<'PY'
@@ -109,6 +114,10 @@ for family in {
     identity = toolchain.get(f"font:{family}", "")
     if "digest=blake3:" not in identity:
         raise SystemExit(f"missing locked font identity: {family}")
+for package in {"fontspec", "xeCJK", "tcolorbox", "tikz"}:
+    identity = toolchain.get(f"latex-package:{package}", "")
+    if "digest=blake3:" not in identity:
+        raise SystemExit(f"missing locked LaTeX package identity: {package}")
 dependencies = set(target.get("dependencies", []))
 for expected in {
     "assets/cover.pdf",

@@ -49,6 +49,8 @@ pub(crate) struct ThemeResources {
 pub(crate) struct ThemeRequirements {
     #[serde(default)]
     pub(crate) fonts: Vec<String>,
+    #[serde(default)]
+    pub(crate) system_latex_packages: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -66,6 +68,8 @@ struct ThemeReport {
     valid: bool,
     font_check_performed: bool,
     missing_fonts: Vec<String>,
+    latex_check_performed: bool,
+    missing_latex_packages: Vec<String>,
     errors: Vec<String>,
 }
 
@@ -74,21 +78,22 @@ pub fn handle_theme(subcommand: ThemeSubcommand) -> Result<()> {
     let library = configured_library_path(&global_config)?;
     match subcommand {
         ThemeSubcommand::List { json } => {
-            let reports = load_theme_reports(&library, false)?;
+            let reports = load_theme_reports(&library, false, false)?;
             print_reports(&reports, json, false)?;
         }
         ThemeSubcommand::Inspect { name, json } => {
-            let report = load_named_theme(&library, &name, false)?;
+            let report = load_named_theme(&library, &name, false, false)?;
             print_reports(std::slice::from_ref(&report), json, true)?;
         }
         ThemeSubcommand::Validate {
             name,
             json,
             check_fonts,
+            check_latex,
         } => {
             let reports = match name {
-                Some(name) => vec![load_named_theme(&library, &name, check_fonts)?],
-                None => load_theme_reports(&library, check_fonts)?,
+                Some(name) => vec![load_named_theme(&library, &name, check_fonts, check_latex)?],
+                None => load_theme_reports(&library, check_fonts, check_latex)?,
             };
             print_reports(&reports, json, false)?;
             ensure_valid(&reports)?;
@@ -97,7 +102,12 @@ pub fn handle_theme(subcommand: ThemeSubcommand) -> Result<()> {
     Ok(())
 }
 
-fn load_named_theme(library: &Path, name: &str, check_fonts: bool) -> Result<ThemeReport> {
+fn load_named_theme(
+    library: &Path,
+    name: &str,
+    check_fonts: bool,
+    check_latex: bool,
+) -> Result<ThemeReport> {
     if safe_relative_path(name).is_none() || name.contains('/') || name.contains('\\') {
         return Err(OmniDocError::Other(format!("invalid theme name: {}", name)));
     }
@@ -109,11 +119,11 @@ fn load_named_theme(library: &Path, name: &str, check_fonts: bool) -> Result<The
             library.join("themes").display()
         )));
     }
-    Ok(inspect_manifest(library, &path, check_fonts))
+    Ok(inspect_manifest(library, &path, check_fonts, check_latex))
 }
 
 pub(crate) fn load_theme_manifest(library: &Path, name: &str) -> Result<ThemeManifest> {
-    let report = load_named_theme(library, name, false)?;
+    let report = load_named_theme(library, name, false, false)?;
     if !report.valid {
         return Err(OmniDocError::Other(format!(
             "theme '{}' is invalid: {}",
@@ -126,7 +136,11 @@ pub(crate) fn load_theme_manifest(library: &Path, name: &str) -> Result<ThemeMan
     })
 }
 
-fn load_theme_reports(library: &Path, check_fonts: bool) -> Result<Vec<ThemeReport>> {
+fn load_theme_reports(
+    library: &Path,
+    check_fonts: bool,
+    check_latex: bool,
+) -> Result<Vec<ThemeReport>> {
     let directory = library.join("themes");
     if !directory.is_dir() {
         return Ok(Vec::new());
@@ -139,11 +153,16 @@ fn load_theme_reports(library: &Path, check_fonts: bool) -> Result<Vec<ThemeRepo
     paths.sort();
     Ok(paths
         .iter()
-        .map(|path| inspect_manifest(library, path, check_fonts))
+        .map(|path| inspect_manifest(library, path, check_fonts, check_latex))
         .collect())
 }
 
-fn inspect_manifest(library: &Path, path: &Path, check_fonts: bool) -> ThemeReport {
+fn inspect_manifest(
+    library: &Path,
+    path: &Path,
+    check_fonts: bool,
+    check_latex: bool,
+) -> ThemeReport {
     let relative_manifest = path
         .strip_prefix(library)
         .unwrap_or(path)
@@ -156,6 +175,8 @@ fn inspect_manifest(library: &Path, path: &Path, check_fonts: bool) -> ThemeRepo
         valid: false,
         font_check_performed: false,
         missing_fonts: Vec::new(),
+        latex_check_performed: false,
+        missing_latex_packages: Vec::new(),
         errors: Vec::new(),
     };
     if path
@@ -185,7 +206,14 @@ fn inspect_manifest(library: &Path, path: &Path, check_fonts: bool) -> ThemeRepo
             return report;
         }
     };
-    validate_manifest(library, path, &manifest, check_fonts, &mut report);
+    validate_manifest(
+        library,
+        path,
+        &manifest,
+        check_fonts,
+        check_latex,
+        &mut report,
+    );
     report.valid = report.errors.is_empty();
     report.theme = Some(manifest);
     report
@@ -196,6 +224,7 @@ fn validate_manifest(
     path: &Path,
     manifest: &ThemeManifest,
     check_fonts: bool,
+    check_latex: bool,
     report: &mut ThemeReport,
 ) {
     if manifest.manifest_version != THEME_MANIFEST_VERSION {
@@ -324,6 +353,24 @@ fn validate_manifest(
     if check_fonts && !manifest.requirements.fonts.is_empty() {
         validate_installed_fonts(&manifest.requirements.fonts, report);
     }
+    let mut packages = BTreeSet::new();
+    for package in &manifest.requirements.system_latex_packages {
+        let normalized = package.trim().to_ascii_lowercase();
+        if !valid_latex_package_name(package) {
+            report.errors.push(format!(
+                "invalid system LaTeX package requirement: {}",
+                package
+            ));
+        } else if !packages.insert(normalized) {
+            report.errors.push(format!(
+                "duplicate system LaTeX package requirement: {}",
+                package
+            ));
+        }
+    }
+    if check_latex && !manifest.requirements.system_latex_packages.is_empty() {
+        validate_installed_latex_packages(&manifest.requirements.system_latex_packages, report);
+    }
 }
 
 fn validate_installed_fonts(fonts: &[String], report: &mut ThemeReport) {
@@ -366,6 +413,40 @@ pub(crate) fn font_family_matches(requested: &str, families: &str) -> bool {
         .lines()
         .flat_map(|line| line.split(','))
         .any(|family| family.trim().eq_ignore_ascii_case(requested.trim()))
+}
+
+pub(crate) fn valid_latex_package_name(package: &str) -> bool {
+    !package.is_empty()
+        && package
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+}
+
+fn validate_installed_latex_packages(packages: &[String], report: &mut ThemeReport) {
+    report.latex_check_performed = true;
+    for package in packages
+        .iter()
+        .filter(|package| valid_latex_package_name(package))
+    {
+        let file = format!("{package}.sty");
+        let output = match Command::new("kpsewhich").args(["--", &file]).output() {
+            Ok(output) => output,
+            Err(error) => {
+                report.errors.push(format!(
+                    "cannot check LaTeX packages because kpsewhich failed: {}",
+                    error
+                ));
+                return;
+            }
+        };
+        if !output.status.success() || String::from_utf8_lossy(&output.stdout).trim().is_empty() {
+            report.missing_latex_packages.push(package.clone());
+            report.errors.push(format!(
+                "required system LaTeX package '{}' is not installed",
+                package
+            ));
+        }
+    }
 }
 
 fn safe_relative_path(relative: &str) -> Option<PathBuf> {
@@ -432,6 +513,10 @@ fn print_reports(reports: &[ThemeReport], json: bool, detailed: bool) -> Result<
                 );
                 println!("  Lua filters: {}", theme.resources.lua_filters.join(", "));
                 println!("  fonts: {}", theme.requirements.fonts.join(", "));
+                println!(
+                    "  system LaTeX packages: {}",
+                    theme.requirements.system_latex_packages.join(", ")
+                );
             }
         }
         for error in &report.errors {
@@ -458,7 +543,7 @@ fn ensure_valid(reports: &[ThemeReport]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{font_family_matches, safe_relative_path};
+    use super::{font_family_matches, safe_relative_path, valid_latex_package_name};
 
     #[test]
     fn rejects_unsafe_theme_paths() {
@@ -474,5 +559,13 @@ mod tests {
             "Noto Serif CJK SC,Noto Serif CJK SC Medium\n"
         ));
         assert!(!font_family_matches("OmniDoc Missing Font", "Noto Sans\n"));
+    }
+
+    #[test]
+    fn validates_portable_latex_package_names() {
+        assert!(valid_latex_package_name("tcolorbox"));
+        assert!(valid_latex_package_name("xeCJK"));
+        assert!(!valid_latex_package_name("../outside"));
+        assert!(!valid_latex_package_name("package.sty"));
     }
 }

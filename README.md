@@ -381,6 +381,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    omnidoc theme inspect engineering-book
    omnidoc theme validate engineering-book
    omnidoc theme validate engineering-book --check-fonts
+   omnidoc theme validate engineering-book --check-fonts --check-latex
    omnidoc theme validate --json       # validate every installed theme
    ```
 
@@ -400,6 +401,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
    [requirements]
    fonts = ["Noto Serif CJK SC"]
+   system_latex_packages = ["fontspec", "xeCJK", "tcolorbox"]
 
    [metadata.defaults]
    lang = "zh-CN"
@@ -409,7 +411,9 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    unsafe paths, and symbolic links in the bundle contract. `--check-fonts`
    additionally resolves every declared font family with fontconfig and rejects
    silent fallback matches; the Golden PDF gate requires this environment
-   check.
+   check. `--check-latex` resolves every declared system package with
+   `kpsewhich`. PDF lock/cache entries include the TeX distribution identity
+   plus each resolved `.sty` version, file name, and BLAKE3 digest.
 
 ### Project Quality and CI Commands
 

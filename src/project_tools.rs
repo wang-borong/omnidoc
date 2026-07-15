@@ -1,6 +1,6 @@
 use crate::build::pandoc::load_selected_theme;
 use crate::build::pandoc_policy::{is_supported_format_key, PandocOutputKind};
-use crate::cli::handlers::theme::font_family_matches;
+use crate::cli::handlers::theme::{font_family_matches, valid_latex_package_name};
 use crate::config::MergedConfig;
 use crate::constants::pandoc;
 use crate::epub::{is_supported_epub_profile, EpubCompatibilityReport};
@@ -1618,9 +1618,16 @@ fn toolchain_versions(config: &MergedConfig, output: &str) -> BTreeMap<String, S
     let output_kind = PandocOutputKind::from_requested(Some(output)).ok();
     if output_kind == Some(PandocOutputKind::Pdf) {
         versions.insert("latex_engine".to_string(), command_version(&latex_engine));
+        versions.insert("tex_kpathsea".to_string(), command_version("kpsewhich"));
         if let Ok(Some(theme)) = load_selected_theme(config) {
             for font in theme.requirements.fonts {
                 versions.insert(format!("font:{font}"), font_identity(&font));
+            }
+            for package in theme.requirements.system_latex_packages {
+                versions.insert(
+                    format!("latex-package:{package}"),
+                    latex_package_identity(&package),
+                );
             }
         }
     }
@@ -1667,6 +1674,38 @@ fn font_identity(requested: &str) -> String {
         .unwrap_or("unknown");
     let digest = content_digest(path).unwrap_or_else(|_| "unavailable".to_string());
     format!("family={family};style={style};fontversion={version};file={file};digest={digest}")
+}
+
+fn latex_package_identity(package: &str) -> String {
+    if !valid_latex_package_name(package) {
+        return "invalid".to_string();
+    }
+    let file = format!("{package}.sty");
+    let output = match Command::new("kpsewhich").args(["--", &file]).output() {
+        Ok(output) if output.status.success() => output,
+        _ => return "missing".to_string(),
+    };
+    let path_text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let path = Path::new(&path_text);
+    if !path.is_file() {
+        return "missing".to_string();
+    }
+    let version = fs::read_to_string(path)
+        .ok()
+        .and_then(|content| {
+            regex::Regex::new(r"(?m)\\Provides(?:Expl)?Package\{[^}]+\}\s*\[([^]]+)\]")
+                .ok()?
+                .captures(&content)
+                .and_then(|captures| captures.get(1))
+                .map(|value| value.as_str().trim().to_string())
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+    let resolved_file = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown");
+    let digest = content_digest(path).unwrap_or_else(|_| "unavailable".to_string());
+    format!("version={version};file={resolved_file};digest={digest}")
 }
 
 fn configured_tool(config: &MergedConfig, key: &str, fallback: &str) -> String {

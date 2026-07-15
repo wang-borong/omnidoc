@@ -496,6 +496,10 @@ pub enum ThemeSubcommand {
         /// verify required font families with fontconfig
         #[arg(long)]
         check_fonts: bool,
+
+        /// verify required system LaTeX packages with kpsewhich
+        #[arg(long)]
+        check_latex: bool,
     },
 }
 
