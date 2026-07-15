@@ -3,7 +3,7 @@ use crate::config::global::GlobalConfig;
 use crate::config::project::ProjectConfig;
 use crate::config::schema::*;
 use crate::error::Result;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::path::Path;
 
@@ -39,6 +39,7 @@ pub struct MergedConfig {
     pub figure_paths: Vec<String>,
     pub figure_output: Option<String>,
     pub pandoc_options: Vec<String>,
+    pub pandoc_format_options: BTreeMap<String, Vec<String>>,
     pub pandoc_css: Option<String>,
     pub pandoc_reference_doc: Option<String>,
     pub pandoc_epub_css: Option<String>,
@@ -241,6 +242,12 @@ impl ConfigManager {
         let pandoc_options = pandoc_config
             .and_then(|p| p.options.clone())
             .unwrap_or_default();
+        let pandoc_format_options = pandoc_config
+            .and_then(|p| p.format_options.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(format, options)| (format.trim().to_ascii_lowercase(), options))
+            .collect();
 
         let pandoc_css = pandoc_config.and_then(|p| p.css.clone());
         let pandoc_reference_doc = pandoc_config.and_then(|p| p.reference_doc.clone());
@@ -355,6 +362,7 @@ impl ConfigManager {
             figure_paths,
             figure_output,
             pandoc_options,
+            pandoc_format_options,
             pandoc_css,
             pandoc_reference_doc,
             pandoc_epub_css,

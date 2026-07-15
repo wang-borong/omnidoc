@@ -758,6 +758,10 @@ pub fn build_input_digest(
         ("figure_paths", format!("{:?}", config.figure_paths)),
         ("figure_output", format!("{:?}", config.figure_output)),
         ("pandoc_options", format!("{:?}", config.pandoc_options)),
+        (
+            "pandoc_format_options",
+            format!("{:?}", config.pandoc_format_options),
+        ),
         ("pandoc_css", format!("{:?}", config.pandoc_css)),
         (
             "pandoc_reference_doc",

@@ -353,11 +353,15 @@ impl ConverterService {
             options.push(resource_path);
         }
 
+        let format_key = pandoc_format_key(to_format);
+        let format_options = self.config.pandoc_format_options.get(format_key);
+
         if to_format.is_some_and(|format| format.starts_with("html"))
             && !self
                 .config
                 .pandoc_options
                 .iter()
+                .chain(format_options.into_iter().flatten())
                 .any(|option| is_html_math_option(option))
         {
             options.push("--mathml".to_string());
@@ -365,6 +369,9 @@ impl ConverterService {
 
         // 添加配置的额外选项
         options.extend(self.config.pandoc_options.clone());
+        if let Some(format_options) = format_options {
+            options.extend(format_options.clone());
+        }
 
         // 输入和输出
         options.push(input.to_string_lossy().to_string());
@@ -396,6 +403,17 @@ fn is_html_math_option(option: &str) -> bool {
     ["--mathml", "--mathjax", "--katex", "--webtex", "--gladtex"]
         .iter()
         .any(|flag| option == *flag || option.starts_with(&format!("{}=", flag)))
+}
+
+fn pandoc_format_key(to_format: Option<&str>) -> &'static str {
+    match to_format.map(|format| format.to_ascii_lowercase()) {
+        None => "pdf",
+        Some(format) if format.starts_with("html") => "html",
+        Some(format) if format.starts_with("epub") => "epub",
+        Some(format) if format == "docx" => "docx",
+        Some(format) if format == "latex" || format == "tex" => "latex",
+        Some(_) => "",
+    }
 }
 
 fn resolve_shared_css(configured: &str, omnidoc_lib: &str) -> PathBuf {

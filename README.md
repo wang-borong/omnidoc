@@ -210,6 +210,12 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    epub_template = "templates/book.html"
    reference_doc = "templates/reference.docx"
    epub_css = "styles/epub.css"
+
+   [pandoc.format_options]
+   # Writer-specific options are appended after common `pandoc.options`.
+   # This is useful when the same setting has different semantics by writer.
+   epub = ["--toc-depth=3"]
+   pdf = ["--toc-depth=1"]
    ```
 
    `template` is still accepted as a generic fallback for template-capable outputs. DOCX uses `reference_doc` instead of Pandoc `--template`.

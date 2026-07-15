@@ -81,6 +81,16 @@ impl PandocOutputKind {
     fn supports_standalone(self) -> bool {
         !matches!(self, Self::Docx)
     }
+
+    fn config_key(self) -> &'static str {
+        match self {
+            Self::Pdf => "pdf",
+            Self::Html => "html",
+            Self::Epub => "epub",
+            Self::Docx => "docx",
+            Self::Latex => "latex",
+        }
+    }
 }
 
 /// Pandoc 构建器
@@ -191,7 +201,7 @@ impl PandocBuilder {
         self.push_math_output(&mut options, output_kind);
         self.push_metadata(&mut options, &omnidoc_lib);
 
-        options.extend(self.config.pandoc_options.clone());
+        self.push_configured_options(&mut options, output_kind);
 
         options.push(entry_file.to_string_lossy().to_string());
         options.push(pandoc::FLAG_OUTPUT.to_string());
@@ -240,6 +250,17 @@ impl PandocBuilder {
                 pandoc::LIB_PANDOC_FILTERS,
                 filter
             ));
+        }
+    }
+
+    fn push_configured_options(&self, options: &mut Vec<String>, output_kind: PandocOutputKind) {
+        options.extend(self.config.pandoc_options.clone());
+        if let Some(format_options) = self
+            .config
+            .pandoc_format_options
+            .get(output_kind.config_key())
+        {
+            options.extend(format_options.clone());
         }
     }
 
@@ -327,6 +348,13 @@ impl PandocBuilder {
             .config
             .pandoc_options
             .iter()
+            .chain(
+                self.config
+                    .pandoc_format_options
+                    .get(output_kind.config_key())
+                    .into_iter()
+                    .flatten(),
+            )
             .any(|option| is_html_math_option(option))
         {
             return;
@@ -505,6 +533,7 @@ mod tests {
     use super::{resolve_css_path, PandocOutputKind};
     use crate::build::pandoc::PandocBuilder;
     use crate::config::MergedConfig;
+    use std::collections::BTreeMap;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -534,6 +563,25 @@ mod tests {
             PandocOutputKind::from_config(&config).expect("output kind"),
             PandocOutputKind::Latex
         );
+    }
+
+    #[test]
+    fn appends_only_the_selected_formats_options_after_common_options() {
+        let builder = PandocBuilder::new(MergedConfig {
+            pandoc_options: vec!["--toc-depth=1".to_string()],
+            pandoc_format_options: BTreeMap::from([
+                ("epub".to_string(), vec!["--toc-depth=3".to_string()]),
+                ("pdf".to_string(), vec!["--pdf-option".to_string()]),
+            ]),
+            ..Default::default()
+        })
+        .expect("pandoc builder");
+        let mut options = Vec::new();
+
+        builder.push_configured_options(&mut options, PandocOutputKind::Epub);
+
+        assert_eq!(options, vec!["--toc-depth=1", "--toc-depth=3"]);
+        assert!(!options.iter().any(|option| option == "--pdf-option"));
     }
 
     #[test]

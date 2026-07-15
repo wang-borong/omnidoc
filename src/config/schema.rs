@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// 配置结构定义
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -135,6 +136,10 @@ pub struct PandocConfig {
 pub struct PandocSection {
     /// Pandoc 额外选项列表（会被追加到默认选项之后）
     pub options: Option<Vec<String>>,
+    /// Per-output Pandoc options keyed by pdf/html/epub/docx/latex.
+    /// These are appended after the common options so a format can override
+    /// settings whose depth semantics differ between writers.
+    pub format_options: Option<BTreeMap<String, Vec<String>>>,
     /// CSS 文件路径（用于 HTML 输出）
     pub css: Option<String>,
     /// DOCX reference document path
