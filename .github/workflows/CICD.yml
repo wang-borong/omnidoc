@@ -19,6 +19,8 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CICD_INTERMEDIATES_DIR: _cicd-intermediates
+  PANDOC_VERSION: '3.10'
+  PANDOC_CROSSREF_VERSION: '0.3.24'
 
 jobs:
   all-jobs:
@@ -28,6 +30,7 @@ jobs:
     needs:
       - crate-metadata
       - quality
+      - golden-book
       - msrv
       - audit
       - package
@@ -93,6 +96,39 @@ jobs:
           cargo run --locked -- lock --help
           cargo run --locked -- lib --help
           cargo run --locked -- plugin --help
+
+  golden-book:
+    name: Golden Book (HTML and EPUB)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: wang-borong/omnidoc-libs
+          path: omnidoc-libs
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: pandoc/actions/setup@v1
+        with:
+          version: ${{ env.PANDOC_VERSION }}
+      - name: Install integration dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y epubcheck jq libssl-dev pkg-config ripgrep unzip xz-utils
+          curl --fail --location --retry 3 \
+            --output /tmp/pandoc-crossref.tar.xz \
+            "https://github.com/lierdakil/pandoc-crossref/releases/download/v${PANDOC_CROSSREF_VERSION}/pandoc-crossref-Linux-X64.tar.xz"
+          tar --extract --xz --file /tmp/pandoc-crossref.tar.xz --directory /tmp pandoc-crossref
+          sudo install -m 0755 /tmp/pandoc-crossref /usr/local/bin/pandoc-crossref
+      - name: Report document toolchain
+        run: |
+          pandoc --version
+          pandoc-crossref --version
+          epubcheck --version
+      - name: Build and verify Golden Book
+        env:
+          OMNIDOC_LIBS: ${{ github.workspace }}/omnidoc-libs
+        run: scripts/check-golden-book.sh
 
   msrv:
     name: Minimum supported Rust version

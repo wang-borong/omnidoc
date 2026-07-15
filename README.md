@@ -388,6 +388,10 @@ display-math layout, repeated heading IDs, packaged CSS/images, lock/report
 digests, and shared-resource cache invalidation. It also runs EPUBCheck when the
 `epubcheck` executable is installed.
 
+GitHub Actions runs the same gate with pinned Pandoc and pandoc-crossref
+versions and requires EPUBCheck, so pull requests exercise the real HTML/EPUB
+toolchain rather than only the Rust command-construction layer.
+
 List discovered local plugins and external template manifests:
 
 ```bash
