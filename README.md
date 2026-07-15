@@ -273,7 +273,11 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    paths and records the byte size and BLAKE3 digest of every copied artifact.
    It also embeds and publishes `omnidoc-libs.toml`, binding the document
    release to the compatible library archive and checksum. Use `--no-build` to
-   publish existing build outputs.
+   publish existing build outputs. Publication is transactional: files are
+   assembled and hashed in a sibling staging directory, then replace the final
+   tag directory only after the complete manifest is written. Failed publishes
+   preserve the previous release, while successful republishes remove stale
+   artifacts.
 
 6. **Open the built PDF document**
 

@@ -34,6 +34,91 @@ struct PublishManifest {
 
 const LIBRARY_RELEASE_CONTRACT: &str = include_str!("../../../release/omnidoc-libs.toml");
 
+struct PublishTransaction {
+    final_dir: PathBuf,
+    staging_dir: PathBuf,
+    backup_dir: PathBuf,
+    committed: bool,
+}
+
+impl PublishTransaction {
+    fn new(final_dir: PathBuf) -> Result<Self> {
+        let parent = final_dir.parent().ok_or_else(|| {
+            OmniDocError::Other(format!(
+                "publish directory has no parent: {}",
+                final_dir.display()
+            ))
+        })?;
+        fs::create_dir_all(parent)?;
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let name = final_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("release");
+        let suffix = format!("{}.{nonce}", std::process::id());
+        let staging_dir = final_dir.with_file_name(format!(".{name}.staging.{suffix}"));
+        let backup_dir = final_dir.with_file_name(format!(".{name}.backup.{suffix}"));
+        fs::create_dir(&staging_dir)?;
+        Ok(Self {
+            final_dir,
+            staging_dir,
+            backup_dir,
+            committed: false,
+        })
+    }
+
+    fn path(&self) -> &Path {
+        &self.staging_dir
+    }
+
+    fn commit(mut self) -> Result<PathBuf> {
+        let had_existing = self.final_dir.exists();
+        if had_existing {
+            fs::rename(&self.final_dir, &self.backup_dir)?;
+        }
+        if let Err(error) = fs::rename(&self.staging_dir, &self.final_dir) {
+            if had_existing {
+                if let Err(restore_error) = fs::rename(&self.backup_dir, &self.final_dir) {
+                    return Err(OmniDocError::Other(format!(
+                        "failed to publish release ({error}); failed to restore previous release ({restore_error})"
+                    )));
+                }
+            }
+            return Err(error.into());
+        }
+        self.committed = true;
+        if had_existing {
+            if let Err(error) = remove_path(&self.backup_dir) {
+                eprintln!(
+                    "Warning: release published but old backup could not be removed: {} ({})",
+                    self.backup_dir.display(),
+                    error
+                );
+            }
+        }
+        Ok(self.final_dir.clone())
+    }
+}
+
+impl Drop for PublishTransaction {
+    fn drop(&mut self) {
+        if !self.committed && self.staging_dir.exists() {
+            let _ = remove_path(&self.staging_dir);
+        }
+    }
+}
+
+fn remove_path(path: &Path) -> std::io::Result<()> {
+    if path.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn handle_publish(
     path: Option<String>,
@@ -86,24 +171,21 @@ pub fn handle_publish(
             .to_string()
     });
     let tag = tag.unwrap_or_else(|| target.clone());
-    let publish_dir = resolve_publish_dir(&project_path, &dist_dir).join(sanitize_path_part(&tag));
-    fs::create_dir_all(&publish_dir)?;
+    let final_publish_dir =
+        resolve_publish_dir(&project_path, &dist_dir).join(sanitize_path_part(&tag));
+    let transaction = PublishTransaction::new(final_publish_dir)?;
+    let publish_dir = transaction.path();
 
     let mut artifacts = Vec::new();
     for output in outputs {
         let source = expected_output_file(&project_path, &config, &output, &target);
-        artifacts.push(copy_artifact(
-            &project_path,
-            &source,
-            &publish_dir,
-            &output,
-        )?);
+        artifacts.push(copy_artifact(&project_path, &source, publish_dir, &output)?);
     }
 
     if let Some(lock_artifact) = copy_optional_sidecar(
         &project_path,
         &project_path.join("omnidoc.lock"),
-        &publish_dir,
+        publish_dir,
         "lock",
     )? {
         artifacts.push(lock_artifact);
@@ -116,14 +198,14 @@ pub fn handle_publish(
         .unwrap_or_else(|| project_path.join("build"))
         .join("omnidoc-report.json");
     if let Some(report_artifact) =
-        copy_optional_sidecar(&project_path, &report_path, &publish_dir, "report")?
+        copy_optional_sidecar(&project_path, &report_path, publish_dir, "report")?
     {
         artifacts.push(report_artifact);
     }
 
     artifacts.push(write_embedded_artifact(
         LIBRARY_RELEASE_CONTRACT,
-        &publish_dir,
+        publish_dir,
         "omnidoc-libs.toml",
         "library-contract",
     )?);
@@ -153,6 +235,7 @@ pub fn handle_publish(
         .map_err(|err| OmniDocError::Other(err.to_string()))?;
     fs::write(publish_dir.join("omnidoc-publish.json"), manifest_content)?;
 
+    let publish_dir = transaction.commit()?;
     println!("Published artifacts to {}", publish_dir.display());
     Ok(())
 }

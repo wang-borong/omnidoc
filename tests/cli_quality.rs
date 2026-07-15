@@ -365,6 +365,9 @@ fn formatter_is_conservative_and_idempotent_on_structured_markdown() {
 fn publish_no_build_copies_existing_artifacts() {
     let fixture = Fixture::new("publish");
     let project = fixture.project_arg();
+    let publish_dir = fixture.project.join("dist").join("release-1");
+    fs::create_dir_all(&publish_dir).expect("old publish directory");
+    fs::write(publish_dir.join("stale.txt"), "stale\n").expect("stale artifact");
 
     assert_success(fixture.command(&[
         "publish",
@@ -376,8 +379,8 @@ fn publish_no_build_copies_existing_artifacts() {
         &project,
     ]));
 
-    let publish_dir = fixture.project.join("dist").join("release-1");
     assert!(Path::new(&publish_dir.join("smoke.html")).exists());
+    assert!(!publish_dir.join("stale.txt").exists());
     let manifest = fs::read_to_string(publish_dir.join("omnidoc-publish.json")).expect("manifest");
     let manifest: serde_json::Value = serde_json::from_str(&manifest).expect("publish JSON");
     assert_eq!(manifest["manifest_version"], 2);
@@ -395,6 +398,34 @@ fn publish_no_build_copies_existing_artifacts() {
         artifact["output"] == "library-contract" && artifact["destination"] == "omnidoc-libs.toml"
     }));
     assert!(publish_dir.join("omnidoc-libs.toml").is_file());
+}
+
+#[test]
+fn failed_publish_preserves_existing_release_directory() {
+    let fixture = Fixture::new("publish-failure");
+    let project = fixture.project_arg();
+    let publish_dir = fixture.project.join("dist").join("stable");
+    fs::create_dir_all(&publish_dir).expect("existing publish directory");
+    fs::write(publish_dir.join("marker.txt"), "preserve\n").expect("release marker");
+
+    assert_failure(fixture.command(&[
+        "publish",
+        "--to",
+        "epub",
+        "--no-build",
+        "--tag",
+        "stable",
+        &project,
+    ]));
+
+    assert_eq!(
+        fs::read_to_string(publish_dir.join("marker.txt")).expect("preserved marker"),
+        "preserve\n"
+    );
+    assert!(!fs::read_dir(fixture.project.join("dist"))
+        .expect("dist directory")
+        .flatten()
+        .any(|entry| entry.file_name().to_string_lossy().contains(".staging.")));
 }
 
 #[cfg(unix)]
