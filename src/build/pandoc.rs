@@ -16,6 +16,34 @@ pub struct PandocBuilder {
     config: MergedConfig,
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) enum PandocCommandProfile {
+    #[default]
+    Project,
+    StandalonePdf {
+        use_cn: bool,
+    },
+    StandaloneHtml {
+        css: Option<PathBuf>,
+    },
+}
+
+impl PandocCommandProfile {
+    fn default_from_format(&self) -> &'static str {
+        match self {
+            Self::StandaloneHtml { .. } => pandoc::DEFAULT_FROM_HTML,
+            Self::Project | Self::StandalonePdf { .. } => pandoc::DEFAULT_FROM_PDF,
+        }
+    }
+
+    fn resource_library_dir(&self) -> &'static str {
+        match self {
+            Self::StandaloneHtml { .. } => pandoc::LIB_PANDOC_HEADERS,
+            Self::Project | Self::StandalonePdf { .. } => pandoc::LIB_PANDOC_CSL,
+        }
+    }
+}
+
 impl PandocBuilder {
     pub fn new(config: MergedConfig) -> Result<Self> {
         let executor = BuildExecutor::new(config.tool_paths.clone());
@@ -23,11 +51,12 @@ impl PandocBuilder {
     }
 
     /// 构建 Pandoc 选项
-    fn build_pandoc_options(
+    pub(crate) fn build_command_options(
         &self,
         entry_file: &Path,
         output_file: &Path,
         output_kind: PandocOutputKind,
+        profile: &PandocCommandProfile,
     ) -> Result<Vec<String>> {
         let mut options = Vec::new();
 
@@ -36,7 +65,7 @@ impl PandocBuilder {
             .config
             .pandoc_from_format
             .clone()
-            .unwrap_or_else(|| pandoc::DEFAULT_FROM_PDF.to_string());
+            .unwrap_or_else(|| profile.default_from_format().to_string());
         options.push(from_format);
 
         if let Some(default_to) = output_kind.default_to_format() {
@@ -105,17 +134,17 @@ impl PandocBuilder {
             format!(
                 ".:{}/{}{}",
                 omnidoc_lib,
-                pandoc::LIB_PANDOC_CSL,
+                profile.resource_library_dir(),
                 pandoc::RESOURCE_PATH_COMMON_SUFFIX
             )
         };
         options.push(resource_path);
 
         self.push_template(&mut options, output_kind);
-        self.push_css(&mut options, output_kind, &omnidoc_lib);
+        self.push_css(&mut options, output_kind, &omnidoc_lib, profile);
         self.push_format_assets(&mut options, output_kind, &omnidoc_lib);
         self.push_math_output(&mut options, output_kind);
-        self.push_metadata(&mut options, &omnidoc_lib);
+        self.push_metadata(&mut options, &omnidoc_lib, profile);
 
         self.push_configured_options(&mut options, output_kind);
 
@@ -179,13 +208,20 @@ impl PandocBuilder {
         options: &mut Vec<String>,
         output_kind: PandocOutputKind,
         omnidoc_lib: &str,
+        profile: &PandocCommandProfile,
     ) {
         if output_kind != PandocOutputKind::Html {
             return;
         }
 
+        let configured = match profile {
+            PandocCommandProfile::StandaloneHtml { css: Some(css) } => {
+                Some(css.to_string_lossy().to_string())
+            }
+            _ => self.config.pandoc_css.clone(),
+        };
         let css_path = resolve_css_path(
-            self.config.pandoc_css.as_deref(),
+            configured.as_deref(),
             omnidoc_lib,
             pandoc::LIB_PANDOC_CSS_DEFAULT,
         );
@@ -236,7 +272,29 @@ impl PandocBuilder {
         options.push("--mathml".to_string());
     }
 
-    fn push_metadata(&self, options: &mut Vec<String>, omnidoc_lib: &str) {
+    fn push_metadata(
+        &self,
+        options: &mut Vec<String>,
+        omnidoc_lib: &str,
+        profile: &PandocCommandProfile,
+    ) {
+        match profile {
+            PandocCommandProfile::StandalonePdf { use_cn: true } => {
+                self.push_crossref_yaml(options, omnidoc_lib, pandoc::LIB_PANDOC_CROSSREF_YAML);
+                return;
+            }
+            PandocCommandProfile::StandalonePdf { use_cn: false } => return,
+            PandocCommandProfile::StandaloneHtml { .. } => {
+                self.push_crossref_yaml(
+                    options,
+                    omnidoc_lib,
+                    pandoc::LIB_PANDOC_CROSSREF_YAML_HTML,
+                );
+                return;
+            }
+            PandocCommandProfile::Project => {}
+        }
+
         let has_metadata_file = self.config.metadata_file.is_some();
         if let Some(metadata_file) = &self.config.metadata_file {
             options.push("--metadata-file".to_string());
@@ -245,11 +303,7 @@ impl PandocBuilder {
 
         if let Some(lang) = &self.config.pandoc_lang {
             if lang != "en" {
-                let crossref_yaml = self.config.pandoc_crossref_yaml.clone().unwrap_or_else(|| {
-                    format!("{}/{}", omnidoc_lib, pandoc::LIB_PANDOC_CROSSREF_YAML)
-                });
-                options.push(pandoc::FLAG_META_SHORT.to_string());
-                options.push(format!("crossrefYaml={}", crossref_yaml));
+                self.push_crossref_yaml(options, omnidoc_lib, pandoc::LIB_PANDOC_CROSSREF_YAML);
             }
         }
 
@@ -270,6 +324,16 @@ impl PandocBuilder {
         if self.config.verbose {
             options.push("--verbose".to_string());
         }
+    }
+
+    fn push_crossref_yaml(&self, options: &mut Vec<String>, omnidoc_lib: &str, fallback: &str) {
+        let crossref_yaml = self
+            .config
+            .pandoc_crossref_yaml
+            .clone()
+            .unwrap_or_else(|| format!("{}/{}", omnidoc_lib, fallback));
+        options.push(pandoc::FLAG_META_SHORT.to_string());
+        options.push(format!("crossrefYaml={}", crossref_yaml));
     }
 
     fn get_omnidoc_lib_path(&self) -> String {
@@ -350,7 +414,12 @@ impl BuildPipeline for PandocBuilder {
 
         let output_kind = PandocOutputKind::from_config(&self.config)?;
         let output_file = outdir.join(format!("{}.{}", target_name, output_kind.extension()));
-        let options = self.build_pandoc_options(&entry_file, &output_file, output_kind)?;
+        let options = self.build_command_options(
+            &entry_file,
+            &output_file,
+            output_kind,
+            &PandocCommandProfile::Project,
+        )?;
 
         let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
         if let Err(err) = self.executor.execute(pandoc::CMD, &args[..], verbose) {
@@ -396,7 +465,7 @@ impl BuildPipeline for PandocBuilder {
 #[cfg(test)]
 mod tests {
     use super::resolve_css_path;
-    use crate::build::pandoc::PandocBuilder;
+    use crate::build::pandoc::{PandocBuilder, PandocCommandProfile};
     use crate::build::pandoc_policy::PandocOutputKind;
     use crate::config::MergedConfig;
     use std::collections::BTreeMap;
@@ -519,6 +588,7 @@ mod tests {
             &mut options,
             PandocOutputKind::Epub,
             library.to_str().expect("library path"),
+            &PandocCommandProfile::Project,
         );
         builder.push_format_assets(
             &mut options,
@@ -547,7 +617,11 @@ mod tests {
         let builder = PandocBuilder::new(config).expect("pandoc builder");
         let mut options = Vec::new();
 
-        builder.push_metadata(&mut options, "/tmp/omnidoc-libs");
+        builder.push_metadata(
+            &mut options,
+            "/tmp/omnidoc-libs",
+            &PandocCommandProfile::Project,
+        );
 
         assert!(options.windows(2).any(|pair| pair
             == [
@@ -581,5 +655,68 @@ mod tests {
         let mut explicit_options = Vec::new();
         explicit.push_math_output(&mut explicit_options, PandocOutputKind::Html);
         assert!(explicit_options.is_empty());
+    }
+
+    #[test]
+    fn standalone_html_uses_the_shared_command_builder_profile() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let css = root.path().join("standalone.css");
+        fs::write(&css, "body { color: navy; }\n").expect("css");
+        let builder = PandocBuilder::new(MergedConfig {
+            lib_path: Some(root.path().to_string_lossy().to_string()),
+            pandoc_format_options: BTreeMap::from([(
+                "html".to_string(),
+                vec!["--mathjax".to_string(), "--toc-depth=3".to_string()],
+            )]),
+            ..Default::default()
+        })
+        .expect("builder");
+
+        let options = builder
+            .build_command_options(
+                std::path::Path::new("input.md"),
+                std::path::Path::new("output.html"),
+                PandocOutputKind::Html,
+                &PandocCommandProfile::StandaloneHtml {
+                    css: Some(css.clone()),
+                },
+            )
+            .expect("options");
+
+        assert!(options.windows(2).any(|pair| pair == ["-f", "markdown"]));
+        assert!(options.windows(2).any(|pair| pair == ["-t", "html"]));
+        assert!(options
+            .windows(2)
+            .any(|pair| pair == ["--css", css.to_string_lossy().as_ref()]));
+        assert!(options.iter().any(|option| option == "--mathjax"));
+        assert!(!options.iter().any(|option| option == "--mathml"));
+        assert!(options
+            .iter()
+            .any(|option| option.contains("pandoc/headers")));
+        assert!(options
+            .iter()
+            .any(|option| option.contains("pandoc/data/crossref.yaml")));
+    }
+
+    #[test]
+    fn standalone_pdf_profile_controls_crossref_metadata() {
+        let builder = PandocBuilder::new(MergedConfig::default()).expect("builder");
+        let mut chinese = Vec::new();
+        builder.push_metadata(
+            &mut chinese,
+            "/tmp/omnidoc-libs",
+            &PandocCommandProfile::StandalonePdf { use_cn: true },
+        );
+        assert!(chinese
+            .iter()
+            .any(|option| option.contains("pandoc/crossref.yaml")));
+
+        let mut english = Vec::new();
+        builder.push_metadata(
+            &mut english,
+            "/tmp/omnidoc-libs",
+            &PandocCommandProfile::StandalonePdf { use_cn: false },
+        );
+        assert!(english.is_empty());
     }
 }
