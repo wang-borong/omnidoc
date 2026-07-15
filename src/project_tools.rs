@@ -1222,7 +1222,7 @@ fn hash_path(path: &Path, hasher: &mut Hasher) -> Result<()> {
     Ok(())
 }
 
-fn content_digest(path: &Path) -> Result<String> {
+pub(crate) fn content_digest(path: &Path) -> Result<String> {
     let mut hasher = Hasher::new();
     hash_path(path, &mut hasher)?;
     Ok(format_digest(hasher.finalize()))

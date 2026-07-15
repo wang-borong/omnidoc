@@ -267,7 +267,13 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    omnidoc publish [PATH] [--to <FORMAT>] [--all] [--tag <TAG>] [--dist-dir dist]
    ```
 
-   `publish` builds by default, writes `omnidoc.lock` and `build/omnidoc-report.json`, then copies generated artifacts into `dist/<tag-or-target>/` with an `omnidoc-publish.json` manifest. Use `--no-build` to publish existing build outputs.
+   `publish` builds by default, writes `omnidoc.lock` and
+   `build/omnidoc-report.json`, then copies generated artifacts into
+   `dist/<tag-or-target>/`. The v2 `omnidoc-publish.json` manifest uses portable
+   paths and records the byte size and BLAKE3 digest of every copied artifact.
+   It also embeds and publishes `omnidoc-libs.toml`, binding the document
+   release to the compatible library archive and checksum. Use `--no-build` to
+   publish existing build outputs.
 
 6. **Open the built PDF document**
 

@@ -379,8 +379,22 @@ fn publish_no_build_copies_existing_artifacts() {
     let publish_dir = fixture.project.join("dist").join("release-1");
     assert!(Path::new(&publish_dir.join("smoke.html")).exists());
     let manifest = fs::read_to_string(publish_dir.join("omnidoc-publish.json")).expect("manifest");
-    assert!(manifest.contains("\"tag\": \"release/1\""));
-    assert!(manifest.contains("smoke.html"));
+    let manifest: serde_json::Value = serde_json::from_str(&manifest).expect("publish JSON");
+    assert_eq!(manifest["manifest_version"], 2);
+    assert_eq!(manifest["tag"], "release/1");
+    assert_eq!(manifest["library_contract"]["library"]["version"], "1.0.0");
+    let artifacts = manifest["artifacts"].as_array().expect("publish artifacts");
+    assert!(artifacts.iter().any(|artifact| {
+        artifact["destination"] == "smoke.html"
+            && artifact["source"] == "build/smoke.html"
+            && artifact["digest"]
+                .as_str()
+                .is_some_and(|digest| digest.starts_with("blake3:"))
+    }));
+    assert!(artifacts.iter().any(|artifact| {
+        artifact["output"] == "library-contract" && artifact["destination"] == "omnidoc-libs.toml"
+    }));
+    assert!(publish_dir.join("omnidoc-libs.toml").is_file());
 }
 
 #[cfg(unix)]

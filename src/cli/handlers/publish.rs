@@ -4,6 +4,7 @@ use crate::cli::handlers::build::{
 };
 use crate::cli::handlers::common::create_config_manager;
 use crate::error::{OmniDocError, Result};
+use crate::project_tools::content_digest;
 use crate::utils::path;
 use serde::Serialize;
 use std::fs;
@@ -16,17 +17,22 @@ struct PublishArtifact {
     source: String,
     destination: String,
     bytes: u64,
+    digest: String,
 }
 
 #[derive(Debug, Serialize)]
 struct PublishManifest {
+    manifest_version: u32,
     omnidoc_version: String,
     project: String,
     target: String,
     tag: String,
     published_at_unix: u64,
+    library_contract: toml::Value,
     artifacts: Vec<PublishArtifact>,
 }
+
+const LIBRARY_RELEASE_CONTRACT: &str = include_str!("../../../release/omnidoc-libs.toml");
 
 #[allow(clippy::too_many_arguments)]
 pub fn handle_publish(
@@ -86,12 +92,20 @@ pub fn handle_publish(
     let mut artifacts = Vec::new();
     for output in outputs {
         let source = expected_output_file(&project_path, &config, &output, &target);
-        artifacts.push(copy_artifact(&source, &publish_dir, &output)?);
+        artifacts.push(copy_artifact(
+            &project_path,
+            &source,
+            &publish_dir,
+            &output,
+        )?);
     }
 
-    if let Some(lock_artifact) =
-        copy_optional_sidecar(&project_path.join("omnidoc.lock"), &publish_dir, "lock")?
-    {
+    if let Some(lock_artifact) = copy_optional_sidecar(
+        &project_path,
+        &project_path.join("omnidoc.lock"),
+        &publish_dir,
+        "lock",
+    )? {
         artifacts.push(lock_artifact);
     }
 
@@ -101,19 +115,38 @@ pub fn handle_publish(
         .map(|outdir| project_path.join(outdir))
         .unwrap_or_else(|| project_path.join("build"))
         .join("omnidoc-report.json");
-    if let Some(report_artifact) = copy_optional_sidecar(&report_path, &publish_dir, "report")? {
+    if let Some(report_artifact) =
+        copy_optional_sidecar(&project_path, &report_path, &publish_dir, "report")?
+    {
         artifacts.push(report_artifact);
     }
 
+    artifacts.push(write_embedded_artifact(
+        LIBRARY_RELEASE_CONTRACT,
+        &publish_dir,
+        "omnidoc-libs.toml",
+        "library-contract",
+    )?);
+
+    let library_contract = toml::from_str(LIBRARY_RELEASE_CONTRACT).map_err(|error| {
+        OmniDocError::Other(format!("invalid embedded library contract: {error}"))
+    })?;
+
     let manifest = PublishManifest {
+        manifest_version: 2,
         omnidoc_version: env!("CARGO_PKG_VERSION").to_string(),
-        project: project_path.display().to_string(),
+        project: project_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("project")
+            .to_string(),
         target,
         tag,
         published_at_unix: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_secs())
             .unwrap_or(0),
+        library_contract,
         artifacts,
     };
     let manifest_content = serde_json::to_string_pretty(&manifest)
@@ -125,6 +158,7 @@ pub fn handle_publish(
 }
 
 fn copy_optional_sidecar(
+    project_path: &Path,
     source: &Path,
     publish_dir: &Path,
     output: &str,
@@ -133,10 +167,15 @@ fn copy_optional_sidecar(
         return Ok(None);
     }
 
-    copy_artifact(source, publish_dir, output).map(Some)
+    copy_artifact(project_path, source, publish_dir, output).map(Some)
 }
 
-fn copy_artifact(source: &Path, publish_dir: &Path, output: &str) -> Result<PublishArtifact> {
+fn copy_artifact(
+    project_path: &Path,
+    source: &Path,
+    publish_dir: &Path,
+    output: &str,
+) -> Result<PublishArtifact> {
     if !source.exists() {
         return Err(OmniDocError::Project(format!(
             "Publish artifact not found: {}",
@@ -152,12 +191,35 @@ fn copy_artifact(source: &Path, publish_dir: &Path, output: &str) -> Result<Publ
     let destination = publish_dir.join(file_name);
     fs::copy(source, &destination)?;
     let bytes = fs::metadata(&destination)?.len();
+    let source_label = source
+        .strip_prefix(project_path)
+        .unwrap_or_else(|_| source.file_name().map(Path::new).unwrap_or(source))
+        .to_string_lossy()
+        .replace('\\', "/");
 
     Ok(PublishArtifact {
         output: output.to_string(),
-        source: source.display().to_string(),
-        destination: destination.display().to_string(),
+        source: source_label,
+        destination: file_name.to_string_lossy().to_string(),
         bytes,
+        digest: content_digest(&destination)?,
+    })
+}
+
+fn write_embedded_artifact(
+    content: &str,
+    publish_dir: &Path,
+    file_name: &str,
+    output: &str,
+) -> Result<PublishArtifact> {
+    let destination = publish_dir.join(file_name);
+    fs::write(&destination, content)?;
+    Ok(PublishArtifact {
+        output: output.to_string(),
+        source: format!("embedded:release/{file_name}"),
+        destination: file_name.to_string(),
+        bytes: fs::metadata(&destination)?.len(),
+        digest: content_digest(&destination)?,
     })
 }
 
