@@ -661,6 +661,15 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
             );
         }
     }
+    if let Some(path) = existing_path(library_root.join(".omnidoc-release.toml")) {
+        add_resolved_resource(
+            &mut resources,
+            project_path,
+            &library_root,
+            "omnidoc-libs-release".to_string(),
+            path,
+        );
+    }
 
     if let (Some(name), Some(_)) = (config.theme_name.as_deref(), theme.as_ref()) {
         if let Some(path) =
@@ -1559,7 +1568,7 @@ fn locked_library(config: &MergedConfig, resources: &[LockedResource]) -> Option
     let (version, checksum_path) = library_contract(&library_root);
     Some(LockedLibrary {
         version,
-        revision: git_revision(&library_root),
+        revision: library_revision(&library_root),
         manifest_digest: existing_path(library_root.join("manifest.toml"))
             .and_then(|path| content_digest(&path).ok()),
         checksums_digest: checksum_path
@@ -1589,6 +1598,9 @@ fn library_contract(library_root: &Path) -> (Option<String>, Option<PathBuf>) {
 }
 
 fn git_revision(path: &Path) -> Option<String> {
+    if !path.join(".git").exists() {
+        return None;
+    }
     let output = Command::new("git")
         .args(["-C", &path.to_string_lossy(), "rev-parse", "HEAD"])
         .output()
@@ -1597,6 +1609,15 @@ fn git_revision(path: &Path) -> Option<String> {
         .status
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn library_revision(path: &Path) -> Option<String> {
+    git_revision(path).or_else(|| {
+        fs::read_to_string(path.join(".omnidoc-release.toml"))
+            .ok()
+            .and_then(|content| toml::from_str::<toml::Value>(&content).ok())
+            .and_then(|metadata| metadata.get("revision")?.as_str().map(str::to_string))
+    })
 }
 
 fn toolchain_versions(config: &MergedConfig, output: &str) -> BTreeMap<String, String> {
@@ -2670,6 +2691,11 @@ mod tests {
         )
         .expect("library manifest");
         fs::write(library.path().join("checksums.sha256"), "abc  payload\n").expect("checksums");
+        fs::write(
+            library.path().join(".omnidoc-release.toml"),
+            "contract_version = 1\nversion = '1.0.0'\nrevision = 'v1.0.0'\narchive_url = 'https://example.invalid/libs.tar.gz'\narchive_digest = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n",
+        )
+        .expect("release metadata");
         let css_dir = library.path().join("pandoc/css");
         fs::create_dir_all(&css_dir).expect("css dir");
         fs::write(
@@ -2727,6 +2753,10 @@ mod tests {
             .resources
             .iter()
             .any(|resource| resource.logical_name == "omnidoc-libs-checksums"));
+        assert!(graph
+            .resources
+            .iter()
+            .any(|resource| resource.logical_name == "omnidoc-libs-release"));
         assert!(!graph
             .resources
             .iter()
@@ -2753,6 +2783,7 @@ mod tests {
         assert_eq!(lock.lock_version, 4);
         let locked_library = lock.library.as_ref().expect("locked library");
         assert_eq!(locked_library.version.as_deref(), Some("1.0.0"));
+        assert_eq!(locked_library.revision.as_deref(), Some("v1.0.0"));
         assert!(locked_library
             .manifest_digest
             .as_deref()

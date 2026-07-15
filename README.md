@@ -356,6 +356,8 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    omnidoc lib --update        # Pull main, then verify the installed payload
    omnidoc lib --install --revision v1.0.0
    omnidoc lib --update --revision 428c8e6
+   omnidoc lib --install --release # Download the archive bound to this OmniDoc release
+   omnidoc lib --update --release  # Verify checksum and replace transactionally
    omnidoc libs --status       # Show version, revision and compatibility
    omnidoc libs --status --revision v1.0.0
    omnidoc libs --verify       # Verify required files and every SHA-256 entry
@@ -369,6 +371,12 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    refuse to overwrite a dirty library checkout. Install and update are
    transactional: OmniDoc clones into a sibling staging directory, validates
    the complete bundle, and only then replaces the active library.
+   With `--release`, OmniDoc instead reads its embedded `omnidoc-libs.toml`
+   contract, downloads the matching `.tar.gz` and external SHA-256 file,
+   rejects unsafe archive entries, verifies the internal manifest/checksums,
+   and promotes the extracted bundle using the same transactional replacement.
+   Later `omnidoc lib --update` calls remember an archive installation and use
+   the matching release source automatically unless a Git revision is requested.
 
 11. **Inspect versioned theme bundles**
 

@@ -367,8 +367,12 @@ pub enum Commands {
         json: bool,
 
         /// install, update, or verify a specific library tag, branch, or commit
-        #[arg(long, value_name = "REVISION")]
+        #[arg(long, value_name = "REVISION", conflicts_with = "release")]
         revision: Option<String>,
+
+        /// install or update from the release archive bound to this OmniDoc version
+        #[arg(long, conflicts_with_all = ["status", "verify", "revision"])]
+        release: bool,
     },
 
     /// discover and validate versioned theme bundles

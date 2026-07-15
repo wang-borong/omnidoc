@@ -7,15 +7,24 @@ use crate::git::{git_checkout_revision, git_clone};
 use crate::utils::fs;
 use console::style;
 use dirs::{config_local_dir, data_local_dir};
+use flate2::read::GzDecoder;
 use git2::{Repository, StatusOptions};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::{Cursor, Read};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tar::Archive;
 use walkdir::WalkDir;
+
+const LIBRARY_RELEASE_CONTRACT: &str = include_str!("../../../release/omnidoc-libs.toml");
+const INSTALLED_RELEASE_FILE: &str = ".omnidoc-release.toml";
+const MAX_RELEASE_ARCHIVE_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_RELEASE_CHECKSUM_BYTES: u64 = 64 * 1024;
+const MAX_RELEASE_EXTRACTED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 struct LibraryManifest {
@@ -29,14 +38,41 @@ struct LibraryManifest {
     required_resources: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct LibraryReleaseContract {
+    contract_version: u32,
+    omnidoc_version: String,
+    library: ReleasedLibrary,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReleasedLibrary {
+    version: String,
+    revision: String,
+    archive_url: String,
+    checksum_algorithm: String,
+    checksum_url: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct InstalledRelease {
+    contract_version: u32,
+    version: String,
+    revision: String,
+    archive_url: String,
+    archive_digest: String,
+}
+
 #[derive(Debug, Serialize)]
 struct LibraryStatus {
     path: String,
     exists: bool,
+    source: Option<String>,
     manifest_valid: bool,
     integrity_verified: bool,
     version: Option<String>,
     revision: Option<String>,
+    archive_digest: Option<String>,
     requested_revision: Option<String>,
     revision_matches: Option<bool>,
     dirty: Option<bool>,
@@ -57,21 +93,32 @@ pub fn handle_lib(
     verify: bool,
     json: bool,
     revision: Option<String>,
+    release: bool,
 ) -> Result<()> {
     let global_config = GlobalConfig::load()?;
     let library_path = configured_library_path(&global_config)?;
-    let requested_revision = revision.or_else(|| configured_library_revision(&global_config));
+    let release_source =
+        release || (revision.is_none() && library_path.join(INSTALLED_RELEASE_FILE).is_file());
+    let requested_revision = if release_source {
+        None
+    } else {
+        revision.or_else(|| configured_library_revision(&global_config))
+    };
     let requested_install = install || (!update && !status && !verify);
 
     if requested_install {
-        let lib_url = configured_library_url(&global_config);
-        install_verified_library(
-            &lib_url,
-            &library_path,
-            requested_revision.as_deref(),
-            false,
-            json,
-        )?;
+        if release_source {
+            install_release_library(&library_path, false)?;
+        } else {
+            let lib_url = configured_library_url(&global_config);
+            install_verified_library(
+                &lib_url,
+                &library_path,
+                requested_revision.as_deref(),
+                false,
+                json,
+            )?;
+        }
         ensure_latexmkrc()?;
         let result = inspect_library(&library_path, requested_revision.as_deref());
         print_library_status(&result, json)?;
@@ -88,16 +135,20 @@ pub fn handle_lib(
     }
 
     if update {
-        ensure_clean_repository(&library_path)?;
-        let lib_url = installed_library_url(&library_path)
-            .unwrap_or_else(|| configured_library_url(&global_config));
-        install_verified_library(
-            &lib_url,
-            &library_path,
-            requested_revision.as_deref(),
-            true,
-            json,
-        )?;
+        if release_source {
+            install_release_library(&library_path, true)?;
+        } else {
+            ensure_clean_repository(&library_path)?;
+            let lib_url = installed_library_url(&library_path)
+                .unwrap_or_else(|| configured_library_url(&global_config));
+            install_verified_library(
+                &lib_url,
+                &library_path,
+                requested_revision.as_deref(),
+                true,
+                json,
+            )?;
+        }
         ensure_latexmkrc()?;
         let result = inspect_library(&library_path, requested_revision.as_deref());
         print_library_status(&result, json)?;
@@ -117,6 +168,271 @@ pub fn handle_lib(
     print_library_status(&result, json)?;
     if verify {
         ensure_verified(&result)?;
+    }
+    Ok(())
+}
+
+fn install_release_library(library_path: &Path, replace_existing: bool) -> Result<()> {
+    let contract = read_release_contract()?;
+    let archive = download_release_file(&contract.library.archive_url, MAX_RELEASE_ARCHIVE_BYTES)?;
+    let checksum =
+        download_release_file(&contract.library.checksum_url, MAX_RELEASE_CHECKSUM_BYTES)?;
+    verify_release_archive_checksum(&archive, &checksum, &contract.library.archive_url)?;
+    let archive_digest = format!("sha256:{:x}", Sha256::digest(&archive));
+
+    let parent = library_path.parent().ok_or_else(|| {
+        OmniDocError::Other(format!(
+            "library path has no parent directory: {}",
+            library_path.display()
+        ))
+    })?;
+    fs::create_dir_all(parent)?;
+    let container = sibling_transaction_path(library_path, "archive");
+    let staging = sibling_transaction_path(library_path, "staging");
+    let prepared = (|| -> Result<LibraryStatus> {
+        extract_release_archive(&archive, &container, &contract.library.version)?;
+        let extracted = container.join(format!("omnidoc-libs-v{}", contract.library.version));
+        fs::rename(&extracted, &staging)?;
+        write_installed_release(
+            &staging,
+            &InstalledRelease {
+                contract_version: contract.contract_version,
+                version: contract.library.version.clone(),
+                revision: contract.library.revision.clone(),
+                archive_url: contract.library.archive_url.clone(),
+                archive_digest: archive_digest.clone(),
+            },
+        )?;
+        let status = inspect_library(&staging, None);
+        ensure_verified(&status)?;
+        if status.version.as_deref() != Some(contract.library.version.as_str()) {
+            return Err(OmniDocError::Other(format!(
+                "release archive library version {:?} does not match contract {}",
+                status.version, contract.library.version
+            )));
+        }
+        Ok(status)
+    })();
+    cleanup_transaction_path(&container);
+    match prepared {
+        Ok(_) => {}
+        Err(error) => {
+            cleanup_transaction_path(&staging);
+            return Err(error);
+        }
+    }
+
+    if !replace_existing {
+        if library_path.exists() {
+            cleanup_transaction_path(&staging);
+            return Err(OmniDocError::Other(format!(
+                "OmniDoc library already exists: {}",
+                library_path.display()
+            )));
+        }
+        if let Err(error) = fs::rename(&staging, library_path) {
+            cleanup_transaction_path(&staging);
+            return Err(error);
+        }
+    } else {
+        replace_library_transactionally(library_path, &staging)?;
+    }
+    Ok(())
+}
+
+fn write_installed_release(root: &Path, release: &InstalledRelease) -> Result<()> {
+    let content = toml::to_string_pretty(release).map_err(|error| {
+        OmniDocError::Other(format!("cannot serialize release metadata: {error}"))
+    })?;
+    fs::write(root.join(INSTALLED_RELEASE_FILE), content.as_bytes())
+}
+
+fn read_release_contract() -> Result<LibraryReleaseContract> {
+    let contract =
+        toml::from_str::<LibraryReleaseContract>(LIBRARY_RELEASE_CONTRACT).map_err(|error| {
+            OmniDocError::Other(format!("invalid library release contract: {error}"))
+        })?;
+    if contract.contract_version != 1 {
+        return Err(OmniDocError::Other(format!(
+            "unsupported library release contract version {}",
+            contract.contract_version
+        )));
+    }
+    if contract.omnidoc_version != env!("CARGO_PKG_VERSION") {
+        return Err(OmniDocError::Other(format!(
+            "library release contract targets OmniDoc {}, running {}",
+            contract.omnidoc_version,
+            env!("CARGO_PKG_VERSION")
+        )));
+    }
+    if contract.library.checksum_algorithm != "sha256" {
+        return Err(OmniDocError::Other(format!(
+            "unsupported release checksum algorithm {}",
+            contract.library.checksum_algorithm
+        )));
+    }
+    Version::parse(&contract.library.version).map_err(|error| {
+        OmniDocError::Other(format!(
+            "invalid library release version {}: {error}",
+            contract.library.version
+        ))
+    })?;
+    let expected_revision = format!("v{}", contract.library.version);
+    if contract.library.revision != expected_revision {
+        return Err(OmniDocError::Other(format!(
+            "library release revision {} does not match version {}",
+            contract.library.revision, contract.library.version
+        )));
+    }
+    Ok(contract)
+}
+
+fn download_release_file(url: &str, max_bytes: u64) -> Result<Vec<u8>> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|error| OmniDocError::Other(format!("cannot create HTTP client: {error}")))?;
+    let response = client
+        .get(url)
+        .send()
+        .map_err(|error| OmniDocError::Other(format!("cannot download {url}: {error}")))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(OmniDocError::HttpError {
+            status: status.as_u16(),
+            url: url.to_string(),
+        });
+    }
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_bytes)
+    {
+        return Err(OmniDocError::Other(format!(
+            "download exceeds size limit ({max_bytes} bytes): {url}"
+        )));
+    }
+    let mut bytes = Vec::new();
+    response
+        .take(max_bytes + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| OmniDocError::Other(format!("cannot read {url}: {error}")))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(OmniDocError::Other(format!(
+            "download exceeds size limit ({max_bytes} bytes): {url}"
+        )));
+    }
+    Ok(bytes)
+}
+
+fn verify_release_archive_checksum(
+    archive: &[u8],
+    checksum: &[u8],
+    archive_url: &str,
+) -> Result<()> {
+    let checksum = std::str::from_utf8(checksum).map_err(|error| {
+        OmniDocError::Other(format!("invalid release checksum encoding: {error}"))
+    })?;
+    let line = checksum
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .ok_or_else(|| OmniDocError::Other("empty release checksum file".to_string()))?;
+    let mut fields = line.split_whitespace();
+    let expected = fields
+        .next()
+        .filter(|value| {
+            value.len() == 64
+                && value.chars().all(|character| {
+                    character.is_ascii_hexdigit() && !character.is_ascii_uppercase()
+                })
+        })
+        .ok_or_else(|| OmniDocError::Other("invalid release SHA-256 checksum".to_string()))?;
+    let expected_name = archive_url
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| OmniDocError::Other("invalid release archive URL".to_string()))?;
+    let checksum_name = fields
+        .next()
+        .map(|name| name.trim_start_matches('*'))
+        .ok_or_else(|| OmniDocError::Other("release checksum is missing a filename".to_string()))?;
+    if checksum_name != expected_name {
+        return Err(OmniDocError::Other(format!(
+            "release checksum filename {checksum_name} does not match {expected_name}"
+        )));
+    }
+    let actual = format!("{:x}", Sha256::digest(archive));
+    if actual != expected {
+        return Err(OmniDocError::Other(format!(
+            "release archive checksum mismatch for {archive_url}: expected {expected}, got {actual}"
+        )));
+    }
+    Ok(())
+}
+
+fn extract_release_archive(archive: &[u8], destination: &Path, version: &str) -> Result<()> {
+    fs::create_dir_all(destination)?;
+    let expected_root = PathBuf::from(format!("omnidoc-libs-v{version}"));
+    let decoder = GzDecoder::new(Cursor::new(archive));
+    let mut archive = Archive::new(decoder);
+    let mut extracted_bytes = 0_u64;
+    let mut extracted_paths = BTreeSet::new();
+    for entry in archive
+        .entries()
+        .map_err(|error| OmniDocError::Other(format!("cannot read release archive: {error}")))?
+    {
+        let mut entry = entry
+            .map_err(|error| OmniDocError::Other(format!("cannot read archive entry: {error}")))?;
+        let path = entry
+            .path()
+            .map_err(|error| OmniDocError::Other(format!("invalid archive path: {error}")))?
+            .into_owned();
+        if !path.starts_with(&expected_root)
+            || path
+                .components()
+                .any(|component| !matches!(component, Component::Normal(_)))
+        {
+            return Err(OmniDocError::Other(format!(
+                "unsafe or unexpected release archive path: {}",
+                path.display()
+            )));
+        }
+        if !extracted_paths.insert(path.clone()) {
+            return Err(OmniDocError::Other(format!(
+                "duplicate release archive path: {}",
+                path.display()
+            )));
+        }
+        let entry_type = entry.header().entry_type();
+        if !entry_type.is_file() && !entry_type.is_dir() {
+            return Err(OmniDocError::Other(format!(
+                "unsupported release archive entry type: {}",
+                path.display()
+            )));
+        }
+        extracted_bytes = extracted_bytes
+            .checked_add(entry.header().size().unwrap_or(0))
+            .ok_or_else(|| OmniDocError::Other("release archive size overflow".to_string()))?;
+        if extracted_bytes > MAX_RELEASE_EXTRACTED_BYTES {
+            return Err(OmniDocError::Other(format!(
+                "release archive expands beyond size limit ({} bytes)",
+                MAX_RELEASE_EXTRACTED_BYTES
+            )));
+        }
+        let unpacked = entry.unpack_in(destination).map_err(|error| {
+            OmniDocError::Other(format!("cannot extract {}: {error}", path.display()))
+        })?;
+        if !unpacked {
+            return Err(OmniDocError::Other(format!(
+                "release archive entry escapes destination: {}",
+                path.display()
+            )));
+        }
+    }
+    let root = destination.join(expected_root);
+    if !root.is_dir() {
+        return Err(OmniDocError::Other(
+            "release archive is missing its versioned root directory".to_string(),
+        ));
     }
     Ok(())
 }
@@ -207,14 +523,18 @@ fn install_verified_library(
         return Ok(());
     }
 
+    replace_library_transactionally(library_path, &staging)
+}
+
+fn replace_library_transactionally(library_path: &Path, staging: &Path) -> Result<()> {
     let backup = sibling_transaction_path(library_path, "backup");
     if let Err(error) = fs::rename(library_path, &backup) {
-        cleanup_transaction_path(&staging);
+        cleanup_transaction_path(staging);
         return Err(error);
     }
-    if let Err(error) = fs::rename(&staging, library_path) {
+    if let Err(error) = fs::rename(staging, library_path) {
         let restore = fs::rename(&backup, library_path);
-        cleanup_transaction_path(&staging);
+        cleanup_transaction_path(staging);
         if let Err(restore_error) = restore {
             return Err(OmniDocError::Other(format!(
                 "failed to promote verified library ({error}); failed to restore previous library ({restore_error})"
@@ -288,10 +608,12 @@ fn inspect_library(path: &Path, requested_revision: Option<&str>) -> LibraryStat
     let mut status = LibraryStatus {
         path: path.display().to_string(),
         exists: path.is_dir(),
+        source: None,
         manifest_valid: false,
         integrity_verified: false,
         version: None,
         revision: None,
+        archive_digest: None,
         requested_revision: requested_revision.map(str::to_string),
         revision_matches: None,
         dirty: None,
@@ -311,6 +633,7 @@ fn inspect_library(path: &Path, requested_revision: Option<&str>) -> LibraryStat
     }
 
     if let Ok(repository) = Repository::open(path) {
+        status.source = Some("git".to_string());
         status.revision = repository
             .head()
             .ok()
@@ -339,6 +662,44 @@ fn inspect_library(path: &Path, requested_revision: Option<&str>) -> LibraryStat
                     .push(format!("cannot resolve requested revision {}", requested));
             }
         }
+    } else {
+        let release_path = path.join(INSTALLED_RELEASE_FILE);
+        if release_path.is_file() {
+            match std::fs::read_to_string(&release_path)
+                .map_err(|error| error.to_string())
+                .and_then(|content| {
+                    toml::from_str::<InstalledRelease>(&content).map_err(|error| error.to_string())
+                }) {
+                Ok(release) => {
+                    let expected_revision = format!("v{}", release.version);
+                    status.source = Some("release".to_string());
+                    status.revision = Some(release.revision.clone());
+                    status.archive_digest = Some(release.archive_digest.clone());
+                    if release.contract_version != 1 {
+                        status.errors.push(format!(
+                            "unsupported installed release metadata version {}",
+                            release.contract_version
+                        ));
+                    }
+                    if release.revision != expected_revision {
+                        status.errors.push(format!(
+                            "installed release revision {} does not match version {}",
+                            release.revision, release.version
+                        ));
+                    }
+                    if !valid_sha256_digest(&release.archive_digest) {
+                        status
+                            .errors
+                            .push("invalid installed release archive digest".to_string());
+                    }
+                }
+                Err(error) => {
+                    status
+                        .errors
+                        .push(format!("invalid {}: {}", release_path.display(), error))
+                }
+            }
+        }
     }
 
     let manifest = match read_manifest(path) {
@@ -350,6 +711,16 @@ fn inspect_library(path: &Path, requested_revision: Option<&str>) -> LibraryStat
     };
     status.manifest_valid = true;
     status.version = Some(manifest.version.clone());
+    if let Ok(content) = std::fs::read_to_string(path.join(INSTALLED_RELEASE_FILE)) {
+        if let Ok(release) = toml::from_str::<InstalledRelease>(&content) {
+            if release.version != manifest.version {
+                status.errors.push(format!(
+                    "installed release metadata version {} does not match manifest {}",
+                    release.version, manifest.version
+                ));
+            }
+        }
+    }
     status.compatible_omnidoc = Some(manifest.compatible_omnidoc.clone());
     status.compatible_pandoc = Some(manifest.compatible_pandoc.clone());
     status.omnidoc_compatible =
@@ -553,6 +924,15 @@ fn version_matches(requirement: &str, version: &str) -> Option<bool> {
     Some(requirement.matches(&version))
 }
 
+fn valid_sha256_digest(digest: &str) -> bool {
+    digest.strip_prefix("sha256:").is_some_and(|value| {
+        value.len() == 64
+            && value
+                .chars()
+                .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase())
+    })
+}
+
 fn parse_version_token(token: &str) -> Option<Version> {
     let token = token.trim_start_matches('v');
     if let Ok(version) = Version::parse(token) {
@@ -592,10 +972,14 @@ fn print_library_status(status: &LibraryStatus, json: bool) -> Result<()> {
     }
     println!("path: {}", status.path);
     println!("exists: {}", status.exists);
+    println!("source: {}", status.source.as_deref().unwrap_or("local"));
     println!(
         "version: {}",
         status.version.as_deref().unwrap_or("unknown")
     );
+    if let Some(digest) = status.archive_digest.as_deref() {
+        println!("archive: {}", digest);
+    }
     println!(
         "revision: {}{}",
         status.revision.as_deref().unwrap_or("unknown"),
@@ -661,6 +1045,7 @@ fn compatibility_label(value: Option<bool>) -> &'static str {
 fn ensure_verified(status: &LibraryStatus) -> Result<()> {
     if status.integrity_verified
         && status.manifest_valid
+        && status.errors.is_empty()
         && status.omnidoc_compatible != Some(false)
         && status.pandoc_compatible != Some(false)
         && status.revision_matches != Some(false)
@@ -676,12 +1061,18 @@ fn ensure_verified(status: &LibraryStatus) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        git_refs, install_verified_library, read_manifest, safe_relative_path, version_matches,
+        extract_release_archive, git_refs, inspect_library, install_verified_library,
+        read_manifest, safe_relative_path, verify_release_archive_checksum, version_matches,
+        write_installed_release, InstalledRelease,
     };
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
     use git2::{Repository, RepositoryInitOptions, Signature};
     use sha2::{Digest, Sha256};
     use std::fs;
+    use std::io::Cursor;
     use std::path::Path;
+    use tar::{Builder, Header};
     use tempfile::TempDir;
 
     fn commit_all(repository: &Repository, message: &str) -> git2::Oid {
@@ -736,6 +1127,48 @@ required_resources = ["payload/resource.txt"]
         .expect("checksums");
     }
 
+    fn append_archive_file(builder: &mut Builder<GzEncoder<Vec<u8>>>, path: &str, bytes: &[u8]) {
+        let mut header = Header::new_gnu();
+        header.set_size(bytes.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, path, Cursor::new(bytes))
+            .expect("append archive file");
+    }
+
+    fn release_archive(root: &str) -> Vec<u8> {
+        let payload = b"verified archive payload\n";
+        let manifest = br#"manifest_version = 1
+version = "1.0.0"
+compatible_omnidoc = ">=1.3.0,<2.0.0"
+compatible_pandoc = ">=0.0.0"
+checksum_algorithm = "sha256"
+checksum_file = "checksums.sha256"
+payload_roots = ["payload"]
+required_resources = ["payload/resource.txt"]
+"#;
+        let checksums = format!("{:x}  payload/resource.txt\n", Sha256::digest(payload));
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = Builder::new(encoder);
+        append_archive_file(&mut builder, &format!("{root}/manifest.toml"), manifest);
+        append_archive_file(
+            &mut builder,
+            &format!("{root}/checksums.sha256"),
+            checksums.as_bytes(),
+        );
+        append_archive_file(
+            &mut builder,
+            &format!("{root}/payload/resource.txt"),
+            payload,
+        );
+        builder
+            .into_inner()
+            .expect("finish tar archive")
+            .finish()
+            .expect("finish gzip archive")
+    }
+
     #[test]
     fn rejects_unsafe_manifest_paths() {
         assert!(safe_relative_path("pandoc/css/theme.css").is_some());
@@ -748,6 +1181,62 @@ required_resources = ["payload/resource.txt"]
         assert_eq!(version_matches(">=1.3.0,<2.0.0", "1.3.0"), Some(true));
         assert_eq!(version_matches(">=1.3.0,<2.0.0", "2.0.0"), Some(false));
         assert_eq!(version_matches(">=3.0,<4.0", "pandoc 3.10"), Some(true));
+    }
+
+    #[test]
+    fn verifies_and_extracts_release_archive() {
+        let archive = release_archive("omnidoc-libs-v1.0.0");
+        let checksum = format!(
+            "{:x}  omnidoc-libs-v1.0.0.tar.gz\n",
+            Sha256::digest(&archive)
+        );
+        verify_release_archive_checksum(
+            &archive,
+            checksum.as_bytes(),
+            "https://example.invalid/omnidoc-libs-v1.0.0.tar.gz",
+        )
+        .expect("archive checksum");
+
+        let destination = TempDir::new().expect("archive destination");
+        extract_release_archive(&archive, destination.path(), "1.0.0")
+            .expect("extract release archive");
+        let installed = destination.path().join("omnidoc-libs-v1.0.0");
+        write_installed_release(
+            &installed,
+            &InstalledRelease {
+                contract_version: 1,
+                version: "1.0.0".to_string(),
+                revision: "v1.0.0".to_string(),
+                archive_url: "https://example.invalid/omnidoc-libs-v1.0.0.tar.gz".to_string(),
+                archive_digest: format!("sha256:{:x}", Sha256::digest(&archive)),
+            },
+        )
+        .expect("release metadata");
+        let status = inspect_library(&installed, None);
+        assert!(status.integrity_verified, "{:?}", status.errors);
+        assert_eq!(status.version.as_deref(), Some("1.0.0"));
+        assert_eq!(status.source.as_deref(), Some("release"));
+        assert_eq!(status.revision.as_deref(), Some("v1.0.0"));
+    }
+
+    #[test]
+    fn rejects_mismatched_or_unexpected_release_archives() {
+        let archive = release_archive("omnidoc-libs-v1.0.0");
+        let error = verify_release_archive_checksum(
+            &archive,
+            b"0000000000000000000000000000000000000000000000000000000000000000  archive.tar.gz\n",
+            "https://example.invalid/archive.tar.gz",
+        )
+        .expect_err("mismatched checksum must fail");
+        assert!(error.to_string().contains("checksum mismatch"));
+
+        let unexpected = release_archive("different-root");
+        let destination = TempDir::new().expect("archive destination");
+        let error = extract_release_archive(&unexpected, destination.path(), "1.0.0")
+            .expect_err("unexpected root must fail");
+        assert!(error
+            .to_string()
+            .contains("unexpected release archive path"));
     }
 
     #[test]
