@@ -21,9 +21,6 @@ struct RegexCache {
     punct_pattern: Regex,
     digit_equal: Regex,
     han_space_han: Regex,
-    #[allow(dead_code)] // May be used in future versions
-    math_pattern: Regex,
-    code_inline_pattern: Regex,
 
     // TeX 格式化
     tex_verb_pattern: Regex,
@@ -31,12 +28,7 @@ struct RegexCache {
     // Markdown 格式化
     ref_pattern: Regex,
     verb_pattern: Regex,
-    citation_label_long: Regex,
-    citation_label_short: Regex,
-    header_bracket: Regex,
     period_end: Regex,
-    image_pattern: Regex,
-    link_pattern: Regex,
     reference_definition: Regex,
     table_delimiter: Regex,
 
@@ -84,11 +76,6 @@ fn get_regex_cache() -> &'static RegexCache {
                 r#"([\p{Han}，。？！：、；…．～￥""（）「」《》——【】〈〉〔〕''])[ \t]+([\p{Han}，。？！：、；…．～￥""（）「」《》——【】〈〉〔〕''])"#,
             )
             .unwrap(),
-            // 保护数学公式 $...$ 和 $$...$$
-            math_pattern: Regex::new(r"\$+\$*([^$]+)\$+\$*").unwrap(),
-            // 保护行内代码 `...`
-            code_inline_pattern: Regex::new(r"`([^`]+)`").unwrap(),
-
             // TeX 格式化
             tex_verb_pattern: Regex::new(r"[ \t~]*\\verb[!|]([\w\-_ \t\.]{3,30})[!|][ \t]*").unwrap(),
 
@@ -96,12 +83,7 @@ fn get_regex_cache() -> &'static RegexCache {
             ref_pattern: Regex::new(r"[ \t~]{0,5}\\ref\{([^}]{5,50})\}[ \t]*").unwrap(),
             verb_pattern: Regex::new(r"[ \t~]*\\verb[!|]([ 0-9a-zA-Z_/\\\-<>,.]+)[!|][ \t]*")
                 .unwrap(),
-            citation_label_long: Regex::new(r" *(\[@\w{2,4}:[\w\\-]+\]) *").unwrap(),
-            citation_label_short: Regex::new(r" *(\[@[\w\\-]+\]) *").unwrap(),
-            header_bracket: Regex::new(r"^ *\[").unwrap(),
             period_end: Regex::new(r"。$").unwrap(),
-            image_pattern: Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap(),
-            link_pattern: Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap(),
             reference_definition: Regex::new(r"^\[[^\]]+\]:\s*\S+").unwrap(),
             table_delimiter: Regex::new(
                 r"^\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?$",
@@ -273,7 +255,7 @@ fn protect_inline_tokens(line: &str) -> (String, Vec<String>) {
     let mut protected = Vec::new();
     let mut index = 0;
     while index < bytes.len() {
-        let end = match bytes[index] {
+        let end = markdown_inline_token_end(line, index).or_else(|| match bytes[index] {
             b'\\' => bytes
                 .get(index + 1)
                 .copied()
@@ -292,7 +274,7 @@ fn protect_inline_tokens(line: &str) -> (String, Vec<String>) {
                 .position(|byte| *byte == b'>')
                 .map(|offset| index + offset + 2),
             _ => None,
-        };
+        });
         if let Some(end) = end {
             let token = line[index..end].to_string();
             let placeholder = format!("\u{e000}{}\u{e001}", protected.len());
@@ -306,6 +288,67 @@ fn protect_inline_tokens(line: &str) -> (String, Vec<String>) {
         index += character.len_utf8();
     }
     (masked, protected)
+}
+
+fn markdown_inline_token_end(line: &str, index: usize) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let bracket = match bytes.get(index..index + 2) {
+        Some([b'!', b'[']) => index + 1,
+        _ if bytes.get(index) == Some(&b'[') => index,
+        _ => {
+            if bytes.get(index) == Some(&b'{') {
+                return attribute_block_end(bytes, index);
+            }
+            return None;
+        }
+    };
+    let label_end = find_balanced(bytes, bracket, b'[', b']')?;
+    let mut end = match bytes.get(label_end) {
+        Some(b'(') => find_balanced(bytes, label_end, b'(', b')')?,
+        Some(b'[') => find_balanced(bytes, label_end, b'[', b']')?,
+        _ => label_end,
+    };
+    if bytes.get(end) == Some(&b'{') {
+        end = attribute_block_end(bytes, end).unwrap_or(end);
+    }
+    Some(end)
+}
+
+fn attribute_block_end(bytes: &[u8], index: usize) -> Option<usize> {
+    let end = find_balanced(bytes, index, b'{', b'}')?;
+    let content = &bytes[index + 1..end - 1];
+    if !content
+        .first()
+        .is_some_and(|marker| matches!(marker, b'#' | b'.' | b'='))
+        && !content.contains(&b'=')
+    {
+        return None;
+    }
+    Some(end)
+}
+
+fn find_balanced(bytes: &[u8], index: usize, open: u8, close: u8) -> Option<usize> {
+    if bytes.get(index) != Some(&open) {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut cursor = index;
+    while cursor < bytes.len() {
+        if bytes[cursor] == b'\\' {
+            cursor = (cursor + 2).min(bytes.len());
+            continue;
+        }
+        if bytes[cursor] == open {
+            depth += 1;
+        } else if bytes[cursor] == close {
+            depth -= 1;
+            if depth == 0 {
+                return Some(cursor + 1);
+            }
+        }
+        cursor += 1;
+    }
+    None
 }
 
 fn find_closing_run(bytes: &[u8], mut index: usize, marker: u8, length: usize) -> Option<usize> {
@@ -476,112 +519,6 @@ impl FormatService {
         let mut result = line.to_string();
         let cache = get_regex_cache();
 
-        // 保护 Markdown 图片语法中的路径部分
-        // 先提取图片路径，用占位符替换，格式化后再恢复
-        let mut image_paths: Vec<String> = Vec::new();
-        let mut link_urls: Vec<String> = Vec::new();
-        let mut code_inlines: Vec<String> = Vec::new();
-        let mut image_placeholder_index = 0;
-        let mut link_placeholder_index = 0;
-        let mut math_placeholder_index = 0;
-        let mut code_placeholder_index = 0;
-
-        // 保护数学公式 $...$ 和 $$...$$
-        // 由于 Rust regex 不支持反向引用，分别处理 $ 和 $$
-        // 需要保存每个公式的完整信息（包括 $ 符号数量）
-        let mut math_formulas_with_type: Vec<String> = Vec::new();
-        let math_pattern_double = Regex::new(r"\$\$([^$]+)\$\$").unwrap();
-        let math_pattern_single = Regex::new(r"\$([^$\n]+)\$").unwrap();
-
-        // 先处理 $$...$$（双美元符号），避免被单美元符号模式匹配
-        result = math_pattern_double
-            .replace_all(&result, |caps: &regex::Captures| {
-                let formula = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                // 保存完整的公式
-                math_formulas_with_type.push(format!("$${}$$", formula));
-                // 使用占位符替换
-                let placeholder = format!("$__OMNIDOC_MATH_{}__$", math_placeholder_index);
-                math_placeholder_index += 1;
-                placeholder
-            })
-            .to_string();
-
-        // 再处理 $...$（单美元符号）
-        // 排除包含占位符的情况
-        result = math_pattern_single
-            .replace_all(&result, |caps: &regex::Captures| {
-                let formula = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                // 如果包含占位符，跳过（已经被处理过）
-                if formula.contains("__OMNIDOC_MATH_") {
-                    return format!("${}$", formula);
-                }
-                // 保存完整的公式
-                math_formulas_with_type.push(format!("${}$", formula));
-                // 使用占位符替换
-                let placeholder = format!("$__OMNIDOC_MATH_{}__$", math_placeholder_index);
-                math_placeholder_index += 1;
-                placeholder
-            })
-            .to_string();
-
-        // 保护行内代码 `...`
-        result = cache
-            .code_inline_pattern
-            .replace_all(&result, |caps: &regex::Captures| {
-                let code = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                // 保存原始代码
-                code_inlines.push(code.to_string());
-                // 使用占位符替换，格式: `__OMNIDOC_CODE_n__`
-                let placeholder = format!("`__OMNIDOC_CODE_{}__`", code_placeholder_index);
-                code_placeholder_index += 1;
-                placeholder
-            })
-            .to_string();
-
-        // 保护图片路径
-        result = cache
-            .image_pattern
-            .replace_all(&result, |caps: &regex::Captures| {
-                let alt_text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                let path = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-                // 保存原始路径
-                image_paths.push(path.to_string());
-                // 使用占位符替换，格式: ![alt](__OMNIDOC_IMG_n__)
-                let placeholder = format!(
-                    "![{}](__OMNIDOC_IMG_{}__)",
-                    alt_text, image_placeholder_index
-                );
-                image_placeholder_index += 1;
-                placeholder
-            })
-            .to_string();
-
-        // 保护链接 URL（不包括图片链接，因为图片已经在上面处理了）
-        // 使用负向前瞻确保不匹配图片链接（以 ! 开头的）
-        result = cache
-            .link_pattern
-            .replace_all(&result, |caps: &regex::Captures| {
-                let full_match = caps.get(0).map(|m| m.as_str()).unwrap_or("");
-                // 如果前面有 !，说明是图片链接，跳过
-                if result[..caps.get(0).unwrap().start()].ends_with('!') {
-                    return full_match.to_string();
-                }
-                let text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                let url = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-                // 检查 URL 是否是占位符（已被图片处理过）
-                if url.starts_with("__OMNIDOC_IMG_") {
-                    return full_match.to_string();
-                }
-                // 保存原始 URL
-                link_urls.push(url.to_string());
-                // 使用占位符替换，格式: [text](__OMNIDOC_LINK_n__)
-                let placeholder =
-                    format!("[{}](__OMNIDOC_LINK_{}__)", text, link_placeholder_index);
-                link_placeholder_index += 1;
-                placeholder
-            })
-            .to_string();
-
         // 替换 tab 为空格
         result = result.replace('\t', "  ");
 
@@ -601,31 +538,6 @@ impl FormatService {
             .digit_equal
             .replace_all(&result, "$1 = $2")
             .to_string();
-
-        // 恢复图片路径（不格式化路径部分）
-        for (index, path) in image_paths.iter().enumerate() {
-            let placeholder = format!("__OMNIDOC_IMG_{}__", index);
-            result = result.replace(&placeholder, path);
-        }
-
-        // 恢复链接 URL（不格式化 URL 部分）
-        for (index, url) in link_urls.iter().enumerate() {
-            let placeholder = format!("__OMNIDOC_LINK_{}__", index);
-            result = result.replace(&placeholder, url);
-        }
-
-        // 恢复行内代码（不格式化代码部分）
-        for (index, code) in code_inlines.iter().enumerate() {
-            let placeholder = format!("__OMNIDOC_CODE_{}__", index);
-            result = result.replace(&placeholder, code);
-        }
-
-        // 恢复数学公式（不格式化公式部分）
-        // 使用保存的公式信息恢复
-        for (index, formula) in math_formulas_with_type.iter().enumerate() {
-            let placeholder = format!("$__OMNIDOC_MATH_{}__$", index);
-            result = result.replace(&placeholder, formula);
-        }
 
         result
     }
@@ -657,19 +569,6 @@ impl FormatService {
 
         // \verb 处理
         result = cache.verb_pattern.replace_all(&result, " $1 ").to_string();
-
-        // 引用标签处理
-        result = cache
-            .citation_label_long
-            .replace_all(&result, " $1 ")
-            .to_string();
-        result = cache
-            .citation_label_short
-            .replace_all(&result, " $1 ")
-            .to_string();
-
-        // 移除行首空格（在 [ 之前）
-        result = cache.header_bracket.replace_all(&result, "[").to_string();
 
         // ltbr div 结尾处理
         if result.contains('&') {
@@ -882,6 +781,29 @@ mod tests {
         assert_eq!(once, twice);
         assert!(once.contains("中文 ABC"));
         assert!(once.contains("`x=y`"));
+    }
+
+    #[test]
+    fn preserves_balanced_markdown_inline_tokens() {
+        let service = FormatService::new(false, true, true, true);
+        let input = concat!(
+            "正文中文ABC与[链接中文ABC](https://example.com/a_(b)?q=中文ABC \"标题中文ABC\"){#链接中文ABC .wide}继续。\n",
+            "![图片中文ABC](assets/diagram_(v2).svg){width=50% #图片中文ABC}\n",
+            "参见[引用中文ABC][章节中文ABC]、[快捷中文ABC]、[@作者中文ABC; @other]和{#锚点中文ABC .样式中文ABC}。\n",
+        );
+
+        let once = service.format_content(input);
+        let twice = service.format_content(&once);
+
+        assert_eq!(once, twice);
+        assert!(once.contains(
+            "[链接中文ABC](https://example.com/a_(b)?q=中文ABC \"标题中文ABC\"){#链接中文ABC .wide}"
+        ));
+        assert!(once.contains("![图片中文ABC](assets/diagram_(v2).svg){width=50% #图片中文ABC}"));
+        assert!(once.contains("[引用中文ABC][章节中文ABC]"));
+        assert!(once.contains("[快捷中文ABC]"));
+        assert!(once.contains("[@作者中文ABC; @other]"));
+        assert!(once.contains("{#锚点中文ABC .样式中文ABC}"));
     }
 
     #[test]

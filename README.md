@@ -503,10 +503,12 @@ omnidoc plugin --validate
     The default formatter is conservative and block/token-aware. It leaves
     front matter, fenced and indented code, display math, raw HTML containers,
     tables, reference definitions, LaTeX environments, inline code/math,
-    escapes, and raw inline HTML byte-stable. `.tex` files use a separate mode
-    that protects command and environment lines. `--semantic` and `--symbol`
-    remain explicit opt-ins, and repeated formatting is required to be
-    idempotent.
+    escapes, raw inline HTML, balanced links/images, reference and citation
+    labels, and Pandoc attribute blocks byte-stable. Nested parentheses in
+    destinations are parsed structurally rather than with URL regexes. `.tex`
+    files use a separate mode that protects command and environment lines.
+    `--semantic` and `--symbol` remain explicit opt-ins, and repeated formatting
+    is required to be idempotent.
 
     Examples:
 
