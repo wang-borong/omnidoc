@@ -265,6 +265,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
    ```bash
    omnidoc publish [PATH] [--to <FORMAT>] [--all] [--tag <TAG>] [--dist-dir dist]
+   omnidoc publish [PATH] --verify --tag <TAG> [--dist-dir dist] [--json]
    ```
 
    `publish` builds by default, writes `omnidoc.lock` and
@@ -277,7 +278,8 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    assembled and hashed in a sibling staging directory, then replace the final
    tag directory only after the complete manifest is written. Failed publishes
    preserve the previous release, while successful republishes remove stale
-   artifacts.
+   artifacts. `--verify` rechecks the manifest schema, portable paths, exact
+   file set, byte sizes, BLAKE3 digests, and embedded libs release contract.
 
 6. **Open the built PDF document**
 

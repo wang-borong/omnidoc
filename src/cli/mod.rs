@@ -33,7 +33,7 @@ pub fn cli() -> Result<()> {
         | Commands::Init { .. }
         | Commands::Build { .. }
         | Commands::Watch { .. }
-        | Commands::Publish { .. }
+        | Commands::Publish { verify: false, .. }
         | Commands::Ci { .. }
         | Commands::Md2pdf { .. }
         | Commands::Md2html { .. }
@@ -162,6 +162,8 @@ pub fn cli() -> Result<()> {
             dist_dir,
             tag,
             no_build,
+            verify,
+            json,
             force,
             strict,
             verbose,
@@ -177,6 +179,8 @@ pub fn cli() -> Result<()> {
                 dist_dir,
                 tag,
                 no_build,
+                verify,
+                json,
                 force,
                 strict,
                 verbose,

@@ -398,6 +398,38 @@ fn publish_no_build_copies_existing_artifacts() {
         artifact["output"] == "library-contract" && artifact["destination"] == "omnidoc-libs.toml"
     }));
     assert!(publish_dir.join("omnidoc-libs.toml").is_file());
+
+    let verified = assert_success(fixture.command(&[
+        "publish",
+        "--verify",
+        "--json",
+        "--tag",
+        "release/1",
+        &project,
+    ]));
+    let verified: serde_json::Value =
+        serde_json::from_str(&verified).expect("publish verification JSON");
+    assert_eq!(verified["valid"], true);
+
+    fs::write(publish_dir.join("smoke.html"), "tampered\n").expect("tamper publish artifact");
+    let failed = assert_failure(fixture.command(&[
+        "publish",
+        "--verify",
+        "--json",
+        "--tag",
+        "release/1",
+        &project,
+    ]));
+    let failed: serde_json::Value =
+        serde_json::from_str(&failed).expect("failed verification JSON");
+    assert_eq!(failed["valid"], false);
+    assert!(failed["errors"]
+        .as_array()
+        .expect("verification errors")
+        .iter()
+        .any(|error| error
+            .as_str()
+            .is_some_and(|error| error.contains("digest mismatch"))));
 }
 
 #[test]

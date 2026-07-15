@@ -6,12 +6,13 @@ use crate::cli::handlers::common::create_config_manager;
 use crate::error::{OmniDocError, Result};
 use crate::project_tools::content_digest;
 use crate::utils::path;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PublishArtifact {
     output: String,
     source: String,
@@ -20,7 +21,7 @@ struct PublishArtifact {
     digest: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PublishManifest {
     manifest_version: u32,
     omnidoc_version: String,
@@ -30,6 +31,14 @@ struct PublishManifest {
     published_at_unix: u64,
     library_contract: toml::Value,
     artifacts: Vec<PublishArtifact>,
+}
+
+#[derive(Debug, Serialize)]
+struct PublishVerification {
+    path: String,
+    valid: bool,
+    checked_artifacts: usize,
+    errors: Vec<String>,
 }
 
 const LIBRARY_RELEASE_CONTRACT: &str = include_str!("../../../release/omnidoc-libs.toml");
@@ -131,11 +140,17 @@ pub fn handle_publish(
     dist_dir: String,
     tag: Option<String>,
     no_build: bool,
+    verify: bool,
+    json: bool,
     force: bool,
     strict: bool,
     verbose: bool,
 ) -> Result<()> {
     let project_path = path::determine_project_path(path)?.canonicalize()?;
+    if verify {
+        let tag = tag.expect("clap requires --tag with --verify");
+        return verify_published_release(&project_path, &dist_dir, &tag, json);
+    }
     let cli_overrides = build_cli_overrides(
         to,
         outputs,
@@ -238,6 +253,202 @@ pub fn handle_publish(
     let publish_dir = transaction.commit()?;
     println!("Published artifacts to {}", publish_dir.display());
     Ok(())
+}
+
+fn verify_published_release(
+    project_path: &Path,
+    dist_dir: &str,
+    tag: &str,
+    json: bool,
+) -> Result<()> {
+    let publish_dir = resolve_publish_dir(project_path, dist_dir).join(sanitize_path_part(tag));
+    let mut verification = PublishVerification {
+        path: publish_dir.display().to_string(),
+        valid: false,
+        checked_artifacts: 0,
+        errors: Vec::new(),
+    };
+    let manifest_path = publish_dir.join("omnidoc-publish.json");
+    let manifest = match fs::read_to_string(&manifest_path) {
+        Ok(content) => match serde_json::from_str::<PublishManifest>(&content) {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                verification
+                    .errors
+                    .push(format!("invalid publish manifest: {error}"));
+                return finish_verification(verification, json);
+            }
+        },
+        Err(error) => {
+            verification.errors.push(format!(
+                "cannot read publish manifest {}: {}",
+                manifest_path.display(),
+                error
+            ));
+            return finish_verification(verification, json);
+        }
+    };
+    if manifest.manifest_version != 2 {
+        verification.errors.push(format!(
+            "unsupported publish manifest version {}",
+            manifest.manifest_version
+        ));
+    }
+    if manifest.tag != tag {
+        verification.errors.push(format!(
+            "publish tag '{}' does not match requested '{}'",
+            manifest.tag, tag
+        ));
+    }
+    let expected_library_contract = match toml::from_str::<toml::Value>(LIBRARY_RELEASE_CONTRACT) {
+        Ok(expected) => {
+            if manifest.library_contract != expected {
+                verification.errors.push(
+                    "embedded library contract does not match this OmniDoc release".to_string(),
+                );
+            }
+            Some(expected)
+        }
+        Err(error) => {
+            verification
+                .errors
+                .push(format!("invalid built-in library contract: {error}"));
+            None
+        }
+    };
+    if let Some(expected) = expected_library_contract {
+        match fs::read_to_string(publish_dir.join("omnidoc-libs.toml"))
+            .ok()
+            .and_then(|content| toml::from_str::<toml::Value>(&content).ok())
+        {
+            Some(sidecar) if sidecar == expected => {}
+            _ => verification.errors.push(
+                "published omnidoc-libs.toml does not match this OmniDoc release".to_string(),
+            ),
+        }
+    }
+
+    let mut expected_files = BTreeSet::from(["omnidoc-publish.json".to_string()]);
+    for artifact in &manifest.artifacts {
+        if !safe_publish_file_name(&artifact.destination) {
+            verification.errors.push(format!(
+                "unsafe publish artifact destination: {}",
+                artifact.destination
+            ));
+            continue;
+        }
+        if !artifact.source.starts_with("embedded:") && !safe_publish_source(&artifact.source) {
+            verification.errors.push(format!(
+                "non-portable publish artifact source: {}",
+                artifact.source
+            ));
+        }
+        if !expected_files.insert(artifact.destination.clone()) {
+            verification.errors.push(format!(
+                "duplicate publish artifact destination: {}",
+                artifact.destination
+            ));
+            continue;
+        }
+        let path = publish_dir.join(&artifact.destination);
+        let metadata = match path.symlink_metadata() {
+            Ok(metadata) if metadata.file_type().is_file() => metadata,
+            Ok(_) => {
+                verification.errors.push(format!(
+                    "publish artifact is not a regular file: {}",
+                    artifact.destination
+                ));
+                continue;
+            }
+            Err(error) => {
+                verification.errors.push(format!(
+                    "missing publish artifact {}: {}",
+                    artifact.destination, error
+                ));
+                continue;
+            }
+        };
+        if metadata.len() != artifact.bytes {
+            verification.errors.push(format!(
+                "publish artifact size mismatch: {}",
+                artifact.destination
+            ));
+        }
+        match content_digest(&path) {
+            Ok(digest) if digest != artifact.digest => verification.errors.push(format!(
+                "publish artifact digest mismatch: {}",
+                artifact.destination
+            )),
+            Err(error) => verification.errors.push(format!(
+                "cannot hash publish artifact {}: {}",
+                artifact.destination, error
+            )),
+            _ => {}
+        }
+        verification.checked_artifacts += 1;
+    }
+
+    match fs::read_dir(&publish_dir) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !expected_files.contains(&name) {
+                    verification
+                        .errors
+                        .push(format!("unexpected file in published release: {name}"));
+                }
+            }
+        }
+        Err(error) => verification.errors.push(format!(
+            "cannot inspect publish directory {}: {}",
+            publish_dir.display(),
+            error
+        )),
+    }
+    verification.valid = verification.errors.is_empty();
+    finish_verification(verification, json)
+}
+
+fn safe_publish_file_name(value: &str) -> bool {
+    !value.is_empty()
+        && !value.chars().any(|ch| matches!(ch, '/' | '\\' | ':'))
+        && Path::new(value)
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+        && Path::new(value).components().count() == 1
+}
+
+fn safe_publish_source(value: &str) -> bool {
+    !value.is_empty()
+        && !value.chars().any(|ch| matches!(ch, '\\' | ':'))
+        && !Path::new(value).is_absolute()
+        && Path::new(value)
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+}
+
+fn finish_verification(verification: PublishVerification, json: bool) -> Result<()> {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&verification)
+                .map_err(|error| OmniDocError::Other(error.to_string()))?
+        );
+    } else {
+        println!("path: {}", verification.path);
+        println!("valid: {}", verification.valid);
+        println!("checked artifacts: {}", verification.checked_artifacts);
+        for error in &verification.errors {
+            println!("error: {error}");
+        }
+    }
+    if verification.valid {
+        Ok(())
+    } else {
+        Err(OmniDocError::Other(
+            "published release verification failed".to_string(),
+        ))
+    }
 }
 
 fn copy_optional_sidecar(

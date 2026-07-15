@@ -190,6 +190,14 @@ pub enum Commands {
         #[arg(long = "no-build")]
         no_build: bool,
 
+        /// verify an existing published release instead of building or copying
+        #[arg(long, requires = "tag")]
+        verify: bool,
+
+        /// emit publish verification results as JSON
+        #[arg(long, requires = "verify")]
+        json: bool,
+
         /// force rebuild even when input cache is unchanged
         #[arg(short = 'F', long)]
         force: bool,
