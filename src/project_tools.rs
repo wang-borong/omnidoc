@@ -111,7 +111,10 @@ pub struct LockTargetInput<'a> {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LockedLibrary {
+    pub version: Option<String>,
     pub revision: Option<String>,
+    pub manifest_digest: Option<String>,
+    pub checksums_digest: Option<String>,
     pub digest: String,
 }
 
@@ -462,6 +465,28 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
     let library_root = omnidoc_library_root(config);
     let mut resources = BTreeMap::<String, ResolvedResource>::new();
     let output_kind = PandocOutputKind::from_config(config).unwrap_or(PandocOutputKind::Pdf);
+
+    let manifest_path = library_root.join("manifest.toml");
+    if let Some(path) = existing_path(manifest_path.clone()) {
+        add_resolved_resource(
+            &mut resources,
+            project_path,
+            &library_root,
+            "omnidoc-libs-manifest".to_string(),
+            path,
+        );
+    }
+    if let Some(checksum_path) = library_contract(&library_root).1 {
+        if let Some(path) = existing_path(checksum_path) {
+            add_resolved_resource(
+                &mut resources,
+                project_path,
+                &library_root,
+                "omnidoc-libs-checksums".to_string(),
+                path,
+            );
+        }
+    }
 
     for filter in output_kind.filters(config) {
         // Keep this resolution identical to PandocBuilder::push_lua_filters:
@@ -1279,10 +1304,37 @@ fn locked_library(config: &MergedConfig, resources: &[LockedResource]) -> Option
         );
         hash_field(&mut hasher, "digest", resource.digest.as_bytes());
     }
+    let library_root = omnidoc_library_root(config);
+    let (version, checksum_path) = library_contract(&library_root);
     Some(LockedLibrary {
-        revision: git_revision(&omnidoc_library_root(config)),
+        version,
+        revision: git_revision(&library_root),
+        manifest_digest: existing_path(library_root.join("manifest.toml"))
+            .and_then(|path| content_digest(&path).ok()),
+        checksums_digest: checksum_path
+            .and_then(existing_path)
+            .and_then(|path| content_digest(&path).ok()),
         digest: format_digest(hasher.finalize()),
     })
+}
+
+fn library_contract(library_root: &Path) -> (Option<String>, Option<PathBuf>) {
+    let manifest_path = library_root.join("manifest.toml");
+    let Ok(content) = fs::read_to_string(manifest_path) else {
+        return (None, None);
+    };
+    let Ok(manifest) = toml::from_str::<toml::Value>(&content) else {
+        return (None, None);
+    };
+    let version = manifest
+        .get("version")
+        .and_then(toml::Value::as_str)
+        .map(str::to_string);
+    let checksum_path = manifest
+        .get("checksum_file")
+        .and_then(toml::Value::as_str)
+        .map(|relative| library_root.join(relative));
+    (version, checksum_path)
 }
 
 fn git_revision(path: &Path) -> Option<String> {
@@ -2119,6 +2171,12 @@ mod tests {
     fn shared_resources_invalidate_cache_and_lock_uses_portable_digests() {
         let project = tempfile::tempdir().expect("project tempdir");
         let library = tempfile::tempdir().expect("library tempdir");
+        fs::write(
+            library.path().join("manifest.toml"),
+            "manifest_version = 1\nversion = '1.0.0'\nchecksum_file = 'checksums.sha256'\n",
+        )
+        .expect("library manifest");
+        fs::write(library.path().join("checksums.sha256"), "abc  payload\n").expect("checksums");
         let css_dir = library.path().join("pandoc/css");
         fs::create_dir_all(&css_dir).expect("css dir");
         fs::write(
@@ -2168,6 +2226,14 @@ mod tests {
             .resources
             .iter()
             .any(|resource| resource.logical_name == "omnidoc-base-css"));
+        assert!(graph
+            .resources
+            .iter()
+            .any(|resource| resource.logical_name == "omnidoc-libs-manifest"));
+        assert!(graph
+            .resources
+            .iter()
+            .any(|resource| resource.logical_name == "omnidoc-libs-checksums"));
         assert!(!graph
             .resources
             .iter()
@@ -2192,6 +2258,16 @@ mod tests {
         let lock_text = fs::read_to_string(project.path().join("omnidoc.lock")).expect("lock text");
         let lock: LockFile = toml::from_str(&lock_text).expect("lock v3");
         assert_eq!(lock.lock_version, 3);
+        let locked_library = lock.library.as_ref().expect("locked library");
+        assert_eq!(locked_library.version.as_deref(), Some("1.0.0"));
+        assert!(locked_library
+            .manifest_digest
+            .as_deref()
+            .is_some_and(|digest| digest.starts_with("blake3:")));
+        assert!(locked_library
+            .checksums_digest
+            .as_deref()
+            .is_some_and(|digest| digest.starts_with("blake3:")));
         let html = lock.targets.get("html").expect("html target");
         assert!(html.input_digest.starts_with("blake3:"));
         assert!(html.resources.iter().any(|resource| {

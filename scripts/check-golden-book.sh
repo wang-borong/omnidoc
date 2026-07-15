@@ -48,6 +48,13 @@ import tomllib
 lock = tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 if lock.get("lock_version") != 3:
     raise SystemExit("expected lock schema v3")
+library = lock.get("library", {})
+if library.get("version") != "1.0.0":
+    raise SystemExit(f"unexpected omnidoc-libs version: {library.get('version')}")
+if not library.get("manifest_digest", "").startswith("blake3:"):
+    raise SystemExit("missing omnidoc-libs manifest digest")
+if not library.get("checksums_digest", "").startswith("blake3:"):
+    raise SystemExit("missing omnidoc-libs checksum digest")
 targets = lock.get("targets", {})
 if set(targets) != {"html", "epub"}:
     raise SystemExit(f"unexpected lock targets: {sorted(targets)}")

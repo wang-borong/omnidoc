@@ -360,8 +360,9 @@ omnidoc lock --check
 Lock schema v3 uses BLAKE3 content digests and stores dependencies and resolved
 resources separately for every configured output target. It also records the
 selected omnidoc-libs revision/content digest and detected Pandoc,
-pandoc-crossref, and LaTeX engine versions. Older lock files must be regenerated
-with `omnidoc lock --update`.
+pandoc-crossref, and LaTeX engine versions. When the library bundle provides a
+manifest, its declared version plus manifest/checksum digests are locked as
+well. Older lock files must be regenerated with `omnidoc lock --update`.
 
 Run CI-mode validation and builds:
 
