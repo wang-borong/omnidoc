@@ -443,6 +443,13 @@ The graph merges project references with the latest include-filter depfiles;
 external included files are recorded as content-digested resources rather
 than machine-specific project paths.
 
+Every active Lua filter also receives
+`omnidoc-depfile-<normalized-filter-stem>` metadata pointing at its own `.d`
+file under `.omnidoc-cache`. A third-party filter can write the
+`# omnidoc-depfile-v1` header followed by each file it actually read. Only
+depfiles belonging to filters active for the current output are consumed, so
+stale or unrelated filter data cannot pollute the target dependency graph.
+
 Create or refresh the lock file:
 
 ```bash

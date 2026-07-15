@@ -477,20 +477,14 @@ pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> Dependenc
 
     let output_kind = PandocOutputKind::from_config(config).unwrap_or(PandocOutputKind::Pdf);
     let active_filters = output_kind.filters(config);
-    for depfile in [
-        active_filters
-            .contains(&"include-files.lua")
-            .then_some(INCLUDE_DEPFILE),
-        active_filters
-            .contains(&"include-code-files.lua")
-            .then_some(INCLUDE_CODE_DEPFILE),
-    ]
-    .into_iter()
-    .flatten()
-    {
+    let depfiles = active_filters
+        .iter()
+        .filter_map(|filter| filter_depfile_name(filter))
+        .collect::<BTreeSet<_>>();
+    for depfile in depfiles {
         load_depfile_dependencies(
             project_path,
-            depfile,
+            &depfile,
             &mut files,
             &mut pending,
             &mut depfile_resources,
@@ -533,6 +527,27 @@ pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> Dependenc
         files: files.into_iter().collect(),
         resources,
     }
+}
+
+pub(crate) fn filter_depfile_name(filter: &str) -> Option<String> {
+    let stem = Path::new(filter).file_stem()?.to_str()?;
+    let normalized = stem
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    (!normalized.is_empty()).then(|| format!("{normalized}.d"))
+}
+
+pub(crate) fn filter_depfile_metadata_key(filter: &str) -> Option<String> {
+    filter_depfile_name(filter)
+        .and_then(|name| name.strip_suffix(".d").map(str::to_string))
+        .map(|stem| format!("omnidoc-depfile-{stem}"))
 }
 
 fn track_svg_pdf_sibling(
@@ -610,7 +625,7 @@ fn load_depfile_dependencies(
             external.insert(
                 path_text.clone(),
                 ResolvedResource {
-                    logical_name: format!("include-depfile:{}", depfile_name),
+                    logical_name: format!("filter-depfile:{}", depfile_name),
                     resolved_from: "external".to_string(),
                     path: path_text,
                 },
@@ -2348,11 +2363,11 @@ fn warning(message: String, path: Option<String>, line: Option<usize>) -> Projec
 #[cfg(test)]
 mod tests {
     use super::{
-        build_input_digest, build_report, cache_hit, dependency_graph, hook_argv,
-        manifest_hook_names, parse_lint_rule_output, supported_outputs, validate_config,
-        validate_hook_command, write_cache, write_lock, write_lock_targets, HookCommand,
-        LoadedPlugin, LockFile, LockTargetInput, PluginHooks, PluginInfo, PluginManifest,
-        CACHE_DIR, INCLUDE_DEPFILE,
+        build_input_digest, build_report, cache_hit, dependency_graph, filter_depfile_metadata_key,
+        filter_depfile_name, hook_argv, manifest_hook_names, parse_lint_rule_output,
+        supported_outputs, validate_config, validate_hook_command, write_cache, write_lock,
+        write_lock_targets, HookCommand, LoadedPlugin, LockFile, LockTargetInput, PluginHooks,
+        PluginInfo, PluginManifest, CACHE_DIR, INCLUDE_DEPFILE,
     };
     use crate::config::MergedConfig;
     use std::fs;
@@ -2532,7 +2547,7 @@ mod tests {
 
         assert!(graph.files.contains(&"chapters/actual.md".to_string()));
         assert!(graph.resources.iter().any(|resource| {
-            resource.logical_name == format!("include-depfile:{}", INCLUDE_DEPFILE)
+            resource.logical_name == format!("filter-depfile:{}", INCLUDE_DEPFILE)
                 && resource.resolved_from == "external"
                 && resource.path == external.path().to_string_lossy()
         }));
@@ -2552,6 +2567,58 @@ mod tests {
             },
         );
         assert!(!ignored.files.contains(&"chapters/actual.md".to_string()));
+    }
+
+    #[test]
+    fn dependency_graph_consumes_depfiles_for_custom_active_filters() {
+        let project = tempfile::tempdir().expect("project tempdir");
+        fs::write(
+            project.path().join(".omnidoc.toml"),
+            "[project]\nentry='main.md'\n",
+        )
+        .expect("config");
+        fs::write(project.path().join("main.md"), "# Main\n").expect("entry");
+        fs::create_dir_all(project.path().join("data")).expect("data dir");
+        fs::write(project.path().join("data/custom.json"), "{}\n").expect("custom data");
+        fs::create_dir_all(project.path().join(CACHE_DIR)).expect("cache dir");
+        fs::write(
+            project.path().join(CACHE_DIR).join("custom-reader.d"),
+            format!(
+                "# omnidoc-depfile-v1\n{}\n",
+                project.path().join("data/custom.json").display()
+            ),
+        )
+        .expect("custom depfile");
+        fs::write(
+            project.path().join(CACHE_DIR).join(INCLUDE_DEPFILE),
+            format!(
+                "# omnidoc-depfile-v1\n{}\n",
+                project.path().join("inactive.md").display()
+            ),
+        )
+        .expect("inactive depfile");
+        fs::write(project.path().join("inactive.md"), "# Inactive\n").expect("inactive source");
+
+        let graph = dependency_graph(
+            project.path(),
+            &MergedConfig {
+                entry: Some("main.md".to_string()),
+                to: Some("html".to_string()),
+                pandoc_lua_filters: vec!["filters/Custom Reader.lua".to_string()],
+                ..Default::default()
+            },
+        );
+
+        assert!(graph.files.contains(&"data/custom.json".to_string()));
+        assert!(!graph.files.contains(&"inactive.md".to_string()));
+        assert_eq!(
+            filter_depfile_name("filters/Custom Reader.lua").as_deref(),
+            Some("custom-reader.d")
+        );
+        assert_eq!(
+            filter_depfile_metadata_key("filters/Custom Reader.lua").as_deref(),
+            Some("omnidoc-depfile-custom-reader")
+        );
     }
 
     #[test]

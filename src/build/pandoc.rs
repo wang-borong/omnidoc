@@ -6,9 +6,12 @@ use crate::cli::handlers::theme::{load_theme_manifest, ThemeManifest};
 use crate::config::MergedConfig;
 use crate::constants::pandoc;
 use crate::error::{OmniDocError, Result};
-use crate::project_tools::{INCLUDE_CODE_DEPFILE, INCLUDE_DEPFILE};
+use crate::project_tools::{
+    filter_depfile_metadata_key, filter_depfile_name, INCLUDE_CODE_DEPFILE, INCLUDE_DEPFILE,
+};
 use crate::utils::fs;
 use dirs::data_local_dir;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// Pandoc 构建器
@@ -552,6 +555,19 @@ impl BuildPipeline for PandocBuilder {
         ] {
             options.push(pandoc::FLAG_METADATA.to_string());
             options.push(format!("{}={}", key, cache_dir.join(file).display()));
+        }
+        let mut generic_depfiles = BTreeSet::new();
+        for filter in output_kind.filters(&self.config) {
+            let Some(key) = filter_depfile_metadata_key(filter) else {
+                continue;
+            };
+            let Some(file) = filter_depfile_name(filter) else {
+                continue;
+            };
+            if generic_depfiles.insert(key.clone()) {
+                options.push(pandoc::FLAG_METADATA.to_string());
+                options.push(format!("{}={}", key, cache_dir.join(file).display()));
+            }
         }
 
         let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
