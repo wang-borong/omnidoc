@@ -143,10 +143,35 @@ pub fn handle_ci(path: Option<String>, outputs: Vec<String>) -> Result<()> {
 
 pub fn handle_lock(path: Option<String>, check: bool, update: bool) -> Result<()> {
     let project_path = path::determine_project_path(path)?.canonicalize()?;
-    let config_manager = create_config_manager_default(Some(&project_path))?;
-    let graph = project_tools::dependency_graph(&project_path, config_manager.get_merged());
+    let base_manager = create_config_manager_default(Some(&project_path))?;
+    let base_config = base_manager.get_merged();
+    let outputs = if base_config.outputs.is_empty() {
+        vec![base_config.to.clone().unwrap_or_else(|| "pdf".to_string())]
+    } else {
+        base_config.outputs.clone()
+    };
+    let targets = outputs
+        .into_iter()
+        .map(|output| {
+            let manager = create_config_manager(
+                Some(&project_path),
+                CliOverrides::new().with_to(Some(output.clone())),
+            )?;
+            let config = manager.get_merged().clone();
+            let graph = project_tools::dependency_graph(&project_path, &config);
+            Ok((output, config, graph))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let inputs = targets
+        .iter()
+        .map(|(output, config, graph)| project_tools::LockTargetInput {
+            output,
+            config,
+            graph,
+        })
+        .collect::<Vec<_>>();
     if check {
-        let status = project_tools::check_lock(&project_path, config_manager.get_merged(), &graph)?;
+        let status = project_tools::check_lock_targets(&project_path, &inputs)?;
         if status.up_to_date {
             println!("omnidoc.lock is up to date");
             return Ok(());
@@ -162,7 +187,7 @@ pub fn handle_lock(path: Option<String>, check: bool, update: bool) -> Result<()
         println!("omnidoc.lock already exists; use --update to rewrite it");
         return Ok(());
     }
-    project_tools::write_lock(&project_path, config_manager.get_merged(), &graph)?;
+    project_tools::write_lock_targets(&project_path, &inputs)?;
     println!("Wrote {}", project_path.join("omnidoc.lock").display());
     Ok(())
 }

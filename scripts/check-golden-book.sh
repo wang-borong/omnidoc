@@ -40,6 +40,22 @@ rg -q 'id="本章小结-1"|id="本章小结-2"' "$html"
 rg -q 'omnidoc-base-css' "$lock"
 rg -q 'lua-filter:display-math.lua' "$lock"
 jq -e '.reports | length == 2 and all(.artifact_digest | startswith("blake3:"))' "$report" >/dev/null
+python3 - "$lock" <<'PY'
+import pathlib
+import sys
+import tomllib
+
+lock = tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+if lock.get("lock_version") != 3:
+    raise SystemExit("expected lock schema v3")
+targets = lock.get("targets", {})
+if set(targets) != {"html", "epub"}:
+    raise SystemExit(f"unexpected lock targets: {sorted(targets)}")
+for name, target in targets.items():
+    if not target.get("input_digest", "").startswith("blake3:"):
+        raise SystemExit(f"missing digest for {name}")
+PY
+"$bin" lock --check "$work/book"
 
 unzip -tq "$epub" >/dev/null
 test "$(zipinfo -1 "$epub" | rg -c '\.svg$')" -ge 2

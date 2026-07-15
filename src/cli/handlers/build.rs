@@ -82,42 +82,42 @@ pub fn build_project_outputs(
     let merged = config_manager.get_merged().clone();
     let outputs = resolve_outputs(&merged, &cli_overrides, all);
     let mut reports = Vec::new();
+    let mut per_output_options = run_options.clone();
+    per_output_options.write_lock = false;
 
     if outputs.len() == 1 {
         let report = build_project_once(
             project_path,
-            cli_overrides.with_to(outputs.into_iter().next()),
-            run_options.clone(),
+            cli_overrides.clone().with_to(outputs.into_iter().next()),
+            per_output_options.clone(),
             verbose,
         )?;
         reports.push(report);
-        if run_options.report {
-            project_tools::write_reports(project_path, &merged, &reports)?;
-        }
-        return Ok(());
-    }
-
-    if outputs.is_empty() {
-        let report = build_project_once(project_path, cli_overrides, run_options.clone(), verbose)?;
-        reports.push(report);
-        if run_options.report {
-            project_tools::write_reports(project_path, &merged, &reports)?;
-        }
-        return Ok(());
-    }
-
-    for output in outputs {
-        let output_overrides = cli_overrides.clone().with_to(Some(output));
-        reports.push(build_project_once(
+    } else if outputs.is_empty() {
+        let report = build_project_once(
             project_path,
-            output_overrides,
-            run_options.clone(),
+            cli_overrides.clone(),
+            per_output_options.clone(),
             verbose,
-        )?);
+        )?;
+        reports.push(report);
+    } else {
+        for output in outputs {
+            let output_overrides = cli_overrides.clone().with_to(Some(output));
+            reports.push(build_project_once(
+                project_path,
+                output_overrides,
+                per_output_options.clone(),
+                verbose,
+            )?);
+        }
     }
 
     if run_options.report {
         project_tools::write_reports(project_path, &merged, &reports)?;
+    }
+    if run_options.write_lock {
+        write_lock_for_reports(project_path, &cli_overrides, &reports)?;
     }
 
     Ok(())
@@ -217,9 +217,6 @@ fn build_project_once(
     project_tools::run_plugin_hook(&build_context, project_tools::PluginHook::PostBuild)?;
 
     project_tools::write_cache(project_path, &output, &input_digest)?;
-    if run_options.write_lock {
-        project_tools::write_lock(project_path, &config, &graph)?;
-    }
     Ok(project_tools::build_report(
         project_tools::BuildReportContext {
             output,
@@ -234,6 +231,34 @@ fn build_project_once(
             issues,
         },
     ))
+}
+
+fn write_lock_for_reports(
+    project_path: &Path,
+    cli_overrides: &CliOverrides,
+    reports: &[project_tools::BuildReport],
+) -> Result<()> {
+    let targets = reports
+        .iter()
+        .map(|report| {
+            let config_manager = create_config_manager(
+                Some(project_path),
+                cli_overrides.clone().with_to(Some(report.output.clone())),
+            )?;
+            let config = config_manager.get_merged().clone();
+            let graph = project_tools::dependency_graph(project_path, &config);
+            Ok((report.output.clone(), config, graph))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let inputs = targets
+        .iter()
+        .map(|(output, config, graph)| project_tools::LockTargetInput {
+            output,
+            config,
+            graph,
+        })
+        .collect::<Vec<_>>();
+    project_tools::write_lock_targets(project_path, &inputs)
 }
 
 pub fn build_cli_overrides(

@@ -14,7 +14,8 @@ use walkdir::WalkDir;
 const CACHE_DIR: &str = ".omnidoc-cache";
 const LOCK_FILE: &str = "omnidoc.lock";
 const REPORT_FILE: &str = "omnidoc-report.json";
-const LOCK_VERSION: u32 = 2;
+const CACHE_VERSION: u32 = 2;
+const LOCK_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum IssueSeverity {
@@ -90,11 +91,22 @@ struct BuildCache {
 pub struct LockFile {
     pub lock_version: u32,
     pub omnidoc_version: String,
-    pub input_digest: String,
     pub library: Option<LockedLibrary>,
     pub toolchain: BTreeMap<String, String>,
+    pub targets: BTreeMap<String, LockedTarget>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LockedTarget {
+    pub input_digest: String,
     pub resources: Vec<LockedResource>,
     pub dependencies: Vec<String>,
+}
+
+pub struct LockTargetInput<'a> {
+    pub output: &'a str,
+    pub config: &'a MergedConfig,
+    pub graph: &'a DependencyGraph,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -113,6 +125,16 @@ pub struct LockedResource {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockStatus {
     pub exists: bool,
+    pub up_to_date: bool,
+    pub library_up_to_date: bool,
+    pub toolchain_up_to_date: bool,
+    pub missing_targets: Vec<String>,
+    pub extra_targets: Vec<String>,
+    pub targets: BTreeMap<String, LockTargetStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LockTargetStatus {
     pub up_to_date: bool,
     pub expected_digest: String,
     pub actual_digest: Option<String>,
@@ -975,14 +997,14 @@ pub fn cache_hit(project_path: &Path, output: &str, digest: &str) -> bool {
         return false;
     };
     serde_json::from_str::<BuildCache>(&content)
-        .map(|cache| cache.cache_version == LOCK_VERSION && cache.input_digest == digest)
+        .map(|cache| cache.cache_version == CACHE_VERSION && cache.input_digest == digest)
         .unwrap_or(false)
 }
 
 pub fn write_cache(project_path: &Path, output: &str, digest: &str) -> Result<()> {
     fs::create_dir_all(project_path.join(CACHE_DIR))?;
     let cache = BuildCache {
-        cache_version: LOCK_VERSION,
+        cache_version: CACHE_VERSION,
         input_digest: digest.to_string(),
     };
     let content =
@@ -1026,16 +1048,49 @@ pub fn write_lock(
     config: &MergedConfig,
     graph: &DependencyGraph,
 ) -> Result<()> {
-    let digest = input_digest(project_path, graph)?;
-    let resources = locked_resources(graph)?;
+    let output = config
+        .to
+        .as_deref()
+        .or(config.pandoc_to_format.as_deref())
+        .unwrap_or("pdf");
+    write_lock_targets(
+        project_path,
+        &[LockTargetInput {
+            output,
+            config,
+            graph,
+        }],
+    )
+}
+
+pub fn write_lock_targets(project_path: &Path, inputs: &[LockTargetInput<'_>]) -> Result<()> {
+    let Some(first) = inputs.first() else {
+        return Err(OmniDocError::Other(
+            "cannot write a lock file without targets".to_string(),
+        ));
+    };
+    let mut targets = BTreeMap::new();
+    let mut all_resources = BTreeMap::new();
+    for input in inputs {
+        let target = locked_target(project_path, input)?;
+        for resource in &target.resources {
+            all_resources.insert(
+                format!(
+                    "{}:{}:{}",
+                    resource.logical_name, resource.resolved_from, resource.digest
+                ),
+                resource.clone(),
+            );
+        }
+        targets.insert(input.output.to_ascii_lowercase(), target);
+    }
+    let resources = all_resources.into_values().collect::<Vec<_>>();
     let lock = LockFile {
         lock_version: LOCK_VERSION,
         omnidoc_version: env!("CARGO_PKG_VERSION").to_string(),
-        input_digest: digest,
-        library: locked_library(config, &resources),
-        toolchain: toolchain_versions(config),
-        resources,
-        dependencies: graph.files.clone(),
+        library: locked_library(first.config, &resources),
+        toolchain: toolchain_versions(first.config),
+        targets,
     };
     let content =
         toml::to_string_pretty(&lock).map_err(|err| OmniDocError::Other(err.to_string()))?;
@@ -1048,48 +1103,148 @@ pub fn check_lock(
     config: &MergedConfig,
     graph: &DependencyGraph,
 ) -> Result<LockStatus> {
-    let expected_digest = input_digest(project_path, graph)?;
+    let output = config
+        .to
+        .as_deref()
+        .or(config.pandoc_to_format.as_deref())
+        .unwrap_or("pdf");
+    check_lock_targets(
+        project_path,
+        &[LockTargetInput {
+            output,
+            config,
+            graph,
+        }],
+    )
+}
+
+pub fn check_lock_targets(
+    project_path: &Path,
+    inputs: &[LockTargetInput<'_>],
+) -> Result<LockStatus> {
     let lock_path = project_path.join(LOCK_FILE);
     if !lock_path.exists() {
+        let mut targets = BTreeMap::new();
+        for input in inputs {
+            let expected = locked_target(project_path, input)?;
+            targets.insert(
+                input.output.to_ascii_lowercase(),
+                LockTargetStatus {
+                    up_to_date: false,
+                    expected_digest: expected.input_digest,
+                    actual_digest: None,
+                    missing_dependencies: expected.dependencies,
+                    extra_dependencies: Vec::new(),
+                },
+            );
+        }
         return Ok(LockStatus {
             exists: false,
             up_to_date: false,
-            expected_digest,
-            actual_digest: None,
-            missing_dependencies: graph.files.clone(),
-            extra_dependencies: Vec::new(),
+            library_up_to_date: false,
+            toolchain_up_to_date: false,
+            missing_targets: inputs
+                .iter()
+                .map(|input| input.output.to_ascii_lowercase())
+                .collect(),
+            extra_targets: Vec::new(),
+            targets,
         });
     }
 
     let content = fs::read_to_string(&lock_path)?;
     let lock: LockFile =
         toml::from_str(&content).map_err(|err| OmniDocError::Other(err.to_string()))?;
-    let expected_dependencies = graph.files.iter().cloned().collect::<BTreeSet<_>>();
-    let actual_dependencies = lock.dependencies.iter().cloned().collect::<BTreeSet<_>>();
-    let missing_dependencies = expected_dependencies
-        .difference(&actual_dependencies)
+    let expected_names = inputs
+        .iter()
+        .map(|input| input.output.to_ascii_lowercase())
+        .collect::<BTreeSet<_>>();
+    let actual_names = lock.targets.keys().cloned().collect::<BTreeSet<_>>();
+    let missing_targets = expected_names
+        .difference(&actual_names)
         .cloned()
         .collect::<Vec<_>>();
-    let extra_dependencies = actual_dependencies
-        .difference(&expected_dependencies)
+    let extra_targets = actual_names
+        .difference(&expected_names)
         .cloned()
         .collect::<Vec<_>>();
-    let expected_resources = locked_resources(graph)?;
+    let mut statuses = BTreeMap::new();
+    let mut all_resources = BTreeMap::new();
+    for input in inputs {
+        let name = input.output.to_ascii_lowercase();
+        let expected = locked_target(project_path, input)?;
+        for resource in &expected.resources {
+            all_resources.insert(
+                format!(
+                    "{}:{}:{}",
+                    resource.logical_name, resource.resolved_from, resource.digest
+                ),
+                resource.clone(),
+            );
+        }
+        let actual = lock.targets.get(&name);
+        let expected_dependencies = expected
+            .dependencies
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let actual_dependencies = actual
+            .map(|target| target.dependencies.iter().cloned().collect::<BTreeSet<_>>())
+            .unwrap_or_default();
+        let missing_dependencies = expected_dependencies
+            .difference(&actual_dependencies)
+            .cloned()
+            .collect::<Vec<_>>();
+        let extra_dependencies = actual_dependencies
+            .difference(&expected_dependencies)
+            .cloned()
+            .collect::<Vec<_>>();
+        let target_up_to_date = actual.is_some_and(|target| {
+            target.input_digest == expected.input_digest
+                && target.resources == expected.resources
+                && missing_dependencies.is_empty()
+                && extra_dependencies.is_empty()
+        });
+        statuses.insert(
+            name,
+            LockTargetStatus {
+                up_to_date: target_up_to_date,
+                expected_digest: expected.input_digest,
+                actual_digest: actual.map(|target| target.input_digest.clone()),
+                missing_dependencies,
+                extra_dependencies,
+            },
+        );
+    }
+    let resources = all_resources.into_values().collect::<Vec<_>>();
+    let first_config = inputs.first().map(|input| input.config);
+    let library_up_to_date =
+        first_config.is_some_and(|config| lock.library == locked_library(config, &resources));
+    let toolchain_up_to_date =
+        first_config.is_some_and(|config| lock.toolchain == toolchain_versions(config));
     let up_to_date = lock.lock_version == LOCK_VERSION
-        && lock.input_digest == expected_digest
-        && lock.resources == expected_resources
-        && lock.library == locked_library(config, &expected_resources)
-        && lock.toolchain == toolchain_versions(config)
-        && missing_dependencies.is_empty()
-        && extra_dependencies.is_empty();
+        && missing_targets.is_empty()
+        && extra_targets.is_empty()
+        && library_up_to_date
+        && toolchain_up_to_date
+        && statuses.values().all(|status| status.up_to_date);
 
     Ok(LockStatus {
         exists: true,
         up_to_date,
-        expected_digest,
-        actual_digest: Some(lock.input_digest),
-        missing_dependencies,
-        extra_dependencies,
+        library_up_to_date,
+        toolchain_up_to_date,
+        missing_targets,
+        extra_targets,
+        targets: statuses,
+    })
+}
+
+fn locked_target(project_path: &Path, input: &LockTargetInput<'_>) -> Result<LockedTarget> {
+    Ok(LockedTarget {
+        input_digest: build_input_digest(project_path, input.graph, input.config, input.output)?,
+        resources: locked_resources(input.graph)?,
+        dependencies: input.graph.files.clone(),
     })
 }
 
@@ -1854,8 +2009,8 @@ mod tests {
     use super::{
         build_input_digest, build_report, cache_hit, dependency_graph, hook_argv,
         manifest_hook_names, parse_lint_rule_output, supported_outputs, validate_config,
-        validate_hook_command, write_cache, write_lock, HookCommand, LoadedPlugin, LockFile,
-        PluginHooks, PluginInfo, PluginManifest,
+        validate_hook_command, write_cache, write_lock, write_lock_targets, HookCommand,
+        LoadedPlugin, LockFile, LockTargetInput, PluginHooks, PluginInfo, PluginManifest,
     };
     use crate::config::MergedConfig;
     use std::fs;
@@ -2035,10 +2190,11 @@ mod tests {
 
         write_lock(project.path(), &config, &graph).expect("lock");
         let lock_text = fs::read_to_string(project.path().join("omnidoc.lock")).expect("lock text");
-        let lock: LockFile = toml::from_str(&lock_text).expect("lock v2");
-        assert_eq!(lock.lock_version, 2);
-        assert!(lock.input_digest.starts_with("blake3:"));
-        assert!(lock.resources.iter().any(|resource| {
+        let lock: LockFile = toml::from_str(&lock_text).expect("lock v3");
+        assert_eq!(lock.lock_version, 3);
+        let html = lock.targets.get("html").expect("html target");
+        assert!(html.input_digest.starts_with("blake3:"));
+        assert!(html.resources.iter().any(|resource| {
             resource.logical_name == "html-css"
                 && resource.resolved_from == "omnidoc-libs"
                 && resource.digest.starts_with("blake3:")
@@ -2077,6 +2233,53 @@ mod tests {
             .as_deref()
             .is_some_and(|digest| digest.starts_with("blake3:")));
         assert!(report.toolchain.contains_key("pandoc"));
+    }
+
+    #[test]
+    fn lock_v3_keeps_multiple_output_targets() {
+        let project = tempfile::tempdir().expect("project");
+        fs::write(project.path().join("main.md"), "# Book\n").expect("entry");
+        let html_config = MergedConfig {
+            entry: Some("main.md".to_string()),
+            to: Some("html".to_string()),
+            ..Default::default()
+        };
+        let epub_config = MergedConfig {
+            entry: Some("main.md".to_string()),
+            to: Some("epub".to_string()),
+            ..Default::default()
+        };
+        let html_graph = dependency_graph(project.path(), &html_config);
+        let epub_graph = dependency_graph(project.path(), &epub_config);
+
+        write_lock_targets(
+            project.path(),
+            &[
+                LockTargetInput {
+                    output: "html",
+                    config: &html_config,
+                    graph: &html_graph,
+                },
+                LockTargetInput {
+                    output: "epub",
+                    config: &epub_config,
+                    graph: &epub_graph,
+                },
+            ],
+        )
+        .expect("multi-target lock");
+
+        let lock_text = fs::read_to_string(project.path().join("omnidoc.lock")).expect("lock");
+        let lock: LockFile = toml::from_str(&lock_text).expect("lock v3");
+        assert_eq!(lock.lock_version, 3);
+        assert_eq!(
+            lock.targets.keys().cloned().collect::<Vec<_>>(),
+            ["epub", "html"]
+        );
+        assert_ne!(
+            lock.targets["html"].input_digest,
+            lock.targets["epub"].input_digest
+        );
     }
 
     #[test]
