@@ -2,6 +2,8 @@ name: CICD
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * 1'
   pull_request:
   push:
     branches:
@@ -130,6 +132,44 @@ jobs:
         env:
           OMNIDOC_LIBS: ${{ github.workspace }}/omnidoc-libs
         run: scripts/check-golden-book.sh
+
+  golden-pdf:
+    name: Golden Book (PDF)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: wang-borong/omnidoc-libs
+          path: omnidoc-libs
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: pandoc/actions/setup@v1
+        with:
+          version: ${{ env.PANDOC_VERSION }}
+      - name: Install PDF integration dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            fonts-noto-cjk jq libssl-dev pkg-config poppler-utils ripgrep \
+            texlive-fonts-recommended texlive-lang-chinese texlive-latex-extra \
+            texlive-xetex xz-utils
+          curl --fail --location --retry 3 \
+            --output /tmp/pandoc-crossref.tar.xz \
+            "https://github.com/lierdakil/pandoc-crossref/releases/download/v${PANDOC_CROSSREF_VERSION}/pandoc-crossref-Linux-X64.tar.xz"
+          tar --extract --xz --file /tmp/pandoc-crossref.tar.xz --directory /tmp pandoc-crossref
+          sudo install -m 0755 /tmp/pandoc-crossref /usr/local/bin/pandoc-crossref
+      - name: Report PDF toolchain
+        run: |
+          pandoc --version
+          pandoc-crossref --version
+          xelatex --version
+          fc-match "Noto Serif CJK SC"
+      - name: Build and verify Golden PDF
+        env:
+          OMNIDOC_LIBS: ${{ github.workspace }}/omnidoc-libs
+        run: scripts/check-golden-pdf.sh
 
   msrv:
     name: Minimum supported Rust version

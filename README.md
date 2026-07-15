@@ -447,6 +447,7 @@ Run the real Pandoc Golden Book gate locally before release-oriented changes:
 
 ```bash
 OMNIDOC_LIBS=../omnidoc-libs scripts/check-golden-book.sh
+OMNIDOC_LIBS=../omnidoc-libs scripts/check-golden-pdf.sh
 ```
 
 The gate builds HTML and EPUB from a recursive-include fixture, checks MathML,
@@ -454,9 +455,15 @@ display-math layout, repeated heading IDs, packaged CSS/images, lock/report
 digests, and shared-resource cache invalidation. It also runs EPUBCheck when the
 `epubcheck` executable is installed.
 
+The PDF gate additionally exercises XeLaTeX, the engineering-book LaTeX
+package, CJK text, admonitions, deterministic SVG-to-PDF sibling assets, page
+generation, embedded/subset fonts, lock contents, and cache invalidation.
+
 GitHub Actions runs the same gate with pinned Pandoc and pandoc-crossref
 versions and requires EPUBCheck, so pull requests exercise the real HTML/EPUB
 toolchain rather than only the Rust command-construction layer.
+The heavier PDF gate runs weekly, for version tags, and when manually
+dispatched.
 
 List discovered local plugins and external template manifests:
 

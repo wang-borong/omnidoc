@@ -509,6 +509,15 @@ pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> Dependenc
                 &mut files,
                 &mut pending,
             );
+            if matches!(output_kind, PandocOutputKind::Pdf | PandocOutputKind::Latex) {
+                track_svg_pdf_sibling(
+                    project_path,
+                    base,
+                    Path::new(&referenced),
+                    &mut files,
+                    &mut pending,
+                );
+            }
         }
     }
 
@@ -523,6 +532,30 @@ pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> Dependenc
         files: files.into_iter().collect(),
         resources,
     }
+}
+
+fn track_svg_pdf_sibling(
+    project_path: &Path,
+    base: &Path,
+    referenced: &Path,
+    files: &mut BTreeSet<String>,
+    pending: &mut Vec<PathBuf>,
+) {
+    if !referenced
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"))
+    {
+        return;
+    }
+
+    track_dependency(
+        project_path,
+        base,
+        &referenced.with_extension("pdf"),
+        files,
+        pending,
+    );
 }
 
 fn load_depfile_dependencies(
@@ -2366,6 +2399,44 @@ mod tests {
         assert!(!graph.files.iter().any(|path| path.starts_with("tmp/")));
 
         fs::remove_dir_all(project).expect("cleanup");
+    }
+
+    #[test]
+    fn pdf_dependency_graph_tracks_pre_rendered_svg_siblings() {
+        let project = tempfile::tempdir().expect("project tempdir");
+        fs::create_dir_all(project.path().join("assets")).expect("assets dir");
+        fs::write(
+            project.path().join(".omnidoc.toml"),
+            "[project]\nentry='main.md'\n",
+        )
+        .expect("config");
+        fs::write(
+            project.path().join("main.md"),
+            "# Book\n\n![diagram](assets/diagram.svg)\n",
+        )
+        .expect("entry");
+        fs::write(project.path().join("assets/diagram.svg"), b"<svg/>").expect("svg");
+        fs::write(project.path().join("assets/diagram.pdf"), b"pdf").expect("pdf");
+
+        let pdf_graph = dependency_graph(
+            project.path(),
+            &MergedConfig {
+                entry: Some("main.md".to_string()),
+                to: Some("pdf".to_string()),
+                ..Default::default()
+            },
+        );
+        assert!(pdf_graph.files.contains(&"assets/diagram.pdf".to_string()));
+
+        let html_graph = dependency_graph(
+            project.path(),
+            &MergedConfig {
+                entry: Some("main.md".to_string()),
+                to: Some("html".to_string()),
+                ..Default::default()
+            },
+        );
+        assert!(!html_graph.files.contains(&"assets/diagram.pdf".to_string()));
     }
 
     #[test]
