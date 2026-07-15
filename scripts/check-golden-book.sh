@@ -28,18 +28,26 @@ html="$work/book/build/golden-book.html"
 epub="$work/book/build/golden-book.epub"
 report="$work/book/build/omnidoc-report.json"
 lock="$work/book/omnidoc.lock"
+include_depfile="$work/book/.omnidoc-cache/include-files.d"
+include_code_depfile="$work/book/.omnidoc-cache/include-code-files.d"
 test -s "$html"
 test -s "$epub"
 test -s "$report"
 test -s "$lock"
+test -s "$include_depfile"
+test -s "$include_code_depfile"
 
 rg -q 'class="omni-display-math"' "$html"
 rg -q 'display="inline"' "$html"
 rg -q 'display="block"' "$html"
+rg -q 'nested include-code works' "$html"
 rg -q 'id="本章小结-1"|id="本章小结-2"' "$html"
 rg -q 'omnidoc-base-css' "$lock"
 rg -q 'lua-filter:display-math.lua' "$lock"
 rg -q 'theme-manifest:engineering-book' "$lock"
+rg -q 'chapters/chapter-one.md' "$include_depfile"
+rg -q 'chapters/nested/details.md' "$include_depfile"
+rg -q 'assets/example.rs' "$include_code_depfile"
 jq -e '.reports | length == 2 and all(.artifact_digest | startswith("blake3:"))' "$report" >/dev/null
 python3 - "$lock" <<'PY'
 import pathlib
@@ -64,6 +72,8 @@ for name, target in targets.items():
         raise SystemExit(f"missing digest for {name}")
 PY
 "$bin" lock --check "$work/book"
+"$bin" build "$work/book" --to html --report
+jq -e '.reports[0].skipped == true and .reports[0].cache_reason == "input_digest_match"' "$report" >/dev/null
 
 unzip -tq "$epub" >/dev/null
 test "$(zipinfo -1 "$epub" | rg -c '\.svg$')" -ge 2
@@ -88,6 +98,10 @@ visible = re.sub(r"<annotation\b[^>]*>.*?</annotation>", "", content, flags=re.S
 if r"\int_0^1" in visible:
     raise SystemExit("raw TeX leaked outside MathML annotation")
 PY
+
+printf '\nDepfile invalidation probe.\n' >> "$work/book/chapters/nested/details.md"
+"$bin" build "$work/book" --to html --report
+jq -e '.reports[0].skipped == false and .reports[0].cache_reason == "input_digest_changed"' "$report" >/dev/null
 
 printf '\n/* cache invalidation probe */\n' >> "$work/data/omnidoc/pandoc/css/omnidoc-base.css"
 "$bin" build "$work/book" --to html --report

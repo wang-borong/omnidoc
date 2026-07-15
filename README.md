@@ -159,6 +159,12 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    input and artifact BLAKE3 digests, resolved resource digests, and detected
    Pandoc/pandoc-crossref/LaTeX toolchain versions.
 
+   The Markdown and code include filters emit authoritative depfiles under
+   `.omnidoc-cache/`. After the first successful build, recursive files that
+   were actually transcluded are used directly by cache, report, and lock
+   generation. The initial build retains a conservative source scan so no
+   separate dependency-generation step is required.
+
    Examples:
 
    ```bash
@@ -399,6 +405,10 @@ Inspect the tracked dependency graph used by cache, reports, and lock files:
 omnidoc deps [PATH]
 omnidoc deps --json
 ```
+
+The graph merges project references with the latest include-filter depfiles;
+external included files are recorded as content-digested resources rather
+than machine-specific project paths.
 
 Create or refresh the lock file:
 

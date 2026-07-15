@@ -6,6 +6,7 @@ use crate::cli::handlers::theme::{load_theme_manifest, ThemeManifest};
 use crate::config::MergedConfig;
 use crate::constants::pandoc;
 use crate::error::{OmniDocError, Result};
+use crate::project_tools::{INCLUDE_CODE_DEPFILE, INCLUDE_DEPFILE};
 use crate::utils::fs;
 use dirs::data_local_dir;
 use std::path::{Path, PathBuf};
@@ -537,12 +538,21 @@ impl BuildPipeline for PandocBuilder {
 
         let output_kind = PandocOutputKind::from_config(&self.config)?;
         let output_file = outdir.join(format!("{}.{}", target_name, output_kind.extension()));
-        let options = self.build_command_options(
+        let mut options = self.build_command_options(
             &entry_file,
             &output_file,
             output_kind,
             &PandocCommandProfile::Project,
         )?;
+        let cache_dir = project_path.join(".omnidoc-cache");
+        fs::create_dir_all(&cache_dir)?;
+        for (key, file) in [
+            ("omnidoc-include-depfile", INCLUDE_DEPFILE),
+            ("omnidoc-include-code-depfile", INCLUDE_CODE_DEPFILE),
+        ] {
+            options.push(pandoc::FLAG_METADATA.to_string());
+            options.push(format!("{}={}", key, cache_dir.join(file).display()));
+        }
 
         let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
         if let Err(err) =

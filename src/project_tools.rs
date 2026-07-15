@@ -13,9 +13,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
 const CACHE_DIR: &str = ".omnidoc-cache";
+pub(crate) const INCLUDE_DEPFILE: &str = "include-files.d";
+pub(crate) const INCLUDE_CODE_DEPFILE: &str = "include-code-files.d";
 const LOCK_FILE: &str = "omnidoc.lock";
 const REPORT_FILE: &str = "omnidoc-report.json";
-const CACHE_VERSION: u32 = 2;
+const CACHE_VERSION: u32 = 3;
 const LOCK_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -424,6 +426,7 @@ pub fn lint_project(project_path: &Path) -> Vec<ProjectIssue> {
 pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> DependencyGraph {
     let mut files = BTreeSet::new();
     let mut pending = Vec::new();
+    let mut depfile_resources = BTreeMap::new();
 
     track_dependency(
         project_path,
@@ -456,6 +459,28 @@ pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> Dependenc
         );
     }
 
+    let output_kind = PandocOutputKind::from_config(config).unwrap_or(PandocOutputKind::Pdf);
+    let active_filters = output_kind.filters(config);
+    for depfile in [
+        active_filters
+            .contains(&"include-files.lua")
+            .then_some(INCLUDE_DEPFILE),
+        active_filters
+            .contains(&"include-code-files.lua")
+            .then_some(INCLUDE_CODE_DEPFILE),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        load_depfile_dependencies(
+            project_path,
+            depfile,
+            &mut files,
+            &mut pending,
+            &mut depfile_resources,
+        );
+    }
+
     while let Some(file) = pending.pop() {
         let Ok(content) = fs::read_to_string(&file) else {
             continue;
@@ -472,9 +497,76 @@ pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> Dependenc
         }
     }
 
+    let mut resources = resolved_build_resources(project_path, config);
+    resources.extend(depfile_resources.into_values());
+    resources.sort_by(|left, right| {
+        (&left.logical_name, &left.path).cmp(&(&right.logical_name, &right.path))
+    });
+    resources
+        .dedup_by(|left, right| left.logical_name == right.logical_name && left.path == right.path);
     DependencyGraph {
         files: files.into_iter().collect(),
-        resources: resolved_build_resources(project_path, config),
+        resources,
+    }
+}
+
+fn load_depfile_dependencies(
+    project_path: &Path,
+    depfile_name: &str,
+    files: &mut BTreeSet<String>,
+    pending: &mut Vec<PathBuf>,
+    external: &mut BTreeMap<String, ResolvedResource>,
+) {
+    let depfile = project_path.join(CACHE_DIR).join(depfile_name);
+    let Ok(metadata) = fs::metadata(&depfile) else {
+        return;
+    };
+    if metadata.len() > 1024 * 1024 {
+        return;
+    }
+    let Ok(content) = fs::read_to_string(&depfile) else {
+        return;
+    };
+    let mut lines = content.lines();
+    if lines.next() != Some("# omnidoc-depfile-v1") {
+        return;
+    }
+    let canonical_project = project_path
+        .canonicalize()
+        .unwrap_or_else(|_| project_path.to_path_buf());
+    for line in lines {
+        let dependency = line.trim();
+        if dependency.is_empty() || dependency.starts_with('#') {
+            continue;
+        }
+        let path = PathBuf::from(dependency);
+        let candidate = if path.is_absolute() {
+            path
+        } else {
+            project_path.join(path)
+        };
+        let Ok(canonical) = candidate.canonicalize() else {
+            continue;
+        };
+        if !canonical.is_file() {
+            continue;
+        }
+        if canonical.starts_with(&canonical_project) {
+            let relative = display_relative(&canonical_project, &canonical);
+            if files.insert(relative) {
+                pending.push(canonical);
+            }
+        } else {
+            let path_text = canonical.to_string_lossy().to_string();
+            external.insert(
+                path_text.clone(),
+                ResolvedResource {
+                    logical_name: format!("include-depfile:{}", depfile_name),
+                    resolved_from: "external".to_string(),
+                    path: path_text,
+                },
+            );
+        }
     }
 }
 
@@ -2155,6 +2247,7 @@ mod tests {
         manifest_hook_names, parse_lint_rule_output, supported_outputs, validate_config,
         validate_hook_command, write_cache, write_lock, write_lock_targets, HookCommand,
         LoadedPlugin, LockFile, LockTargetInput, PluginHooks, PluginInfo, PluginManifest,
+        CACHE_DIR, INCLUDE_DEPFILE,
     };
     use crate::config::MergedConfig;
     use std::fs;
@@ -2257,6 +2350,65 @@ mod tests {
         assert!(!graph.files.iter().any(|path| path.starts_with("tmp/")));
 
         fs::remove_dir_all(project).expect("cleanup");
+    }
+
+    #[test]
+    fn dependency_graph_uses_filter_depfiles_for_actual_includes() {
+        let project = tempfile::tempdir().expect("project tempdir");
+        let library = tempfile::tempdir().expect("library tempdir");
+        let external = tempfile::NamedTempFile::new().expect("external include");
+        fs::write(
+            project.path().join(".omnidoc.toml"),
+            "[project]\nentry='main.md'\n",
+        )
+        .expect("config");
+        fs::write(project.path().join("main.md"), "# Main\n").expect("entry");
+        fs::create_dir_all(project.path().join("chapters")).expect("chapters");
+        let chapter = project.path().join("chapters/actual.md");
+        fs::write(&chapter, "# Actual include\n").expect("included chapter");
+        fs::create_dir_all(project.path().join(CACHE_DIR)).expect("cache dir");
+        fs::write(
+            project.path().join(CACHE_DIR).join(INCLUDE_DEPFILE),
+            format!(
+                "# omnidoc-depfile-v1\n{}\n{}\n",
+                chapter.display(),
+                external.path().display()
+            ),
+        )
+        .expect("depfile");
+
+        let graph = dependency_graph(
+            project.path(),
+            &MergedConfig {
+                entry: Some("main.md".to_string()),
+                to: Some("html".to_string()),
+                lib_path: Some(library.path().to_string_lossy().to_string()),
+                ..Default::default()
+            },
+        );
+
+        assert!(graph.files.contains(&"chapters/actual.md".to_string()));
+        assert!(graph.resources.iter().any(|resource| {
+            resource.logical_name == format!("include-depfile:{}", INCLUDE_DEPFILE)
+                && resource.resolved_from == "external"
+                && resource.path == external.path().to_string_lossy()
+        }));
+
+        fs::write(
+            project.path().join(CACHE_DIR).join(INCLUDE_DEPFILE),
+            format!("# unknown-depfile\n{}\n", chapter.display()),
+        )
+        .expect("invalid depfile");
+        let ignored = dependency_graph(
+            project.path(),
+            &MergedConfig {
+                entry: Some("main.md".to_string()),
+                to: Some("html".to_string()),
+                lib_path: Some(library.path().to_string_lossy().to_string()),
+                ..Default::default()
+            },
+        );
+        assert!(!ignored.files.contains(&"chapters/actual.md".to_string()));
     }
 
     #[test]

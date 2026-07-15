@@ -2,6 +2,9 @@
 
 这是第二层 include。
 
+```rust {include-code="../../assets/example.rs"}
+```
+
 ![相对路径示意图](../../assets/diagram.svg)
 
 $$

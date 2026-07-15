@@ -94,8 +94,8 @@ impl PandocOutputKind {
             "fonts-and-alignment.lua",
         ];
         const PORTABLE_FILTERS: &[&str] = &[
-            "include-code-files.lua",
             "include-files.lua",
+            "include-code-files.lua",
             "display-math.lua",
             "diagram-generator.lua",
             "admonition.lua",

@@ -216,7 +216,13 @@ fn build_project_once(
         .map_err(|e| OmniDocError::Project(format!("Failed to build project: {}", e)))?;
     project_tools::run_plugin_hook(&build_context, project_tools::PluginHook::PostBuild)?;
 
-    project_tools::write_cache(project_path, &output, &input_digest)?;
+    // Filters may emit authoritative dependency files during the build. Re-read
+    // the graph before writing the cache/report so the first successful build
+    // does not require a second rebuild merely to adopt its depfile.
+    let final_graph = project_tools::dependency_graph(project_path, &config);
+    let final_input_digest =
+        project_tools::build_input_digest(project_path, &final_graph, &config, &output)?;
+    project_tools::write_cache(project_path, &output, &final_input_digest)?;
     Ok(project_tools::build_report(
         project_tools::BuildReportContext {
             output,
@@ -224,8 +230,8 @@ fn build_project_once(
             skipped: false,
             cache_reason: cache_reason.to_string(),
             duration_ms: started_at.elapsed().as_millis() as u64,
-            input_digest,
-            graph: &graph,
+            input_digest: final_input_digest,
+            graph: &final_graph,
             config: &config,
             artifact: &output_file,
             issues,
