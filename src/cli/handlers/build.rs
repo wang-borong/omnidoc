@@ -6,6 +6,7 @@ use crate::error::{OmniDocError, Result};
 use crate::project_tools;
 use crate::utils::path;
 use std::path::Path;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Default)]
 pub struct BuildRunOptions {
@@ -128,6 +129,7 @@ fn build_project_once(
     run_options: BuildRunOptions,
     verbose: bool,
 ) -> Result<project_tools::BuildReport> {
+    let started_at = Instant::now();
     check_omnidoc_project(project_path)?;
 
     let config_manager = create_config_manager(Some(project_path), cli_overrides.clone())?;
@@ -177,14 +179,28 @@ fn build_project_once(
             println!("Skipping {} build; input cache is unchanged.", output);
         }
         return Ok(project_tools::build_report(
-            output,
-            target,
-            true,
-            input_digest,
-            graph.files.clone(),
-            issues,
+            project_tools::BuildReportContext {
+                output,
+                target,
+                skipped: true,
+                cache_reason: "input_digest_match".to_string(),
+                duration_ms: started_at.elapsed().as_millis() as u64,
+                input_digest,
+                graph: &graph,
+                config: &config,
+                artifact: &output_file,
+                issues,
+            },
         ));
     }
+
+    let cache_reason = if run_options.force {
+        "forced_rebuild"
+    } else if !output_file.exists() {
+        "artifact_missing"
+    } else {
+        "input_digest_changed"
+    };
 
     let build_context = project_tools::PluginContext {
         project_path,
@@ -205,12 +221,18 @@ fn build_project_once(
         project_tools::write_lock(project_path, &config, &graph)?;
     }
     Ok(project_tools::build_report(
-        output,
-        target,
-        false,
-        input_digest,
-        graph.files.clone(),
-        issues,
+        project_tools::BuildReportContext {
+            output,
+            target,
+            skipped: false,
+            cache_reason: cache_reason.to_string(),
+            duration_ms: started_at.elapsed().as_millis() as u64,
+            input_digest,
+            graph: &graph,
+            config: &config,
+            artifact: &output_file,
+            issues,
+        },
     ))
 }
 

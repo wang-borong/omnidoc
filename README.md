@@ -155,6 +155,10 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    - Use `--verbose` to show detailed build messages
    - The build directory is `build/` (configurable via config), and the output file is named after the repository directory
 
+   Build reports include the cache decision reason, elapsed milliseconds,
+   input and artifact BLAKE3 digests, resolved resource digests, and detected
+   Pandoc/pandoc-crossref/LaTeX toolchain versions.
+
    Examples:
 
    ```bash

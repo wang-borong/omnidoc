@@ -1,4 +1,4 @@
-use crate::build::pandoc_policy::is_supported_format_key;
+use crate::build::pandoc_policy::{is_supported_format_key, PandocOutputKind};
 use crate::config::MergedConfig;
 use crate::constants::pandoc;
 use crate::error::{OmniDocError, Result};
@@ -49,8 +49,13 @@ pub struct BuildReport {
     pub output: String,
     pub target: String,
     pub skipped: bool,
+    pub cache_reason: String,
+    pub duration_ms: u64,
     pub input_digest: String,
+    pub artifact_digest: Option<String>,
     pub dependencies: Vec<String>,
+    pub resources: Vec<LockedResource>,
+    pub toolchain: BTreeMap<String, String>,
     pub issues: Vec<ProjectIssue>,
     pub timestamp_unix: u64,
 }
@@ -60,6 +65,19 @@ pub struct BuildReportDocument {
     pub omnidoc_version: String,
     pub generated_at_unix: u64,
     pub reports: Vec<BuildReport>,
+}
+
+pub struct BuildReportContext<'a> {
+    pub output: String,
+    pub target: String,
+    pub skipped: bool,
+    pub cache_reason: String,
+    pub duration_ms: u64,
+    pub input_digest: String,
+    pub graph: &'a DependencyGraph,
+    pub config: &'a MergedConfig,
+    pub artifact: &'a Path,
+    pub issues: Vec<ProjectIssue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -421,28 +439,13 @@ pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> Dependenc
 fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<ResolvedResource> {
     let library_root = omnidoc_library_root(config);
     let mut resources = BTreeMap::<String, ResolvedResource>::new();
+    let output_kind = PandocOutputKind::from_config(config).unwrap_or(PandocOutputKind::Pdf);
 
-    let filters = if config.pandoc_lua_filters.is_empty() {
-        vec![
-            "include-files.lua",
-            "include-code-files.lua",
-            "diagram-generator.lua",
-            "admonition.lua",
-            "ltblr.lua",
-            "latex-patch.lua",
-            "fonts-and-alignment.lua",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect::<Vec<_>>()
-    } else {
-        config.pandoc_lua_filters.clone()
-    };
-    for filter in filters {
+    for filter in output_kind.filters(config) {
         // Keep this resolution identical to PandocBuilder::push_lua_filters:
         // filter names are relative to the shared filter directory.
         if let Some(path) =
-            existing_path(library_root.join(pandoc::LIB_PANDOC_FILTERS).join(&filter))
+            existing_path(library_root.join(pandoc::LIB_PANDOC_FILTERS).join(filter))
         {
             add_resolved_resource(
                 &mut resources,
@@ -469,15 +472,23 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
         );
     }
 
-    let configured_css = config.pandoc_css.as_deref();
-    for (logical_name, configured, fallback) in [
-        ("html-css", configured_css, pandoc::LIB_PANDOC_CSS_DEFAULT),
-        (
+    let css = match output_kind {
+        PandocOutputKind::Html => Some((
+            "html-css",
+            config.pandoc_css.as_deref(),
+            pandoc::LIB_PANDOC_CSS_DEFAULT,
+        )),
+        PandocOutputKind::Epub => Some((
             "epub-css",
-            config.pandoc_epub_css.as_deref().or(configured_css),
+            config
+                .pandoc_epub_css
+                .as_deref()
+                .or(config.pandoc_css.as_deref()),
             "pandoc/data/epub.css",
-        ),
-    ] {
+        )),
+        _ => None,
+    };
+    if let Some((logical_name, configured, fallback)) = css {
         let path = configured
             .and_then(|value| {
                 resolve_resource_path(project_path, &library_root, value, Some("pandoc/css"))
@@ -494,26 +505,34 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
         }
     }
 
-    for (logical_name, configured, fallback) in [
-        (
+    let template = match output_kind {
+        PandocOutputKind::Pdf | PandocOutputKind::Latex => Some((
             "latex-template",
             config
                 .pandoc_latex_template
                 .as_deref()
                 .or(config.pandoc_template.as_deref()),
             Some(pandoc::DEFAULT_TEMPLATE_LATEX),
-        ),
-        (
+        )),
+        PandocOutputKind::Html => Some((
             "html-template",
-            config.pandoc_html_template.as_deref(),
+            config
+                .pandoc_html_template
+                .as_deref()
+                .or(config.pandoc_template.as_deref()),
             None,
-        ),
-        (
+        )),
+        PandocOutputKind::Epub => Some((
             "epub-template",
-            config.pandoc_epub_template.as_deref(),
+            config
+                .pandoc_epub_template
+                .as_deref()
+                .or(config.pandoc_template.as_deref()),
             None,
-        ),
-    ] {
+        )),
+        PandocOutputKind::Docx => None,
+    };
+    if let Some((logical_name, configured, fallback)) = template {
         let selected = configured.or(fallback);
         if let Some(selected) = selected {
             if let Some(path) = resolve_resource_path(
@@ -533,16 +552,19 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
         }
     }
 
-    if let Some(reference_doc) = config.pandoc_reference_doc.as_deref() {
-        if let Some(path) = resolve_resource_path(project_path, &library_root, reference_doc, None)
-        {
-            add_resolved_resource(
-                &mut resources,
-                project_path,
-                &library_root,
-                "reference-doc".to_string(),
-                path,
-            );
+    if output_kind == PandocOutputKind::Docx {
+        if let Some(reference_doc) = config.pandoc_reference_doc.as_deref() {
+            if let Some(path) =
+                resolve_resource_path(project_path, &library_root, reference_doc, None)
+            {
+                add_resolved_resource(
+                    &mut resources,
+                    project_path,
+                    &library_root,
+                    "reference-doc".to_string(),
+                    path,
+                );
+            }
         }
     }
 
@@ -559,23 +581,46 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
         }
     }
 
-    for (logical_name, path) in [
-        (
-            "crossref-yaml",
-            config
-                .pandoc_crossref_yaml
-                .as_deref()
-                .and_then(|value| resolve_resource_path(project_path, &library_root, value, None))
-                .or_else(|| existing_path(library_root.join(pandoc::LIB_PANDOC_CROSSREF_YAML))),
-        ),
-        ("texmf", existing_path(library_root.join("texmf"))),
-    ] {
+    if config.pandoc_resource_path.is_empty() {
+        if let Some(path) = existing_path(library_root.join(pandoc::LIB_PANDOC_CSL)) {
+            add_resolved_resource(
+                &mut resources,
+                project_path,
+                &library_root,
+                "pandoc-csl-dir".to_string(),
+                path,
+            );
+        }
+    }
+
+    if config
+        .pandoc_lang
+        .as_deref()
+        .is_some_and(|lang| lang != "en")
+    {
+        let path = config
+            .pandoc_crossref_yaml
+            .as_deref()
+            .and_then(|value| resolve_resource_path(project_path, &library_root, value, None))
+            .or_else(|| existing_path(library_root.join(pandoc::LIB_PANDOC_CROSSREF_YAML)));
         if let Some(path) = path {
             add_resolved_resource(
                 &mut resources,
                 project_path,
                 &library_root,
-                logical_name.to_string(),
+                "crossref-yaml".to_string(),
+                path,
+            );
+        }
+    }
+
+    if output_kind.uses_latex_defaults() {
+        if let Some(path) = existing_path(library_root.join("texmf")) {
+            add_resolved_resource(
+                &mut resources,
+                project_path,
+                &library_root,
+                "texmf".to_string(),
                 path,
             );
         }
@@ -1231,21 +1276,23 @@ pub fn print_issues(issues: &[ProjectIssue]) {
     }
 }
 
-pub fn build_report(
-    output: String,
-    target: String,
-    skipped: bool,
-    input_digest: String,
-    dependencies: Vec<String>,
-    issues: Vec<ProjectIssue>,
-) -> BuildReport {
+pub fn build_report(context: BuildReportContext<'_>) -> BuildReport {
     BuildReport {
-        output,
-        target,
-        skipped,
-        input_digest,
-        dependencies,
-        issues,
+        output: context.output,
+        target: context.target,
+        skipped: context.skipped,
+        cache_reason: context.cache_reason,
+        duration_ms: context.duration_ms,
+        input_digest: context.input_digest,
+        artifact_digest: context
+            .artifact
+            .is_file()
+            .then(|| content_digest(context.artifact).ok())
+            .flatten(),
+        dependencies: context.graph.files.clone(),
+        resources: locked_resources(context.graph).unwrap_or_default(),
+        toolchain: toolchain_versions(context.config),
+        issues: context.issues,
         timestamp_unix: current_timestamp_unix(),
     }
 }
@@ -1793,10 +1840,10 @@ fn warning(message: String, path: Option<String>, line: Option<usize>) -> Projec
 #[cfg(test)]
 mod tests {
     use super::{
-        build_input_digest, cache_hit, dependency_graph, hook_argv, manifest_hook_names,
-        parse_lint_rule_output, supported_outputs, validate_config, validate_hook_command,
-        write_cache, write_lock, HookCommand, LoadedPlugin, LockFile, PluginHooks, PluginInfo,
-        PluginManifest,
+        build_input_digest, build_report, cache_hit, dependency_graph, hook_argv,
+        manifest_hook_names, parse_lint_rule_output, supported_outputs, validate_config,
+        validate_hook_command, write_cache, write_lock, HookCommand, LoadedPlugin, LockFile,
+        PluginHooks, PluginInfo, PluginManifest,
     };
     use crate::config::MergedConfig;
     use std::fs;
@@ -1907,6 +1954,13 @@ mod tests {
         let library = tempfile::tempdir().expect("library tempdir");
         let css_dir = library.path().join("pandoc/css");
         fs::create_dir_all(&css_dir).expect("css dir");
+        let filter_dir = library.path().join("pandoc/data/filters");
+        fs::create_dir_all(&filter_dir).expect("filter dir");
+        fs::write(filter_dir.join("include-files.lua"), "return {}\n").expect("html filter");
+        fs::write(filter_dir.join("ltblr.lua"), "return {}\n").expect("latex filter");
+        let texmf = library.path().join("texmf/tex/latex");
+        fs::create_dir_all(&texmf).expect("texmf dir");
+        fs::write(texmf.join("theme.sty"), "% theme\n").expect("style");
         let css = css_dir.join("engineering-book.css");
         fs::write(&css, "body { color: black; }\n").expect("css");
         fs::write(
@@ -1917,6 +1971,7 @@ mod tests {
         fs::write(project.path().join("main.md"), "# Book\n").expect("entry");
         let config = MergedConfig {
             entry: Some("main.md".to_string()),
+            to: Some("html".to_string()),
             lib_path: Some(library.path().to_string_lossy().to_string()),
             pandoc_css: Some("engineering-book.css".to_string()),
             ..Default::default()
@@ -1928,6 +1983,18 @@ mod tests {
                 && resource.resolved_from == "omnidoc-libs"
                 && resource.path == css.to_string_lossy()
         }));
+        assert!(graph
+            .resources
+            .iter()
+            .any(|resource| resource.logical_name == "lua-filter:include-files.lua"));
+        assert!(!graph
+            .resources
+            .iter()
+            .any(|resource| resource.logical_name == "lua-filter:ltblr.lua"));
+        assert!(!graph
+            .resources
+            .iter()
+            .any(|resource| resource.logical_name == "texmf"));
 
         let before =
             build_input_digest(project.path(), &graph, &config, "html").expect("initial digest");
@@ -1951,6 +2018,39 @@ mod tests {
                 && resource.digest.starts_with("blake3:")
         }));
         assert!(!lock_text.contains(&library.path().to_string_lossy().to_string()));
+    }
+
+    #[test]
+    fn build_report_records_cache_timing_toolchain_and_artifact_digest() {
+        let project = tempfile::tempdir().expect("project");
+        let artifact = project.path().join("book.html");
+        fs::write(&artifact, "<h1>Book</h1>\n").expect("artifact");
+        let graph = super::DependencyGraph {
+            files: vec!["main.md".to_string()],
+            resources: Vec::new(),
+        };
+
+        let config = MergedConfig::default();
+        let report = build_report(super::BuildReportContext {
+            output: "html".to_string(),
+            target: "book".to_string(),
+            skipped: true,
+            cache_reason: "input_digest_match".to_string(),
+            duration_ms: 12,
+            input_digest: "blake3:input".to_string(),
+            graph: &graph,
+            config: &config,
+            artifact: &artifact,
+            issues: Vec::new(),
+        });
+
+        assert_eq!(report.cache_reason, "input_digest_match");
+        assert_eq!(report.duration_ms, 12);
+        assert!(report
+            .artifact_digest
+            .as_deref()
+            .is_some_and(|digest| digest.starts_with("blake3:")));
+        assert!(report.toolchain.contains_key("pandoc"));
     }
 
     #[test]
