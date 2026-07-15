@@ -1,5 +1,6 @@
 use crate::build::pandoc::load_selected_theme;
 use crate::build::pandoc_policy::{is_supported_format_key, PandocOutputKind};
+use crate::cli::handlers::theme::font_family_matches;
 use crate::config::MergedConfig;
 use crate::constants::pandoc;
 use crate::epub::{is_supported_epub_profile, EpubCompatibilityReport};
@@ -18,8 +19,8 @@ pub(crate) const INCLUDE_DEPFILE: &str = "include-files.d";
 pub(crate) const INCLUDE_CODE_DEPFILE: &str = "include-code-files.d";
 const LOCK_FILE: &str = "omnidoc.lock";
 const REPORT_FILE: &str = "omnidoc-report.json";
-const CACHE_VERSION: u32 = 3;
-const LOCK_VERSION: u32 = 3;
+const CACHE_VERSION: u32 = 4;
+const LOCK_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum IssueSeverity {
@@ -1173,6 +1174,10 @@ pub fn build_input_digest(
     ] {
         hash_field(&mut hasher, label, value.as_bytes());
     }
+    for (name, version) in toolchain_versions(config, output) {
+        hash_field(&mut hasher, "toolchain-name", name.as_bytes());
+        hash_field(&mut hasher, "toolchain-version", version.as_bytes());
+    }
     Ok(format_digest(hasher.finalize()))
 }
 
@@ -1346,7 +1351,7 @@ pub fn write_lock_targets(project_path: &Path, inputs: &[LockTargetInput<'_>]) -
         lock_version: LOCK_VERSION,
         omnidoc_version: env!("CARGO_PKG_VERSION").to_string(),
         library: locked_library(first.config, &resources),
-        toolchain: toolchain_versions(first.config),
+        toolchain: combined_toolchain_versions(inputs),
         targets,
     };
     let content =
@@ -1477,8 +1482,7 @@ pub fn check_lock_targets(
     let first_config = inputs.first().map(|input| input.config);
     let library_up_to_date =
         first_config.is_some_and(|config| lock.library == locked_library(config, &resources));
-    let toolchain_up_to_date =
-        first_config.is_some_and(|config| lock.toolchain == toolchain_versions(config));
+    let toolchain_up_to_date = lock.toolchain == combined_toolchain_versions(inputs);
     let up_to_date = lock.lock_version == LOCK_VERSION
         && missing_targets.is_empty()
         && extra_targets.is_empty()
@@ -1580,23 +1584,74 @@ fn git_revision(path: &Path) -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn toolchain_versions(config: &MergedConfig) -> BTreeMap<String, String> {
+fn toolchain_versions(config: &MergedConfig, output: &str) -> BTreeMap<String, String> {
     let latex_engine = config
         .tool_paths
         .get("latex_engine")
         .and_then(|value| value.clone())
         .unwrap_or_else(|| "xelatex".to_string());
-    [
+    let mut versions = [
         ("pandoc", configured_tool(config, "pandoc", "pandoc")),
         (
             "pandoc_crossref",
             configured_tool(config, "pandoc_crossref", "pandoc-crossref"),
         ),
-        ("latex_engine", latex_engine),
     ]
     .into_iter()
     .map(|(name, program)| (name.to_string(), command_version(&program)))
-    .collect()
+    .collect::<BTreeMap<_, _>>();
+    let output_kind = PandocOutputKind::from_requested(Some(output)).ok();
+    if output_kind == Some(PandocOutputKind::Pdf) {
+        versions.insert("latex_engine".to_string(), command_version(&latex_engine));
+        if let Ok(Some(theme)) = load_selected_theme(config) {
+            for font in theme.requirements.fonts {
+                versions.insert(format!("font:{font}"), font_identity(&font));
+            }
+        }
+    }
+    versions
+}
+
+fn combined_toolchain_versions(inputs: &[LockTargetInput<'_>]) -> BTreeMap<String, String> {
+    let mut versions = BTreeMap::new();
+    for input in inputs {
+        versions.extend(toolchain_versions(input.config, input.output));
+    }
+    versions
+}
+
+fn font_identity(requested: &str) -> String {
+    let output = match Command::new("fc-match")
+        .args([
+            "--format",
+            "%{family}|%{style}|%{fontversion}|%{file}\\n",
+            "--",
+            requested,
+        ])
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        _ => return "unavailable".to_string(),
+    };
+    let line = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()
+        .unwrap_or("")
+        .to_string();
+    let mut fields = line.splitn(4, '|');
+    let family = fields.next().unwrap_or("").trim();
+    let style = fields.next().unwrap_or("").trim();
+    let version = fields.next().unwrap_or("").trim();
+    let path = Path::new(fields.next().unwrap_or("").trim());
+    if !font_family_matches(requested, family) {
+        return format!("missing;fallback={family}");
+    }
+    let file = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown");
+    let digest = content_digest(path).unwrap_or_else(|_| "unavailable".to_string());
+    format!("family={family};style={style};fontversion={version};file={file};digest={digest}")
 }
 
 fn configured_tool(config: &MergedConfig, key: &str, fallback: &str) -> String {
@@ -1728,6 +1783,7 @@ pub fn print_issues(issues: &[ProjectIssue]) {
 }
 
 pub fn build_report(context: BuildReportContext<'_>) -> BuildReport {
+    let toolchain = toolchain_versions(context.config, &context.output);
     BuildReport {
         output: context.output,
         target: context.target,
@@ -1743,7 +1799,7 @@ pub fn build_report(context: BuildReportContext<'_>) -> BuildReport {
         compatibility: context.compatibility,
         dependencies: context.graph.files.clone(),
         resources: locked_resources(context.graph).unwrap_or_default(),
-        toolchain: toolchain_versions(context.config),
+        toolchain,
         issues: context.issues,
         timestamp_unix: current_timestamp_unix(),
     }
@@ -2587,8 +2643,8 @@ mod tests {
 
         write_lock(project.path(), &config, &graph).expect("lock");
         let lock_text = fs::read_to_string(project.path().join("omnidoc.lock")).expect("lock text");
-        let lock: LockFile = toml::from_str(&lock_text).expect("lock v3");
-        assert_eq!(lock.lock_version, 3);
+        let lock: LockFile = toml::from_str(&lock_text).expect("lock v4");
+        assert_eq!(lock.lock_version, 4);
         let locked_library = lock.library.as_ref().expect("locked library");
         assert_eq!(locked_library.version.as_deref(), Some("1.0.0"));
         assert!(locked_library
@@ -2641,10 +2697,11 @@ mod tests {
             .as_deref()
             .is_some_and(|digest| digest.starts_with("blake3:")));
         assert!(report.toolchain.contains_key("pandoc"));
+        assert!(!report.toolchain.contains_key("latex_engine"));
     }
 
     #[test]
-    fn lock_v3_keeps_multiple_output_targets() {
+    fn lock_v4_keeps_multiple_output_targets() {
         let project = tempfile::tempdir().expect("project");
         fs::write(project.path().join("main.md"), "# Book\n").expect("entry");
         let html_config = MergedConfig {
@@ -2678,8 +2735,9 @@ mod tests {
         .expect("multi-target lock");
 
         let lock_text = fs::read_to_string(project.path().join("omnidoc.lock")).expect("lock");
-        let lock: LockFile = toml::from_str(&lock_text).expect("lock v3");
-        assert_eq!(lock.lock_version, 3);
+        let lock: LockFile = toml::from_str(&lock_text).expect("lock v4");
+        assert_eq!(lock.lock_version, 4);
+        assert!(!lock.toolchain.contains_key("latex_engine"));
         assert_eq!(
             lock.targets.keys().cloned().collect::<Vec<_>>(),
             ["epub", "html"]

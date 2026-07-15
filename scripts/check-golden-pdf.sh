@@ -82,6 +82,9 @@ jq -e '
     and .skipped == false
     and (.artifact_digest | startswith("blake3:"))
     and (.toolchain.latex_engine | startswith("XeTeX "))
+    and (.toolchain["font:Noto Serif CJK SC"] | contains("digest=blake3:"))
+    and (.toolchain["font:Noto Sans CJK SC"] | contains("digest=blake3:"))
+    and (.toolchain["font:Noto Sans Mono CJK SC"] | contains("digest=blake3:"))
 ' "$report" >/dev/null
 
 python3 - "$lock" <<'PY'
@@ -90,11 +93,22 @@ import sys
 import tomllib
 
 lock = tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+if lock.get("lock_version") != 4:
+    raise SystemExit("expected lock schema v4")
 target = lock.get("targets", {}).get("pdf")
 if target is None:
     raise SystemExit("missing PDF lock target")
 if not target.get("input_digest", "").startswith("blake3:"):
     raise SystemExit("missing PDF input digest")
+toolchain = lock.get("toolchain", {})
+for family in {
+    "Noto Serif CJK SC",
+    "Noto Sans CJK SC",
+    "Noto Sans Mono CJK SC",
+}:
+    identity = toolchain.get(f"font:{family}", "")
+    if "digest=blake3:" not in identity:
+        raise SystemExit(f"missing locked font identity: {family}")
 dependencies = set(target.get("dependencies", []))
 for expected in {
     "assets/cover.pdf",

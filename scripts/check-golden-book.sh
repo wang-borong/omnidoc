@@ -64,8 +64,8 @@ import sys
 import tomllib
 
 lock = tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-if lock.get("lock_version") != 3:
-    raise SystemExit("expected lock schema v3")
+if lock.get("lock_version") != 4:
+    raise SystemExit("expected lock schema v4")
 library = lock.get("library", {})
 if library.get("version") != "1.0.0":
     raise SystemExit(f"unexpected omnidoc-libs version: {library.get('version')}")

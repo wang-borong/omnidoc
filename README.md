@@ -452,12 +452,16 @@ omnidoc lock --check
 ```
 
 `lock --check` exits with an error when `omnidoc.lock` is missing or stale.
-Lock schema v3 uses BLAKE3 content digests and stores dependencies and resolved
+Lock schema v4 uses BLAKE3 content digests and stores dependencies and resolved
 resources separately for every configured output target. It also records the
 selected omnidoc-libs revision/content digest and detected Pandoc,
-pandoc-crossref, and LaTeX engine versions. When the library bundle provides a
-manifest, its declared version plus manifest/checksum digests are locked as
-well. Older lock files must be regenerated with `omnidoc lock --update`.
+pandoc-crossref, LaTeX engine, and PDF theme font identities. Font identities
+include the resolved family, style, font version, file name, and content digest.
+Toolchain identities now participate in cache keys, so replacing Pandoc,
+XeLaTeX, or a font invalidates existing outputs. When the library bundle
+provides a manifest, its declared version plus manifest/checksum digests are
+locked as well. Older lock files must be regenerated with
+`omnidoc lock --update`.
 
 Run CI-mode validation and builds:
 

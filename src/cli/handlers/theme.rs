@@ -361,7 +361,7 @@ fn validate_installed_fonts(fonts: &[String], report: &mut ThemeReport) {
     }
 }
 
-fn font_family_matches(requested: &str, families: &str) -> bool {
+pub(crate) fn font_family_matches(requested: &str, families: &str) -> bool {
     families
         .lines()
         .flat_map(|line| line.split(','))
