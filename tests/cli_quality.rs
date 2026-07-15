@@ -316,6 +316,17 @@ compatibility = "readium"
 }
 
 #[test]
+fn json_commands_remain_machine_readable_when_creating_default_config() {
+    let fixture = Fixture::new("json-default-config");
+    fs::remove_file(fixture.env_root.join("config/omnidoc.toml")).ok();
+
+    let output = fixture.command(&["theme", "list", "--json"]);
+    let stdout = assert_success(output);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("pure JSON stdout");
+    assert_eq!(parsed, serde_json::json!([]));
+}
+
+#[test]
 fn formatter_is_conservative_and_idempotent_on_structured_markdown() {
     let fixture = Fixture::new("formatter");
     let markdown = fixture.project.join("structured.md");

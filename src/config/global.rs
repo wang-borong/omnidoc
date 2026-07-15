@@ -36,7 +36,7 @@ impl GlobalConfig {
         // 如果配置文件不存在，创建默认配置
         if !fs::exists(&config_file) {
             Self::create_default(&config_file)?;
-            println!(
+            eprintln!(
                 "{} The '{}' configuration file was created in '{}'.\n    You can modify it to set your author name.",
                 style("ℹ").cyan().bold(),
                 config_consts::OMNIDOC_CONFIG_FILE,

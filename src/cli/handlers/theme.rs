@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 
 const THEME_MANIFEST_VERSION: u32 = 1;
 
@@ -63,6 +64,8 @@ struct ThemeReport {
     theme: Option<ThemeManifest>,
     compatible: Option<bool>,
     valid: bool,
+    font_check_performed: bool,
+    missing_fonts: Vec<String>,
     errors: Vec<String>,
 }
 
@@ -71,17 +74,21 @@ pub fn handle_theme(subcommand: ThemeSubcommand) -> Result<()> {
     let library = configured_library_path(&global_config)?;
     match subcommand {
         ThemeSubcommand::List { json } => {
-            let reports = load_theme_reports(&library)?;
+            let reports = load_theme_reports(&library, false)?;
             print_reports(&reports, json, false)?;
         }
         ThemeSubcommand::Inspect { name, json } => {
-            let report = load_named_theme(&library, &name)?;
+            let report = load_named_theme(&library, &name, false)?;
             print_reports(std::slice::from_ref(&report), json, true)?;
         }
-        ThemeSubcommand::Validate { name, json } => {
+        ThemeSubcommand::Validate {
+            name,
+            json,
+            check_fonts,
+        } => {
             let reports = match name {
-                Some(name) => vec![load_named_theme(&library, &name)?],
-                None => load_theme_reports(&library)?,
+                Some(name) => vec![load_named_theme(&library, &name, check_fonts)?],
+                None => load_theme_reports(&library, check_fonts)?,
             };
             print_reports(&reports, json, false)?;
             ensure_valid(&reports)?;
@@ -90,7 +97,7 @@ pub fn handle_theme(subcommand: ThemeSubcommand) -> Result<()> {
     Ok(())
 }
 
-fn load_named_theme(library: &Path, name: &str) -> Result<ThemeReport> {
+fn load_named_theme(library: &Path, name: &str, check_fonts: bool) -> Result<ThemeReport> {
     if safe_relative_path(name).is_none() || name.contains('/') || name.contains('\\') {
         return Err(OmniDocError::Other(format!("invalid theme name: {}", name)));
     }
@@ -102,11 +109,11 @@ fn load_named_theme(library: &Path, name: &str) -> Result<ThemeReport> {
             library.join("themes").display()
         )));
     }
-    Ok(inspect_manifest(library, &path))
+    Ok(inspect_manifest(library, &path, check_fonts))
 }
 
 pub(crate) fn load_theme_manifest(library: &Path, name: &str) -> Result<ThemeManifest> {
-    let report = load_named_theme(library, name)?;
+    let report = load_named_theme(library, name, false)?;
     if !report.valid {
         return Err(OmniDocError::Other(format!(
             "theme '{}' is invalid: {}",
@@ -119,7 +126,7 @@ pub(crate) fn load_theme_manifest(library: &Path, name: &str) -> Result<ThemeMan
     })
 }
 
-fn load_theme_reports(library: &Path) -> Result<Vec<ThemeReport>> {
+fn load_theme_reports(library: &Path, check_fonts: bool) -> Result<Vec<ThemeReport>> {
     let directory = library.join("themes");
     if !directory.is_dir() {
         return Ok(Vec::new());
@@ -132,11 +139,11 @@ fn load_theme_reports(library: &Path) -> Result<Vec<ThemeReport>> {
     paths.sort();
     Ok(paths
         .iter()
-        .map(|path| inspect_manifest(library, path))
+        .map(|path| inspect_manifest(library, path, check_fonts))
         .collect())
 }
 
-fn inspect_manifest(library: &Path, path: &Path) -> ThemeReport {
+fn inspect_manifest(library: &Path, path: &Path, check_fonts: bool) -> ThemeReport {
     let relative_manifest = path
         .strip_prefix(library)
         .unwrap_or(path)
@@ -147,6 +154,8 @@ fn inspect_manifest(library: &Path, path: &Path) -> ThemeReport {
         theme: None,
         compatible: None,
         valid: false,
+        font_check_performed: false,
+        missing_fonts: Vec::new(),
         errors: Vec::new(),
     };
     if path
@@ -176,7 +185,7 @@ fn inspect_manifest(library: &Path, path: &Path) -> ThemeReport {
             return report;
         }
     };
-    validate_manifest(library, path, &manifest, &mut report);
+    validate_manifest(library, path, &manifest, check_fonts, &mut report);
     report.valid = report.errors.is_empty();
     report.theme = Some(manifest);
     report
@@ -186,6 +195,7 @@ fn validate_manifest(
     library: &Path,
     path: &Path,
     manifest: &ThemeManifest,
+    check_fonts: bool,
     report: &mut ThemeReport,
 ) {
     if manifest.manifest_version != THEME_MANIFEST_VERSION {
@@ -299,13 +309,63 @@ fn validate_manifest(
             }
         }
     }
+    let mut fonts = BTreeSet::new();
     for font in &manifest.requirements.fonts {
         if font.trim().is_empty() {
             report
                 .errors
                 .push("font requirement must not be empty".to_string());
+        } else if !fonts.insert(font.trim().to_lowercase()) {
+            report
+                .errors
+                .push(format!("duplicate font requirement: {}", font));
         }
     }
+    if check_fonts && !manifest.requirements.fonts.is_empty() {
+        validate_installed_fonts(&manifest.requirements.fonts, report);
+    }
+}
+
+fn validate_installed_fonts(fonts: &[String], report: &mut ThemeReport) {
+    report.font_check_performed = true;
+    for font in fonts.iter().filter(|font| !font.trim().is_empty()) {
+        let output = match Command::new("fc-match")
+            .args(["--format", "%{family}\n", "--", font])
+            .output()
+        {
+            Ok(output) => output,
+            Err(error) => {
+                report.errors.push(format!(
+                    "cannot check theme fonts because fc-match failed: {}",
+                    error
+                ));
+                return;
+            }
+        };
+        if !output.status.success() {
+            report.errors.push(format!(
+                "fc-match failed while checking required font '{}'",
+                font
+            ));
+            continue;
+        }
+        let families = String::from_utf8_lossy(&output.stdout);
+        if !font_family_matches(font, &families) {
+            report.missing_fonts.push(font.clone());
+            report.errors.push(format!(
+                "required font '{}' is not installed (fontconfig matched '{}')",
+                font,
+                families.lines().next().unwrap_or("unknown").trim()
+            ));
+        }
+    }
+}
+
+fn font_family_matches(requested: &str, families: &str) -> bool {
+    families
+        .lines()
+        .flat_map(|line| line.split(','))
+        .any(|family| family.trim().eq_ignore_ascii_case(requested.trim()))
 }
 
 fn safe_relative_path(relative: &str) -> Option<PathBuf> {
@@ -398,12 +458,21 @@ fn ensure_valid(reports: &[ThemeReport]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::safe_relative_path;
+    use super::{font_family_matches, safe_relative_path};
 
     #[test]
     fn rejects_unsafe_theme_paths() {
         assert!(safe_relative_path("pandoc/css/theme.css").is_some());
         assert!(safe_relative_path("../theme.css").is_none());
         assert!(safe_relative_path("/theme.css").is_none());
+    }
+
+    #[test]
+    fn distinguishes_requested_fonts_from_fontconfig_fallbacks() {
+        assert!(font_family_matches(
+            "Noto Serif CJK SC",
+            "Noto Serif CJK SC,Noto Serif CJK SC Medium\n"
+        ));
+        assert!(!font_family_matches("OmniDoc Missing Font", "Noto Sans\n"));
     }
 }

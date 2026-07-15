@@ -484,6 +484,10 @@ pub enum ThemeSubcommand {
         /// emit JSON validation results
         #[arg(long)]
         json: bool,
+
+        /// verify required font families with fontconfig
+        #[arg(long)]
+        check_fonts: bool,
     },
 }
 

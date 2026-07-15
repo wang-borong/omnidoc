@@ -47,6 +47,14 @@ lock="$work/book/omnidoc.lock"
 include_depfile="$work/book/.omnidoc-cache/include-files.d"
 include_code_depfile="$work/book/.omnidoc-cache/include-code-files.d"
 
+"$bin" theme validate engineering-book --check-fonts --json > "$work/theme.json"
+jq -e '
+  .[0]
+  | .valid == true
+    and .font_check_performed == true
+    and (.missing_fonts | length == 0)
+' "$work/theme.json" >/dev/null
+
 "$bin" build "$work/book" --to pdf --force --report --write-lock
 
 test -s "$pdf"

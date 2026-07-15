@@ -368,6 +368,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    omnidoc theme list
    omnidoc theme inspect engineering-book
    omnidoc theme validate engineering-book
+   omnidoc theme validate engineering-book --check-fonts
    omnidoc theme validate --json       # validate every installed theme
    ```
 
@@ -393,7 +394,10 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    ```
 
    Validation rejects incompatible versions, missing or duplicate resources,
-   unsafe paths, and symbolic links in the bundle contract.
+   unsafe paths, and symbolic links in the bundle contract. `--check-fonts`
+   additionally resolves every declared font family with fontconfig and rejects
+   silent fallback matches; the Golden PDF gate requires this environment
+   check.
 
 ### Project Quality and CI Commands
 
