@@ -244,11 +244,11 @@ pub fn validate_config(project_path: &Path, config: &MergedConfig) -> Vec<Projec
     }
 
     if let Some(css) = &config.pandoc_css {
-        check_configured_path(
+        check_configured_css_path(
             project_path,
             css,
+            config.lib_path.as_deref(),
             "Configured pandoc.css not found",
-            false,
             &mut issues,
         );
     }
@@ -264,11 +264,11 @@ pub fn validate_config(project_path: &Path, config: &MergedConfig) -> Vec<Projec
     }
 
     if let Some(epub_css) = &config.pandoc_epub_css {
-        check_configured_path(
+        check_configured_css_path(
             project_path,
             epub_css,
+            config.lib_path.as_deref(),
             "Configured pandoc.epub_css not found",
-            false,
             &mut issues,
         );
     }
@@ -323,22 +323,149 @@ pub fn lint_project(project_path: &Path) -> Vec<ProjectIssue> {
 
 pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> DependencyGraph {
     let mut files = BTreeSet::new();
-    if project_path.join(".omnidoc.toml").exists() {
-        files.insert(".omnidoc.toml".to_string());
-    }
-    if let Some(entry) = &config.entry {
-        if project_path.join(entry).exists() {
-            files.insert(entry.clone());
-        }
+    let mut pending = Vec::new();
+
+    track_dependency(
+        project_path,
+        project_path,
+        Path::new(".omnidoc.toml"),
+        &mut files,
+        &mut pending,
+    );
+
+    for configured in [
+        config.entry.as_ref(),
+        config.metadata_file.as_ref(),
+        config.pandoc_css.as_ref(),
+        config.pandoc_reference_doc.as_ref(),
+        config.pandoc_epub_css.as_ref(),
+        config.pandoc_template.as_ref(),
+        config.pandoc_html_template.as_ref(),
+        config.pandoc_latex_template.as_ref(),
+        config.pandoc_epub_template.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        track_dependency(
+            project_path,
+            project_path,
+            Path::new(configured),
+            &mut files,
+            &mut pending,
+        );
     }
 
-    for file in source_files(project_path) {
-        files.insert(display_relative(project_path, &file));
+    while let Some(file) = pending.pop() {
+        let Ok(content) = fs::read_to_string(&file) else {
+            continue;
+        };
+        let base = file.parent().unwrap_or(project_path);
+        for referenced in referenced_local_files(&content) {
+            track_dependency(
+                project_path,
+                base,
+                Path::new(&referenced),
+                &mut files,
+                &mut pending,
+            );
+        }
     }
 
     DependencyGraph {
         files: files.into_iter().collect(),
     }
+}
+
+fn track_dependency(
+    project_path: &Path,
+    base: &Path,
+    referenced: &Path,
+    files: &mut BTreeSet<String>,
+    pending: &mut Vec<PathBuf>,
+) {
+    let referenced_text = referenced.to_string_lossy();
+    let referenced = Path::new(referenced_text.split(['#', '?']).next().unwrap_or(""));
+    if referenced.as_os_str().is_empty() {
+        return;
+    }
+
+    let mut candidates = Vec::new();
+    if referenced.is_absolute() {
+        candidates.push(referenced.to_path_buf());
+    } else {
+        candidates.push(base.join(referenced));
+        if base != project_path {
+            candidates.push(project_path.join(referenced));
+        }
+    }
+
+    for candidate in candidates {
+        let resolved = if candidate.is_file() {
+            candidate
+        } else if candidate.extension().is_none() && candidate.with_extension("tex").is_file() {
+            candidate.with_extension("tex")
+        } else {
+            continue;
+        };
+        let Ok(canonical_project) = project_path.canonicalize() else {
+            return;
+        };
+        let Ok(canonical_file) = resolved.canonicalize() else {
+            continue;
+        };
+        if !canonical_file.starts_with(&canonical_project) {
+            continue;
+        }
+        let relative = display_relative(&canonical_project, &canonical_file);
+        if files.insert(relative) {
+            pending.push(canonical_file);
+        }
+        return;
+    }
+}
+
+fn referenced_local_files(content: &str) -> Vec<String> {
+    let patterns = [
+        r#"!\[[^\]]*\]\(\s*<?([^)>\s]+)"#,
+        r#"(?:include|include-code)=[\"']([^\"']+)[\"']"#,
+        r#"(?:src|href)=[\"']([^\"']+)[\"']"#,
+        r#"\\(?:input|include|includegraphics)(?:\[[^\]]*\])?\{([^}]+)\}"#,
+        r#"url\(\s*[\"']?([^\)\"']+)[\"']?\s*\)"#,
+        r#"@import\s+[\"']([^\"']+)[\"']"#,
+        r#"(?m)^\s*(?:cover-image|bibliography|csl|include-before-body|include-after-body)\s*:\s*[\"']?([^\"'\s]+)"#,
+    ];
+    let mut references = BTreeSet::new();
+    for pattern in patterns {
+        let regex = regex::Regex::new(pattern).expect("dependency reference regex");
+        for captures in regex.captures_iter(content) {
+            let Some(target) = captures.get(1).map(|capture| capture.as_str().trim()) else {
+                continue;
+            };
+            if is_local_path(target) && !target.starts_with("data:") {
+                references.insert(target.trim_matches(['<', '>']).to_string());
+            }
+        }
+    }
+
+    for pattern in [
+        r#"(?ms)^```[^\n]*\{[^}\n]*\.include[^}\n]*\}[^\n]*\n(.*?)^```\s*$"#,
+        r#"(?ms)^~~~[^\n]*\{[^}\n]*\.include[^}\n]*\}[^\n]*\n(.*?)^~~~\s*$"#,
+    ] {
+        let regex = regex::Regex::new(pattern).expect("include block regex");
+        for captures in regex.captures_iter(content) {
+            let Some(body) = captures.get(1).map(|capture| capture.as_str()) else {
+                continue;
+            };
+            for line in body.lines() {
+                let target = line.trim();
+                if !target.is_empty() && !target.starts_with("//") && is_local_path(target) {
+                    references.insert(target.to_string());
+                }
+            }
+        }
+    }
+    references.into_iter().collect()
 }
 
 pub fn input_hash(project_path: &Path, graph: &DependencyGraph) -> Result<u64> {
@@ -760,6 +887,35 @@ fn check_configured_path(
     issues.push(issue);
 }
 
+fn check_configured_css_path(
+    project_path: &Path,
+    configured_path: &str,
+    lib_path: Option<&str>,
+    message: &str,
+    issues: &mut Vec<ProjectIssue>,
+) {
+    let path = Path::new(configured_path);
+    let project_exists = if path.is_absolute() {
+        path.exists()
+    } else {
+        project_path.join(path).exists() || path.exists()
+    };
+    let library_root = lib_path
+        .map(PathBuf::from)
+        .or_else(|| dirs::data_local_dir().map(|path| path.join("omnidoc")));
+    let shared_exists = library_root
+        .map(|root| root.join("pandoc/css").join(path).exists())
+        .unwrap_or(false);
+    if project_exists || shared_exists {
+        return;
+    }
+    issues.push(warning(
+        format!("{}: {}", message, configured_path),
+        Some(configured_path.to_string()),
+        None,
+    ));
+}
+
 fn plugin_manifest_paths(base: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     for entry in WalkDir::new(base)
@@ -1162,11 +1318,22 @@ fn warning(message: String, path: Option<String>, line: Option<usize>) -> Projec
 #[cfg(test)]
 mod tests {
     use super::{
-        hook_argv, manifest_hook_names, parse_lint_rule_output, supported_outputs, validate_config,
-        validate_hook_command, HookCommand, LoadedPlugin, PluginHooks, PluginInfo, PluginManifest,
+        dependency_graph, hook_argv, manifest_hook_names, parse_lint_rule_output,
+        supported_outputs, validate_config, validate_hook_command, HookCommand, LoadedPlugin,
+        PluginHooks, PluginInfo, PluginManifest,
     };
     use crate::config::MergedConfig;
+    use std::fs;
     use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temporary_project(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!("omnidoc-{name}-{}-{nonce}", std::process::id()))
+    }
 
     #[test]
     fn validates_unsupported_output() {
@@ -1187,6 +1354,78 @@ mod tests {
     }
 
     #[test]
+    fn dependency_graph_tracks_reachable_inputs_not_every_project_file() {
+        let project = temporary_project("dependency-graph");
+        fs::create_dir_all(project.join("assets")).expect("assets dir");
+        fs::create_dir_all(project.join("chapters/nested")).expect("chapters dir");
+        fs::create_dir_all(project.join("styles")).expect("styles dir");
+        fs::create_dir_all(project.join("raw")).expect("raw dir");
+        fs::create_dir_all(project.join("output/pdf")).expect("output dir");
+        fs::create_dir_all(project.join("tmp")).expect("tmp dir");
+        fs::write(
+            project.join(".omnidoc.toml"),
+            "[project]\nentry='main.md'\n",
+        )
+        .expect("config");
+        fs::write(
+            project.join("main.md"),
+            "# Book\n\n```{.include format=\"markdown\"}\nchapters/chapter.md\n```\n",
+        )
+        .expect("entry");
+        fs::write(
+            project.join("chapters/chapter.md"),
+            "# Chapter\n\n![used](../assets/used.png)\n\n```{.include}\nnested/part.md\n```\n",
+        )
+        .expect("chapter");
+        fs::write(project.join("chapters/nested/part.md"), "## Nested\n").expect("nested chapter");
+        fs::write(
+            project.join("styles/book-metadata.yaml"),
+            "cover-image: assets/cover.png\nheader-includes:\n  - \\input{styles/theme.tex}\n",
+        )
+        .expect("metadata");
+        fs::write(project.join("styles/book.css"), "body { color: black; }\n").expect("css");
+        fs::write(project.join("styles/theme.tex"), "\\usepackage{xcolor}\n").expect("theme");
+        fs::write(project.join("assets/used.png"), b"used").expect("used image");
+        fs::write(project.join("assets/cover.png"), b"cover").expect("cover image");
+        fs::write(project.join("raw/unused.md"), "# raw\n").expect("raw");
+        fs::write(project.join("output/pdf/unused.pdf"), b"pdf").expect("pdf");
+        fs::write(project.join("tmp/unused.png"), b"tmp").expect("tmp");
+
+        let graph = dependency_graph(
+            &project,
+            &MergedConfig {
+                entry: Some("main.md".to_string()),
+                metadata_file: Some("styles/book-metadata.yaml".to_string()),
+                pandoc_css: Some("styles/book.css".to_string()),
+                pandoc_epub_css: Some("styles/book.css".to_string()),
+                ..Default::default()
+            },
+        );
+
+        for expected in [
+            ".omnidoc.toml",
+            "main.md",
+            "chapters/chapter.md",
+            "chapters/nested/part.md",
+            "styles/book-metadata.yaml",
+            "styles/book.css",
+            "styles/theme.tex",
+            "assets/used.png",
+            "assets/cover.png",
+        ] {
+            assert!(
+                graph.files.contains(&expected.to_string()),
+                "missing {expected}"
+            );
+        }
+        assert!(!graph.files.iter().any(|path| path.starts_with("raw/")));
+        assert!(!graph.files.iter().any(|path| path.starts_with("output/")));
+        assert!(!graph.files.iter().any(|path| path.starts_with("tmp/")));
+
+        fs::remove_dir_all(project).expect("cleanup");
+    }
+
+    #[test]
     fn validates_unsupported_build_outputs() {
         let config = MergedConfig {
             outputs: vec!["pdf".to_string(), "unknown".to_string()],
@@ -1197,6 +1436,39 @@ mod tests {
         assert!(issues
             .iter()
             .any(|issue| issue.message.contains("build.outputs")));
+    }
+
+    #[test]
+    fn validates_css_names_resolved_from_omnidoc_libs() {
+        let project = temporary_project("shared-css-project");
+        let library = temporary_project("shared-css-library");
+        fs::create_dir_all(library.join("pandoc/css")).expect("css dir");
+        fs::create_dir_all(&project).expect("project dir");
+        fs::write(project.join("main.md"), "# Book\n").expect("entry");
+        fs::write(
+            library.join("pandoc/css/engineering-book.css"),
+            "body { max-width: 56rem; }\n",
+        )
+        .expect("shared css");
+        let issues = validate_config(
+            &project,
+            &MergedConfig {
+                entry: Some("main.md".to_string()),
+                lib_path: Some(library.to_string_lossy().to_string()),
+                pandoc_css: Some("engineering-book.css".to_string()),
+                pandoc_epub_css: Some("engineering-book.css".to_string()),
+                ..Default::default()
+            },
+        );
+        assert!(!issues
+            .iter()
+            .any(|issue| issue.message.contains("pandoc.css not found")));
+        assert!(!issues
+            .iter()
+            .any(|issue| issue.message.contains("pandoc.epub_css not found")));
+
+        fs::remove_dir_all(project).expect("project cleanup");
+        fs::remove_dir_all(library).expect("library cleanup");
     }
 
     #[test]

@@ -74,10 +74,6 @@ impl PandocOutputKind {
         matches!(self, Self::Pdf | Self::Latex)
     }
 
-    fn supports_css(self) -> bool {
-        matches!(self, Self::Html | Self::Epub)
-    }
-
     fn supports_embed_resources(self) -> bool {
         matches!(self, Self::Html)
     }
@@ -192,6 +188,7 @@ impl PandocBuilder {
         self.push_template(&mut options, output_kind);
         self.push_css(&mut options, output_kind, &omnidoc_lib);
         self.push_format_assets(&mut options, output_kind, &omnidoc_lib);
+        self.push_math_output(&mut options, output_kind);
         self.push_metadata(&mut options, &omnidoc_lib);
 
         options.extend(self.config.pandoc_options.clone());
@@ -214,6 +211,7 @@ impl PandocBuilder {
                 "include-files.lua".to_string(),
                 "include-code-files.lua".to_string(),
                 "diagram-generator.lua".to_string(),
+                "admonition.lua".to_string(),
                 "ltblr.lua".to_string(),
                 "latex-patch.lua".to_string(),
                 "fonts-and-alignment.lua".to_string(),
@@ -223,6 +221,7 @@ impl PandocBuilder {
                 "include-code-files.lua".to_string(),
                 "include-files.lua".to_string(),
                 "diagram-generator.lua".to_string(),
+                "admonition.lua".to_string(),
                 "fonts-and-alignment.lua".to_string(),
             ]
         };
@@ -277,22 +276,15 @@ impl PandocBuilder {
         output_kind: PandocOutputKind,
         omnidoc_lib: &str,
     ) {
-        if !output_kind.supports_css() {
+        if output_kind != PandocOutputKind::Html {
             return;
         }
 
-        let css_path = self
-            .config
-            .pandoc_css
-            .as_ref()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                PathBuf::from(format!(
-                    "{}/{}",
-                    omnidoc_lib,
-                    pandoc::LIB_PANDOC_CSS_DEFAULT
-                ))
-            });
+        let css_path = resolve_css_path(
+            self.config.pandoc_css.as_deref(),
+            omnidoc_lib,
+            pandoc::LIB_PANDOC_CSS_DEFAULT,
+        );
 
         if css_path.exists() {
             options.push(pandoc::FLAG_CSS.to_string());
@@ -314,12 +306,12 @@ impl PandocBuilder {
         }
 
         if output_kind == PandocOutputKind::Epub {
-            let css_path = self
+            let configured_css = self
                 .config
                 .pandoc_epub_css
-                .as_ref()
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from(format!("{}/pandoc/data/epub.css", omnidoc_lib)));
+                .as_deref()
+                .or(self.config.pandoc_css.as_deref());
+            let css_path = resolve_css_path(configured_css, omnidoc_lib, "pandoc/data/epub.css");
             if css_path.exists() {
                 options.push("--css".to_string());
                 options.push(css_path.to_string_lossy().to_string());
@@ -327,7 +319,26 @@ impl PandocBuilder {
         }
     }
 
+    fn push_math_output(&self, options: &mut Vec<String>, output_kind: PandocOutputKind) {
+        if !matches!(output_kind, PandocOutputKind::Html | PandocOutputKind::Epub) {
+            return;
+        }
+        if self
+            .config
+            .pandoc_options
+            .iter()
+            .any(|option| is_html_math_option(option))
+        {
+            return;
+        }
+        // MathML is self-contained, works in EPUB 3, and avoids leaving raw
+        // TeX delimiters in HTML when Pandoc's plain-HTML math conversion
+        // cannot represent a formula.
+        options.push("--mathml".to_string());
+    }
+
     fn push_metadata(&self, options: &mut Vec<String>, omnidoc_lib: &str) {
+        let has_metadata_file = self.config.metadata_file.is_some();
         if let Some(metadata_file) = &self.config.metadata_file {
             options.push("--metadata-file".to_string());
             options.push(metadata_file.clone());
@@ -343,13 +354,18 @@ impl PandocBuilder {
             }
         }
 
-        if let Some(author) = &self.config.author {
-            options.push(pandoc::FLAG_META_SHORT.to_string());
-            options.push(format!("author={}", author));
-        }
-        if let Some(target) = &self.config.target {
-            options.push(pandoc::FLAG_META_SHORT.to_string());
-            options.push(format!("title={}", target));
+        // A project metadata file is authoritative for publication metadata.
+        // `target` is primarily an output filename and global author defaults
+        // must not overwrite a book's explicit title/author.
+        if !has_metadata_file {
+            if let Some(author) = &self.config.author {
+                options.push(pandoc::FLAG_META_SHORT.to_string());
+                options.push(format!("author={}", author));
+            }
+            if let Some(target) = &self.config.target {
+                options.push(pandoc::FLAG_META_SHORT.to_string());
+                options.push(format!("title={}", target));
+            }
         }
 
         if self.config.verbose {
@@ -372,6 +388,29 @@ impl PandocBuilder {
             }
         })
     }
+}
+
+fn is_html_math_option(option: &str) -> bool {
+    ["--mathml", "--mathjax", "--katex", "--webtex", "--gladtex"]
+        .iter()
+        .any(|flag| option == *flag || option.starts_with(&format!("{}=", flag)))
+}
+
+fn resolve_css_path(configured: Option<&str>, omnidoc_lib: &str, fallback: &str) -> PathBuf {
+    let Some(configured) = configured else {
+        return PathBuf::from(omnidoc_lib).join(fallback);
+    };
+    let project_path = PathBuf::from(configured);
+    if project_path.exists() {
+        return project_path;
+    }
+    let shared_path = PathBuf::from(omnidoc_lib)
+        .join("pandoc/css")
+        .join(configured);
+    if shared_path.exists() {
+        return shared_path;
+    }
+    project_path
 }
 
 impl BuildPipeline for PandocBuilder {
@@ -462,9 +501,11 @@ impl BuildPipeline for PandocBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::PandocOutputKind;
+    use super::{resolve_css_path, PandocOutputKind};
     use crate::build::pandoc::PandocBuilder;
     use crate::config::MergedConfig;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn defaults_to_pdf_output() {
@@ -529,5 +570,101 @@ mod tests {
         let mut docx_options = Vec::new();
         docx_builder.push_template(&mut docx_options, PandocOutputKind::Docx);
         assert!(docx_options.is_empty());
+    }
+
+    #[test]
+    fn resolves_named_css_from_omnidoc_libs_and_avoids_epub_duplicates() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let library = std::env::temp_dir().join(format!("omnidoc-css-{nonce}"));
+        let css_dir = library.join("pandoc/css");
+        fs::create_dir_all(&css_dir).expect("css dir");
+        let shared_css = css_dir.join("engineering-book.css");
+        fs::write(&shared_css, "body { max-width: 56rem; }\n").expect("shared css");
+
+        assert_eq!(
+            resolve_css_path(
+                Some("engineering-book.css"),
+                library.to_str().expect("library path"),
+                "pandoc/data/epub.css",
+            ),
+            shared_css
+        );
+
+        let builder = PandocBuilder::new(MergedConfig {
+            pandoc_css: Some("engineering-book.css".to_string()),
+            pandoc_epub_css: Some("engineering-book.css".to_string()),
+            ..Default::default()
+        })
+        .expect("pandoc builder");
+        let mut options = Vec::new();
+        builder.push_css(
+            &mut options,
+            PandocOutputKind::Epub,
+            library.to_str().expect("library path"),
+        );
+        builder.push_format_assets(
+            &mut options,
+            PandocOutputKind::Epub,
+            library.to_str().expect("library path"),
+        );
+        assert_eq!(
+            options,
+            vec![
+                "--css".to_string(),
+                shared_css.to_string_lossy().to_string()
+            ]
+        );
+
+        fs::remove_dir_all(library).expect("cleanup");
+    }
+
+    #[test]
+    fn metadata_file_is_not_overridden_by_target_or_global_author() {
+        let config = MergedConfig {
+            metadata_file: Some("book-metadata.yaml".to_string()),
+            target: Some("output-filename".to_string()),
+            author: Some("global default author".to_string()),
+            ..Default::default()
+        };
+        let builder = PandocBuilder::new(config).expect("pandoc builder");
+        let mut options = Vec::new();
+
+        builder.push_metadata(&mut options, "/tmp/omnidoc-libs");
+
+        assert!(options.windows(2).any(|pair| pair
+            == [
+                "--metadata-file".to_string(),
+                "book-metadata.yaml".to_string()
+            ]));
+        assert!(!options
+            .iter()
+            .any(|option| option == "title=output-filename"));
+        assert!(!options
+            .iter()
+            .any(|option| option == "author=global default author"));
+    }
+
+    #[test]
+    fn html_and_epub_default_to_mathml_without_overriding_explicit_math_output() {
+        let builder = PandocBuilder::new(MergedConfig::default()).expect("pandoc builder");
+        let mut html_options = Vec::new();
+        builder.push_math_output(&mut html_options, PandocOutputKind::Html);
+        assert_eq!(html_options, vec!["--mathml"]);
+
+        let mut epub_options = Vec::new();
+        builder.push_math_output(&mut epub_options, PandocOutputKind::Epub);
+        assert_eq!(epub_options, vec!["--mathml"]);
+
+        let explicit = PandocBuilder::new(MergedConfig {
+            pandoc_options: vec!["--mathjax=https://cdn.example/mathjax.js".to_string()],
+            ..Default::default()
+        })
+        .expect("pandoc builder");
+        let mut explicit_options = Vec::new();
+        explicit.push_math_output(&mut explicit_options, PandocOutputKind::Html);
+        assert!(explicit_options.is_empty());
     }
 }

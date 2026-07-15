@@ -222,9 +222,9 @@ impl ConverterService {
 
         // CSS（从参数、配置或默认值获取）
         let css_path = if let Some(css_file) = css {
-            css_file.to_path_buf()
+            resolve_shared_css(&css_file.to_string_lossy(), &omnidoc_lib)
         } else if let Some(css_str) = &self.config.pandoc_css {
-            PathBuf::from(css_str)
+            resolve_shared_css(css_str, &omnidoc_lib)
         } else {
             PathBuf::from(format!("{}/pandoc/css/advance-editor.css", omnidoc_lib))
         };
@@ -277,6 +277,7 @@ impl ConverterService {
                 "include-code-files.lua".to_string(),
                 "include-files.lua".to_string(),
                 "diagram-generator.lua".to_string(),
+                "admonition.lua".to_string(),
                 "fonts-and-alignment.lua".to_string(),
             ]
         } else {
@@ -285,6 +286,7 @@ impl ConverterService {
                 "include-files.lua".to_string(),
                 "include-code-files.lua".to_string(),
                 "diagram-generator.lua".to_string(),
+                "admonition.lua".to_string(),
                 "ltblr.lua".to_string(),
                 "latex-patch.lua".to_string(),
                 "fonts-and-alignment.lua".to_string(),
@@ -351,6 +353,16 @@ impl ConverterService {
             options.push(resource_path);
         }
 
+        if to_format.is_some_and(|format| format.starts_with("html"))
+            && !self
+                .config
+                .pandoc_options
+                .iter()
+                .any(|option| is_html_math_option(option))
+        {
+            options.push("--mathml".to_string());
+        }
+
         // 添加配置的额外选项
         options.extend(self.config.pandoc_options.clone());
 
@@ -377,5 +389,26 @@ impl ConverterService {
                 ".local/share/omnidoc".to_string()
             }
         })
+    }
+}
+
+fn is_html_math_option(option: &str) -> bool {
+    ["--mathml", "--mathjax", "--katex", "--webtex", "--gladtex"]
+        .iter()
+        .any(|flag| option == *flag || option.starts_with(&format!("{}=", flag)))
+}
+
+fn resolve_shared_css(configured: &str, omnidoc_lib: &str) -> PathBuf {
+    let project_path = PathBuf::from(configured);
+    if project_path.exists() {
+        return project_path;
+    }
+    let shared_path = PathBuf::from(omnidoc_lib)
+        .join("pandoc/css")
+        .join(configured);
+    if shared_path.exists() {
+        shared_path
+    } else {
+        project_path
     }
 }
