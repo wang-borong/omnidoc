@@ -224,6 +224,10 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
    `template` is still accepted as a generic fallback for template-capable outputs. DOCX uses `reference_doc` instead of Pandoc `--template`.
 
+   HTML and EPUB builds also load OmniDoc's portable base stylesheet before
+   the selected theme. It provides semantic layout primitives such as centered
+   standalone formulas while leaving inline math unchanged.
+
 4. **Watch and rebuild while editing**
 
    ```bash

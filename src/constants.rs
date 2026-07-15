@@ -112,6 +112,7 @@ pub mod pandoc {
     pub const LIB_PANDOC_CSL: &str = "pandoc/csl";
     pub const LIB_PANDOC_CROSSREF_YAML: &str = "pandoc/crossref.yaml"; // PDF fallback
     pub const LIB_PANDOC_CROSSREF_YAML_HTML: &str = "pandoc/data/crossref.yaml"; // HTML fallback
+    pub const LIB_PANDOC_CSS_BASE: &str = "pandoc/css/omnidoc-base.css";
     pub const LIB_PANDOC_CSS_DEFAULT: &str = "pandoc/css/advance-editor.css";
 
     // Resource path defaults

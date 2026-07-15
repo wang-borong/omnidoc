@@ -472,6 +472,18 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
         );
     }
 
+    if matches!(output_kind, PandocOutputKind::Html | PandocOutputKind::Epub) {
+        if let Some(path) = existing_path(library_root.join(pandoc::LIB_PANDOC_CSS_BASE)) {
+            add_resolved_resource(
+                &mut resources,
+                project_path,
+                &library_root,
+                "omnidoc-base-css".to_string(),
+                path,
+            );
+        }
+    }
+
     let css = match output_kind {
         PandocOutputKind::Html => Some((
             "html-css",
@@ -1954,9 +1966,15 @@ mod tests {
         let library = tempfile::tempdir().expect("library tempdir");
         let css_dir = library.path().join("pandoc/css");
         fs::create_dir_all(&css_dir).expect("css dir");
+        fs::write(
+            css_dir.join("omnidoc-base.css"),
+            ".omni-display-math { text-align: center; }\n",
+        )
+        .expect("base css");
         let filter_dir = library.path().join("pandoc/data/filters");
         fs::create_dir_all(&filter_dir).expect("filter dir");
         fs::write(filter_dir.join("include-files.lua"), "return {}\n").expect("html filter");
+        fs::write(filter_dir.join("display-math.lua"), "return {}\n").expect("display math filter");
         fs::write(filter_dir.join("ltblr.lua"), "return {}\n").expect("latex filter");
         let texmf = library.path().join("texmf/tex/latex");
         fs::create_dir_all(&texmf).expect("texmf dir");
@@ -1987,6 +2005,14 @@ mod tests {
             .resources
             .iter()
             .any(|resource| resource.logical_name == "lua-filter:include-files.lua"));
+        assert!(graph
+            .resources
+            .iter()
+            .any(|resource| resource.logical_name == "lua-filter:display-math.lua"));
+        assert!(graph
+            .resources
+            .iter()
+            .any(|resource| resource.logical_name == "omnidoc-base-css"));
         assert!(!graph
             .resources
             .iter()

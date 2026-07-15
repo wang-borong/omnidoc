@@ -210,7 +210,17 @@ impl PandocBuilder {
         omnidoc_lib: &str,
         profile: &PandocCommandProfile,
     ) {
-        if output_kind != PandocOutputKind::Html {
+        if !matches!(output_kind, PandocOutputKind::Html | PandocOutputKind::Epub) {
+            return;
+        }
+
+        let base_css = PathBuf::from(omnidoc_lib).join(pandoc::LIB_PANDOC_CSS_BASE);
+        if base_css.exists() {
+            options.push(pandoc::FLAG_CSS.to_string());
+            options.push(base_css.to_string_lossy().to_string());
+        }
+
+        if output_kind == PandocOutputKind::Epub {
             return;
         }
 
@@ -565,6 +575,8 @@ mod tests {
         let library = std::env::temp_dir().join(format!("omnidoc-css-{nonce}"));
         let css_dir = library.join("pandoc/css");
         fs::create_dir_all(&css_dir).expect("css dir");
+        let base_css = css_dir.join("omnidoc-base.css");
+        fs::write(&base_css, ".omni-display-math { text-align: center; }\n").expect("base css");
         let shared_css = css_dir.join("engineering-book.css");
         fs::write(&shared_css, "body { max-width: 56rem; }\n").expect("shared css");
 
@@ -598,6 +610,8 @@ mod tests {
         assert_eq!(
             options,
             vec![
+                "--css".to_string(),
+                base_css.to_string_lossy().to_string(),
                 "--css".to_string(),
                 shared_css.to_string_lossy().to_string()
             ]

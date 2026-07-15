@@ -96,6 +96,7 @@ impl PandocOutputKind {
         const PORTABLE_FILTERS: &[&str] = &[
             "include-code-files.lua",
             "include-files.lua",
+            "display-math.lua",
             "diagram-generator.lua",
             "admonition.lua",
             "fonts-and-alignment.lua",
@@ -192,6 +193,12 @@ mod tests {
 
         assert_eq!(options, ["--toc-depth=1", "--toc-depth=3", "--mathjax"]);
         assert!(PandocOutputKind::Epub.has_explicit_html_math(&config));
+        assert!(PandocOutputKind::Html
+            .default_filters()
+            .contains(&"display-math.lua"));
+        assert!(!PandocOutputKind::Pdf
+            .default_filters()
+            .contains(&"display-math.lua"));
         assert_eq!(
             PandocOutputKind::Pdf
                 .default_filters()
