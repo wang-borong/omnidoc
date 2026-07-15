@@ -96,7 +96,8 @@ impl ConverterService {
 
         // 执行转换
         let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
-        self.executor.execute(pandoc::CMD, &args[..], false)?;
+        self.executor
+            .execute_in_dir(pandoc::CMD, &args[..], false, input.parent())?;
 
         // 清理临时文件（如有）
         if let Some(tmp) = temp_to_cleanup {
@@ -143,7 +144,8 @@ impl ConverterService {
 
         // 执行转换
         let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
-        self.executor.execute(pandoc::CMD, &args[..], false)?;
+        self.executor
+            .execute_in_dir(pandoc::CMD, &args[..], false, input.parent())?;
 
         Ok(())
     }

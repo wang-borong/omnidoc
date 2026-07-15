@@ -2,7 +2,7 @@ use crate::constants::pandoc;
 use crate::diagnostics::summarize_command_output;
 use crate::error::{OmniDocError, Result};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// 构建执行器
@@ -64,10 +64,23 @@ impl BuildExecutor {
 
     /// 执行命令
     pub fn execute(&self, cmd: &str, args: &[&str], verbose: bool) -> Result<()> {
+        self.execute_in_dir(cmd, args, verbose, None)
+    }
+
+    pub fn execute_in_dir(
+        &self,
+        cmd: &str,
+        args: &[&str],
+        verbose: bool,
+        working_dir: Option<&Path>,
+    ) -> Result<()> {
         let tool_path = self.check_tool(cmd)?;
 
         let mut command = Command::new(&tool_path);
         command.args(args);
+        if let Some(working_dir) = working_dir {
+            command.current_dir(working_dir);
+        }
 
         if verbose {
             println!("Executing: {} {}", tool_path, args.join(" "));
@@ -204,5 +217,22 @@ mod tests {
             .expect_err("missing configured engine should fail");
 
         assert!(err.to_string().contains("__omnidoc_missing_latex_engine__"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executes_commands_in_the_requested_working_directory() {
+        let directory = tempfile::tempdir().expect("working directory");
+        let executor = BuildExecutor::new(HashMap::new());
+        let expected = directory.path().to_string_lossy().to_string();
+
+        executor
+            .execute_in_dir(
+                "sh",
+                &["-c", "test \"$PWD\" = \"$1\"", "sh", &expected],
+                false,
+                Some(directory.path()),
+            )
+            .expect("command should see requested working directory");
     }
 }

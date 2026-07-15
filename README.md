@@ -370,6 +370,17 @@ omnidoc ci [PATH] [--output pdf] [--output html]
 
 `ci` runs strict validation, builds all configured/default outputs, writes `build/omnidoc-report.json`, and updates `omnidoc.lock`.
 
+Run the real Pandoc Golden Book gate locally before release-oriented changes:
+
+```bash
+OMNIDOC_LIBS=../omnidoc-libs scripts/check-golden-book.sh
+```
+
+The gate builds HTML and EPUB from a recursive-include fixture, checks MathML,
+display-math layout, repeated heading IDs, packaged CSS/images, lock/report
+digests, and shared-resource cache invalidation. It also runs EPUBCheck when the
+`epubcheck` executable is installed.
+
 List discovered local plugins and external template manifests:
 
 ```bash

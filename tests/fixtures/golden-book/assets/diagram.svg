@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="240" viewBox="0 0 720 240">
+  <rect x="20" y="70" width="180" height="100" rx="14" fill="#dbeaf5" stroke="#3977a8" stroke-width="4"/>
+  <rect x="270" y="70" width="180" height="100" rx="14" fill="#e7f2e8" stroke="#4b8b57" stroke-width="4"/>
+  <rect x="520" y="70" width="180" height="100" rx="14" fill="#f7ead7" stroke="#b8782d" stroke-width="4"/>
+  <path d="M200 120h70M450 120h70" stroke="#334" stroke-width="5" marker-end="url(#arrow)"/>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0L10 3L0 6Z" fill="#334"/></marker></defs>
+  <text x="110" y="130" text-anchor="middle" font-family="sans-serif" font-size="28">Source</text>
+  <text x="360" y="130" text-anchor="middle" font-family="sans-serif" font-size="28">Pandoc</text>
+  <text x="610" y="130" text-anchor="middle" font-family="sans-serif" font-size="28">Book</text>
+</svg>
