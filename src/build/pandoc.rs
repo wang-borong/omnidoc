@@ -1,4 +1,5 @@
 use crate::build::executor::BuildExecutor;
+use crate::build::pandoc_policy::PandocOutputKind;
 use crate::build::pipeline::{BuildPipeline, ProjectType};
 use crate::build::source_map::locate_markdown_error;
 use crate::config::MergedConfig;
@@ -7,91 +8,6 @@ use crate::error::{OmniDocError, Result};
 use crate::utils::fs;
 use dirs::data_local_dir;
 use std::path::{Path, PathBuf};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PandocOutputKind {
-    Pdf,
-    Html,
-    Epub,
-    Docx,
-    Latex,
-}
-
-impl PandocOutputKind {
-    fn from_config(config: &MergedConfig) -> Result<Self> {
-        let requested = config
-            .to
-            .as_deref()
-            .or(config.pandoc_to_format.as_deref())
-            .unwrap_or("pdf")
-            .trim()
-            .to_ascii_lowercase();
-
-        match requested.as_str() {
-            "" | "pdf" => Ok(Self::Pdf),
-            "html" | "html4" | "html5" => Ok(Self::Html),
-            "epub" | "epub2" | "epub3" => Ok(Self::Epub),
-            "docx" => Ok(Self::Docx),
-            "latex" | "tex" => Ok(Self::Latex),
-            _ => Err(OmniDocError::UnsupportedDocumentType(format!(
-                "Unsupported build output format '{}'. Supported formats: pdf, html, epub, docx, latex",
-                requested
-            ))),
-        }
-    }
-
-    fn extension(self) -> &'static str {
-        match self {
-            Self::Pdf => "pdf",
-            Self::Html => "html",
-            Self::Epub => "epub",
-            Self::Docx => "docx",
-            Self::Latex => "tex",
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Pdf => "PDF",
-            Self::Html => "HTML",
-            Self::Epub => "EPUB",
-            Self::Docx => "DOCX",
-            Self::Latex => "LaTeX",
-        }
-    }
-
-    fn default_to_format(self) -> Option<&'static str> {
-        match self {
-            Self::Pdf => None,
-            Self::Html => Some("html"),
-            Self::Epub => Some("epub3"),
-            Self::Docx => Some("docx"),
-            Self::Latex => Some("latex"),
-        }
-    }
-
-    fn uses_latex_defaults(self) -> bool {
-        matches!(self, Self::Pdf | Self::Latex)
-    }
-
-    fn supports_embed_resources(self) -> bool {
-        matches!(self, Self::Html)
-    }
-
-    fn supports_standalone(self) -> bool {
-        !matches!(self, Self::Docx)
-    }
-
-    fn config_key(self) -> &'static str {
-        match self {
-            Self::Pdf => "pdf",
-            Self::Html => "html",
-            Self::Epub => "epub",
-            Self::Docx => "docx",
-            Self::Latex => "latex",
-        }
-    }
-}
 
 /// Pandoc 构建器
 /// 实现 markdown 项目的多格式构建功能
@@ -216,33 +132,7 @@ impl PandocBuilder {
         output_kind: PandocOutputKind,
         omnidoc_lib: &str,
     ) {
-        let default_filters = if output_kind.uses_latex_defaults() {
-            vec![
-                "include-files.lua".to_string(),
-                "include-code-files.lua".to_string(),
-                "diagram-generator.lua".to_string(),
-                "admonition.lua".to_string(),
-                "ltblr.lua".to_string(),
-                "latex-patch.lua".to_string(),
-                "fonts-and-alignment.lua".to_string(),
-            ]
-        } else {
-            vec![
-                "include-code-files.lua".to_string(),
-                "include-files.lua".to_string(),
-                "diagram-generator.lua".to_string(),
-                "admonition.lua".to_string(),
-                "fonts-and-alignment.lua".to_string(),
-            ]
-        };
-
-        let filters = if !self.config.pandoc_lua_filters.is_empty() {
-            &self.config.pandoc_lua_filters
-        } else {
-            &default_filters
-        };
-
-        for filter in filters {
+        for filter in output_kind.filters(&self.config) {
             options.push("--lua-filter".to_string());
             options.push(format!(
                 "{}/{}/{}",
@@ -254,14 +144,7 @@ impl PandocBuilder {
     }
 
     fn push_configured_options(&self, options: &mut Vec<String>, output_kind: PandocOutputKind) {
-        options.extend(self.config.pandoc_options.clone());
-        if let Some(format_options) = self
-            .config
-            .pandoc_format_options
-            .get(output_kind.config_key())
-        {
-            options.extend(format_options.clone());
-        }
+        output_kind.append_configured_options(&self.config, options);
     }
 
     fn push_template(&self, options: &mut Vec<String>, output_kind: PandocOutputKind) {
@@ -344,19 +227,7 @@ impl PandocBuilder {
         if !matches!(output_kind, PandocOutputKind::Html | PandocOutputKind::Epub) {
             return;
         }
-        if self
-            .config
-            .pandoc_options
-            .iter()
-            .chain(
-                self.config
-                    .pandoc_format_options
-                    .get(output_kind.config_key())
-                    .into_iter()
-                    .flatten(),
-            )
-            .any(|option| is_html_math_option(option))
-        {
+        if output_kind.has_explicit_html_math(&self.config) {
             return;
         }
         // MathML is self-contained, works in EPUB 3, and avoids leaving raw
@@ -416,12 +287,6 @@ impl PandocBuilder {
             }
         })
     }
-}
-
-fn is_html_math_option(option: &str) -> bool {
-    ["--mathml", "--mathjax", "--katex", "--webtex", "--gladtex"]
-        .iter()
-        .any(|flag| option == *flag || option.starts_with(&format!("{}=", flag)))
 }
 
 fn resolve_css_path(configured: Option<&str>, omnidoc_lib: &str, fallback: &str) -> PathBuf {
@@ -530,8 +395,9 @@ impl BuildPipeline for PandocBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_css_path, PandocOutputKind};
+    use super::resolve_css_path;
     use crate::build::pandoc::PandocBuilder;
+    use crate::build::pandoc_policy::PandocOutputKind;
     use crate::config::MergedConfig;
     use std::collections::BTreeMap;
     use std::fs;

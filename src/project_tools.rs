@@ -1,3 +1,4 @@
+use crate::build::pandoc_policy::is_supported_format_key;
 use crate::config::MergedConfig;
 use crate::constants::pandoc;
 use crate::error::{OmniDocError, Result};
@@ -202,6 +203,19 @@ pub fn validate_config(project_path: &Path, config: &MergedConfig) -> Vec<Projec
             issues.push(error(
                 format!("Unsupported build.outputs item '{}'", output),
                 None,
+                None,
+            ));
+        }
+    }
+
+    for format in config.pandoc_format_options.keys() {
+        if !is_supported_format_key(format) {
+            issues.push(error(
+                format!(
+                    "Unsupported pandoc.format_options key '{}'. Supported keys: pdf, html, epub, docx, latex",
+                    format
+                ),
+                Some(".omnidoc.toml".to_string()),
                 None,
             ));
         }
@@ -1950,6 +1964,23 @@ mod tests {
         assert!(issues
             .iter()
             .any(|issue| issue.message.contains("build.outputs")));
+    }
+
+    #[test]
+    fn validates_pandoc_format_option_keys() {
+        let config = MergedConfig {
+            pandoc_format_options: std::collections::BTreeMap::from([(
+                "html5".to_string(),
+                vec!["--toc-depth=3".to_string()],
+            )]),
+            ..Default::default()
+        };
+
+        let issues = validate_config(Path::new("."), &config);
+
+        assert!(issues
+            .iter()
+            .any(|issue| issue.message.contains("pandoc.format_options")));
     }
 
     #[test]

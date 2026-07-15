@@ -1,4 +1,5 @@
 use crate::build::executor::BuildExecutor;
+use crate::build::pandoc_policy::PandocOutputKind;
 use crate::config::MergedConfig;
 use crate::constants::{file_names, pandoc};
 use crate::doc::templates::{generate_markdown_template, TemplateDocType};
@@ -124,7 +125,7 @@ impl ConverterService {
         };
 
         // 构建 Pandoc 选项
-        let options = self.build_pandoc_html_options(input, &output_path, css);
+        let options = self.build_pandoc_html_options(input, &output_path, css)?;
 
         // 执行转换
         let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
@@ -141,7 +142,7 @@ impl ConverterService {
         use_cn: bool,
     ) -> Result<Vec<String>> {
         let mut options =
-            self.build_pandoc_common_options(input, output, pandoc::DEFAULT_FROM_PDF, None);
+            self.build_pandoc_common_options(input, output, pandoc::DEFAULT_FROM_PDF, None)?;
 
         // PDF 专用选项
         // PDF engine（从配置获取，默认 xelatex）
@@ -189,13 +190,13 @@ impl ConverterService {
         input: &Path,
         output: &Path,
         css: Option<&Path>,
-    ) -> Vec<String> {
+    ) -> Result<Vec<String>> {
         let mut options = self.build_pandoc_common_options(
             input,
             output,
             pandoc::DEFAULT_FROM_HTML,
             Some(pandoc::DEFAULT_TO_HTML),
-        );
+        )?;
 
         // HTML 专用选项
         // Crossref YAML（从配置获取或使用默认值）
@@ -234,7 +235,7 @@ impl ConverterService {
             options.push(css_path.to_string_lossy().to_string());
         }
 
-        options
+        Ok(options)
     }
 
     /// 构建 Pandoc 公共选项
@@ -244,8 +245,9 @@ impl ConverterService {
         output: &Path,
         default_from_format: &str,
         to_format: Option<&str>,
-    ) -> Vec<String> {
+    ) -> Result<Vec<String>> {
         let mut options = Vec::new();
+        let output_kind = PandocOutputKind::from_requested(to_format)?;
 
         // 基础格式（从配置获取或使用默认值）
         options.push(pandoc::FLAG_FROM.to_string());
@@ -271,38 +273,9 @@ impl ConverterService {
         let omnidoc_lib = self.get_omnidoc_lib_path();
 
         // Lua filters（从配置获取或使用默认值）
-        let default_filters = if to_format.is_some() {
-            // HTML 使用较少的 filters
-            vec![
-                "include-code-files.lua".to_string(),
-                "include-files.lua".to_string(),
-                "diagram-generator.lua".to_string(),
-                "admonition.lua".to_string(),
-                "fonts-and-alignment.lua".to_string(),
-            ]
-        } else {
-            // PDF 使用所有 filters
-            vec![
-                "include-files.lua".to_string(),
-                "include-code-files.lua".to_string(),
-                "diagram-generator.lua".to_string(),
-                "admonition.lua".to_string(),
-                "ltblr.lua".to_string(),
-                "latex-patch.lua".to_string(),
-                "fonts-and-alignment.lua".to_string(),
-            ]
-        };
-
-        let filters = if !self.config.pandoc_lua_filters.is_empty() {
-            &self.config.pandoc_lua_filters
-        } else {
-            &default_filters
-        };
-
-        for filter in filters {
+        for filter in output_kind.filters(&self.config) {
             options.push("--lua-filter".to_string());
-            let filter_path = format!("{}/pandoc/data/filters/{}", omnidoc_lib, filter);
-            options.push(filter_path);
+            options.push(format!("{}/pandoc/data/filters/{}", omnidoc_lib, filter));
         }
 
         // Python path（从配置获取，默认 python3）
@@ -353,32 +326,21 @@ impl ConverterService {
             options.push(resource_path);
         }
 
-        let format_key = pandoc_format_key(to_format);
-        let format_options = self.config.pandoc_format_options.get(format_key);
-
         if to_format.is_some_and(|format| format.starts_with("html"))
-            && !self
-                .config
-                .pandoc_options
-                .iter()
-                .chain(format_options.into_iter().flatten())
-                .any(|option| is_html_math_option(option))
+            && !output_kind.has_explicit_html_math(&self.config)
         {
             options.push("--mathml".to_string());
         }
 
         // 添加配置的额外选项
-        options.extend(self.config.pandoc_options.clone());
-        if let Some(format_options) = format_options {
-            options.extend(format_options.clone());
-        }
+        output_kind.append_configured_options(&self.config, &mut options);
 
         // 输入和输出
         options.push(input.to_string_lossy().to_string());
         options.push(pandoc::FLAG_OUTPUT.to_string());
         options.push(output.to_string_lossy().to_string());
 
-        options
+        Ok(options)
     }
 
     /// 获取 omnidoc-libs 路径
@@ -399,23 +361,6 @@ impl ConverterService {
     }
 }
 
-fn is_html_math_option(option: &str) -> bool {
-    ["--mathml", "--mathjax", "--katex", "--webtex", "--gladtex"]
-        .iter()
-        .any(|flag| option == *flag || option.starts_with(&format!("{}=", flag)))
-}
-
-fn pandoc_format_key(to_format: Option<&str>) -> &'static str {
-    match to_format.map(|format| format.to_ascii_lowercase()) {
-        None => "pdf",
-        Some(format) if format.starts_with("html") => "html",
-        Some(format) if format.starts_with("epub") => "epub",
-        Some(format) if format == "docx" => "docx",
-        Some(format) if format == "latex" || format == "tex" => "latex",
-        Some(_) => "",
-    }
-}
-
 fn resolve_shared_css(configured: &str, omnidoc_lib: &str) -> PathBuf {
     let project_path = PathBuf::from(configured);
     if project_path.exists() {
@@ -428,5 +373,68 @@ fn resolve_shared_css(configured: &str, omnidoc_lib: &str) -> PathBuf {
         shared_path
     } else {
         project_path
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ConverterService;
+    use crate::config::MergedConfig;
+    use crate::constants::pandoc;
+    use std::collections::BTreeMap;
+    use std::path::Path;
+
+    #[test]
+    fn converter_uses_shared_pdf_filter_and_format_option_policy() {
+        let service = ConverterService::new(MergedConfig {
+            pandoc_format_options: BTreeMap::from([(
+                "pdf".to_string(),
+                vec!["--toc-depth=1".to_string()],
+            )]),
+            ..Default::default()
+        })
+        .expect("converter");
+
+        let options = service
+            .build_pandoc_common_options(
+                Path::new("input.md"),
+                Path::new("output.pdf"),
+                pandoc::DEFAULT_FROM_PDF,
+                None,
+            )
+            .expect("options");
+
+        assert_eq!(
+            options
+                .iter()
+                .filter(|option| option.ends_with("/ltblr.lua"))
+                .count(),
+            1
+        );
+        assert!(options.iter().any(|option| option == "--toc-depth=1"));
+    }
+
+    #[test]
+    fn converter_respects_format_specific_html_math_output() {
+        let service = ConverterService::new(MergedConfig {
+            pandoc_format_options: BTreeMap::from([(
+                "html".to_string(),
+                vec!["--mathjax".to_string()],
+            )]),
+            ..Default::default()
+        })
+        .expect("converter");
+
+        let options = service
+            .build_pandoc_common_options(
+                Path::new("input.md"),
+                Path::new("output.html"),
+                pandoc::DEFAULT_FROM_HTML,
+                Some("html"),
+            )
+            .expect("options");
+
+        assert!(options.iter().any(|option| option == "--mathjax"));
+        assert!(!options.iter().any(|option| option == "--mathml"));
     }
 }

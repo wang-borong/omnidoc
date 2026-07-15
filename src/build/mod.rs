@@ -1,6 +1,7 @@
 pub mod executor;
 pub mod latex;
 pub mod pandoc;
+pub(crate) mod pandoc_policy;
 pub mod pipeline;
 pub mod source_map;
 
