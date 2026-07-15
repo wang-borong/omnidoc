@@ -10,7 +10,7 @@ pub struct FormatService {
     backup: bool,
     semantic: bool,
     symbol: bool,
-    markdown: bool,
+    default_markdown: bool,
 }
 
 // 正则表达式缓存
@@ -37,6 +37,8 @@ struct RegexCache {
     period_end: Regex,
     image_pattern: Regex,
     link_pattern: Regex,
+    reference_definition: Regex,
+    table_delimiter: Regex,
 
     // 语义格式化
     #[allow(dead_code)] // May be used in future versions
@@ -44,6 +46,8 @@ struct RegexCache {
     sentence_break: Regex,
     indent_simple: Regex,
     numbered_list_pattern: Regex,
+    bullet_list_pattern: Regex,
+    blockquote_pattern: Regex,
     comment_line_pattern: Regex,
     c_comment_pattern: Regex,
     lua_comment_pattern: Regex,
@@ -98,12 +102,19 @@ fn get_regex_cache() -> &'static RegexCache {
             period_end: Regex::new(r"。$").unwrap(),
             image_pattern: Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap(),
             link_pattern: Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap(),
+            reference_definition: Regex::new(r"^\[[^\]]+\]:\s*\S+").unwrap(),
+            table_delimiter: Regex::new(
+                r"^\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?$",
+            )
+            .unwrap(),
 
             // 语义格式化
             indent_pattern: Regex::new(r"^(\s*)([0-9]+\.|[\*\#\@]+|/\*+|--+)?(\s*)").unwrap(),
             sentence_break: Regex::new(r"([。；])([^\n\\\*）])\s*").unwrap(),
             indent_simple: Regex::new(r"^(\s*)(.*)").unwrap(),
             numbered_list_pattern: Regex::new(r"^(\s*)([0-9]+\.)(\s*)").unwrap(),
+            bullet_list_pattern: Regex::new(r"^(\s*)([-+*])(\s+(?:\[[ xX]\]\s+)?)").unwrap(),
+            blockquote_pattern: Regex::new(r"^(\s*(?:>\s*)+)").unwrap(),
             comment_line_pattern: Regex::new(r"^(\s*)([\*\@]+)(\s+)").unwrap(),
             c_comment_pattern: Regex::new(r"^(\s*)(/\*+)(\s*)").unwrap(),
             lua_comment_pattern: Regex::new(r"^(\s*)(\-\-+)(\s*)").unwrap(),
@@ -124,13 +135,211 @@ fn get_regex_cache() -> &'static RegexCache {
     })
 }
 
+#[derive(Debug, Clone)]
+enum ProtectedBlock {
+    FrontMatter(String),
+    Fence { marker: u8, length: usize },
+    Math(&'static str),
+    HtmlComment,
+    HtmlElement(String),
+    LatexEnvironment(String),
+    SingleLine,
+}
+
+impl ProtectedBlock {
+    fn opening(trimmed: &str) -> Option<Self> {
+        let bytes = trimmed.as_bytes();
+        if let Some(marker) = bytes
+            .first()
+            .copied()
+            .filter(|byte| matches!(byte, b'`' | b'~'))
+        {
+            let length = bytes.iter().take_while(|byte| **byte == marker).count();
+            if length >= 3 {
+                return Some(Self::Fence { marker, length });
+            }
+        }
+        if trimmed == "$$" {
+            return Some(Self::Math("$$"));
+        }
+        if trimmed == r"\[" {
+            return Some(Self::Math(r"\]"));
+        }
+        if trimmed.starts_with("$$") && trimmed.ends_with("$$") && trimmed.len() > 4 {
+            return Some(Self::SingleLine);
+        }
+        if trimmed.starts_with("<!--") {
+            return Some(if trimmed.contains("-->") {
+                Self::SingleLine
+            } else {
+                Self::HtmlComment
+            });
+        }
+        if let Some(environment) = latex_environment(trimmed) {
+            let closing = format!(r"\end{{{}}}", environment);
+            return Some(if trimmed.contains(&closing) {
+                Self::SingleLine
+            } else {
+                Self::LatexEnvironment(environment)
+            });
+        }
+        if let Some(tag) = raw_html_container(trimmed) {
+            let closing = format!("</{}>", tag);
+            return Some(if trimmed.to_ascii_lowercase().contains(&closing) {
+                Self::SingleLine
+            } else {
+                Self::HtmlElement(tag)
+            });
+        }
+        trimmed.starts_with('<').then_some(Self::SingleLine)
+    }
+
+    fn requires_closing(&self) -> bool {
+        !matches!(self, Self::SingleLine)
+    }
+
+    fn closes(&self, line: &str) -> bool {
+        let trimmed = line.trim_start();
+        match self {
+            Self::FrontMatter(marker) => {
+                line.trim() == marker || (marker == "---" && line.trim() == "...")
+            }
+            Self::Fence { marker, length } => {
+                let bytes = trimmed.as_bytes();
+                bytes.first() == Some(marker)
+                    && bytes.iter().take_while(|byte| **byte == *marker).count() >= *length
+            }
+            Self::Math(marker) => line.trim() == *marker,
+            Self::HtmlComment => line.contains("-->"),
+            Self::HtmlElement(tag) => trimmed
+                .to_ascii_lowercase()
+                .contains(&format!("</{}>", tag)),
+            Self::LatexEnvironment(environment) => {
+                line.contains(&format!(r"\end{{{}}}", environment))
+            }
+            Self::SingleLine => true,
+        }
+    }
+}
+
+fn latex_environment(trimmed: &str) -> Option<String> {
+    let rest = trimmed.strip_prefix(r"\begin{")?;
+    let end = rest.find('}')?;
+    let environment = &rest[..end];
+    (!environment.is_empty()).then(|| environment.to_string())
+}
+
+fn raw_html_container(trimmed: &str) -> Option<String> {
+    let lower = trimmed.to_ascii_lowercase();
+    [
+        "script", "style", "pre", "code", "table", "div", "details", "summary", "math", "svg",
+    ]
+    .into_iter()
+    .find(|tag| lower.starts_with(&format!("<{}", tag)))
+    .map(str::to_string)
+}
+
+fn is_structural_markdown_line(line: &str, markdown: bool) -> bool {
+    let trimmed = line.trim_start();
+    if trimmed.is_empty() {
+        return true;
+    }
+    if !markdown {
+        return trimmed.starts_with('%') || trimmed.starts_with('\\');
+    }
+    if line.starts_with("    ") || line.starts_with('\t') {
+        return true;
+    }
+    let cache = get_regex_cache();
+    if trimmed.starts_with(":::")
+        || (trimmed.starts_with('{') && trimmed.ends_with('}'))
+        || cache.reference_definition.is_match(trimmed)
+    {
+        return true;
+    }
+    let pipe_count = trimmed
+        .chars()
+        .filter(|character| *character == '|')
+        .count();
+    if pipe_count > 0 && (trimmed.starts_with('|') || trimmed.ends_with('|')) {
+        return true;
+    }
+    cache.table_delimiter.is_match(trimmed)
+}
+
+fn protect_inline_tokens(line: &str) -> (String, Vec<String>) {
+    let bytes = line.as_bytes();
+    let mut masked = String::with_capacity(line.len());
+    let mut protected = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        let end = match bytes[index] {
+            b'\\' => bytes
+                .get(index + 1)
+                .copied()
+                .filter(u8::is_ascii_punctuation)
+                .map(|_| index + 2),
+            b'`' | b'$' => {
+                let marker = bytes[index];
+                let run = bytes[index..]
+                    .iter()
+                    .take_while(|byte| **byte == marker)
+                    .count();
+                find_closing_run(bytes, index + run, marker, run).map(|closing| closing + run)
+            }
+            b'<' => bytes[index + 1..]
+                .iter()
+                .position(|byte| *byte == b'>')
+                .map(|offset| index + offset + 2),
+            _ => None,
+        };
+        if let Some(end) = end {
+            let token = line[index..end].to_string();
+            let placeholder = format!("\u{e000}{}\u{e001}", protected.len());
+            protected.push(token);
+            masked.push_str(&placeholder);
+            index = end;
+            continue;
+        }
+        let character = line[index..].chars().next().expect("character boundary");
+        masked.push(character);
+        index += character.len_utf8();
+    }
+    (masked, protected)
+}
+
+fn find_closing_run(bytes: &[u8], mut index: usize, marker: u8, length: usize) -> Option<usize> {
+    while index < bytes.len() {
+        if bytes[index] == marker {
+            let run = bytes[index..]
+                .iter()
+                .take_while(|byte| **byte == marker)
+                .count();
+            if run == length {
+                return Some(index);
+            }
+            index += run;
+        } else {
+            index += 1;
+        }
+    }
+    None
+}
+
+fn restore_inline_tokens(mut line: String, protected: &[String]) -> String {
+    for (index, token) in protected.iter().enumerate() {
+        line = line.replace(&format!("\u{e000}{}\u{e001}", index), token);
+    }
+    line
+}
+
 impl FormatService {
     pub fn new(backup: bool, semantic: bool, symbol: bool, markdown: bool) -> Self {
         Self {
             backup,
             semantic,
             symbol,
-            markdown,
+            default_markdown: markdown,
         }
     }
 
@@ -145,7 +354,12 @@ impl FormatService {
 
         // 读取文件
         let content = fs::read_to_string(file_path)?;
-        let formatted_content = self.format_content(&content);
+        let markdown = file_path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| matches!(extension, "md" | "markdown" | "mdown"))
+            .unwrap_or(self.default_markdown);
+        let formatted_content = self.format_content_with_mode(&content, markdown);
 
         // 备份文件（如果需要）
         if self.backup {
@@ -166,52 +380,42 @@ impl FormatService {
     }
 
     /// Format Markdown content while preserving structural regions that must be byte-stable.
+    #[cfg(test)]
     fn format_content(&self, content: &str) -> String {
+        self.format_content_with_mode(content, self.default_markdown)
+    }
+
+    fn format_content_with_mode(&self, content: &str, markdown: bool) -> String {
         let mut formatted_lines = Vec::new();
-        let mut in_front_matter = false;
-        let mut in_fenced_code = false;
-        let mut fence_marker = "";
+        let mut protected_block = None::<ProtectedBlock>;
 
         for (index, line) in content.lines().enumerate() {
             let trimmed = line.trim_start();
 
-            if index == 0 && line.trim() == "---" {
-                in_front_matter = true;
+            if index == 0 && matches!(line.trim(), "---" | "+++") {
+                protected_block = Some(ProtectedBlock::FrontMatter(line.trim().to_string()));
                 formatted_lines.push(line.to_string());
                 continue;
             }
-            if in_front_matter {
+            if let Some(block) = &protected_block {
                 formatted_lines.push(line.to_string());
-                if index > 0 && line.trim() == "---" {
-                    in_front_matter = false;
+                if block.closes(line) {
+                    protected_block = None;
                 }
                 continue;
             }
 
-            let current_fence = if trimmed.starts_with("```") {
-                Some("```")
-            } else if trimmed.starts_with("~~~") {
-                Some("~~~")
-            } else {
-                None
-            };
-            if let Some(marker) = current_fence {
+            if let Some(block) = ProtectedBlock::opening(trimmed) {
                 formatted_lines.push(line.to_string());
-                if in_fenced_code && marker == fence_marker {
-                    in_fenced_code = false;
-                    fence_marker = "";
-                } else if !in_fenced_code {
-                    in_fenced_code = true;
-                    fence_marker = marker;
-                }
+                protected_block = block.requires_closing().then_some(block);
                 continue;
             }
-            if in_fenced_code {
+            if is_structural_markdown_line(line, markdown) {
                 formatted_lines.push(line.to_string());
                 continue;
             }
 
-            formatted_lines.push(self.format_line(line));
+            formatted_lines.push(self.format_line(line, markdown));
         }
 
         formatted_lines.join("\n")
@@ -240,8 +444,8 @@ impl FormatService {
     }
 
     /// 格式化单行
-    fn format_line(&self, line: &str) -> String {
-        let mut result = line.to_string();
+    fn format_line(&self, line: &str, markdown: bool) -> String {
+        let (mut result, protected) = protect_inline_tokens(line);
 
         // 通用格式化
         result = self.common_format(&result);
@@ -250,7 +454,7 @@ impl FormatService {
         result = self.tex_format(&result);
 
         // Markdown 特殊处理
-        if self.markdown {
+        if markdown {
             result = self.md_format(&result);
         }
 
@@ -264,7 +468,7 @@ impl FormatService {
             result = self.symbol_format(&result);
         }
 
-        result
+        restore_inline_tokens(result, &protected)
     }
 
     /// 通用格式化
@@ -502,6 +706,15 @@ impl FormatService {
             let marker_len = marker.len();
             let spaces = " ".repeat(marker_len);
             format!("$1\n{}{}{}$2", indent, spaces, after_marker)
+        } else if let Some(caps) = cache.bullet_list_pattern.captures(&result) {
+            let indent = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let marker = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+            let after_marker = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+            let spaces = " ".repeat(marker.chars().count() + after_marker.chars().count());
+            format!("$1\n{}{}$2", indent, spaces)
+        } else if let Some(caps) = cache.blockquote_pattern.captures(&result) {
+            let prefix = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            format!("$1\n{}$2", prefix)
         } else if let Some(caps) = cache.comment_line_pattern.captures(&result) {
             // Markdown bullet/comment continuation: keep the marker only on the first line.
             let indent = caps.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -618,8 +831,74 @@ mod tests {
     #[test]
     fn semantic_format_does_not_turn_sentence_continuations_into_new_bullets() {
         let service = FormatService::new(false, true, false, true);
-        let output = service.format_content("* 第一项；第二句。\n");
+        let output = service
+            .format_content("* 第一项；第二句。\n- 第二项；续句。\n> 引用第一句；引用第二句。\n");
 
-        assert_eq!(output, "* 第一项；\n  第二句。");
+        assert_eq!(
+            output,
+            "* 第一项；\n  第二句。\n- 第二项；\n  续句。\n> 引用第一句；\n> 引用第二句。"
+        );
+    }
+
+    #[test]
+    fn preserves_markdown_blocks_and_inline_tokens() {
+        let service = FormatService::new(false, true, true, true);
+        let input = concat!(
+            "+++\n",
+            "title = \"中文ABC:原样\"\n",
+            "+++\n\n",
+            "$$\n",
+            "中文ABC=a+b, raw\n",
+            "$$\n\n",
+            "<table>\n",
+            "<tr><td>中文ABC: raw</td></tr>\n",
+            "</table>\n\n",
+            "| 中文ABC, | value:raw |\n",
+            "|---|---|\n",
+            "[手册]: https://example.com/a:b?q=中文\n\n",
+            "正文中文ABC，``code:中文ABC`` 与 $a=b$ 以及 <span data-x=\"a:b\">内容</span>；参见 \\ref{chapter-one} 和转义 \\*。\n",
+        );
+
+        let output = service.format_content(input);
+
+        assert!(output.contains("title = \"中文ABC:原样\""));
+        assert!(output.contains("$$\n中文ABC=a+b, raw\n$$"));
+        assert!(output.contains("<tr><td>中文ABC: raw</td></tr>"));
+        assert!(output.contains("| 中文ABC, | value:raw |\n|---|---|"));
+        assert!(output.contains("[手册]: https://example.com/a:b?q=中文"));
+        assert!(output.contains("``code:中文ABC``"));
+        assert!(output.contains("$a=b$"));
+        assert!(output.contains("<span data-x=\"a:b\">"));
+        assert!(output.contains("\\ref{chapter-one}"));
+        assert!(output.contains("\\*"));
+    }
+
+    #[test]
+    fn conservative_formatting_is_idempotent() {
+        let service = FormatService::new(false, false, false, true);
+        let once = service.format_content("中文ABC 与 `x=y`。\n\n普通文本DEF。\n");
+        let twice = service.format_content(&once);
+
+        assert_eq!(once, twice);
+        assert!(once.contains("中文 ABC"));
+        assert!(once.contains("`x=y`"));
+    }
+
+    #[test]
+    fn tex_mode_preserves_command_and_environment_lines() {
+        let service = FormatService::new(false, true, true, true);
+        let input = concat!(
+            "\\newcommand{\\BookName}{中文ABC:原样}\n",
+            "\\begin{align}\n",
+            "中文ABC &= a+b, raw\\\\\n",
+            "\\end{align}\n",
+            "正文中文ABC。\n",
+        );
+
+        let output = service.format_content_with_mode(input, false);
+
+        assert!(output.contains("\\newcommand{\\BookName}{中文ABC:原样}"));
+        assert!(output.contains("\\begin{align}\n中文ABC &= a+b, raw\\\\\n\\end{align}"));
+        assert!(output.ends_with("正文中文 ABC。"));
     }
 }

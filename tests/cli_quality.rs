@@ -278,6 +278,41 @@ compatibility = "readium"
 }
 
 #[test]
+fn formatter_is_conservative_and_idempotent_on_structured_markdown() {
+    let fixture = Fixture::new("formatter");
+    let markdown = fixture.project.join("structured.md");
+    fs::write(
+        &markdown,
+        concat!(
+            "---\n",
+            "title: 中文ABC:原样\n",
+            "---\n\n",
+            "| 中文ABC, | value:raw |\n",
+            "|---|---|\n\n",
+            "```rust\n",
+            "let value = \"中文ABC:raw\";\n",
+            "```\n\n",
+            "正文中文ABC 与 ``code:中文ABC``。\n",
+        ),
+    )
+    .expect("structured markdown");
+    let path = markdown.to_string_lossy().to_string();
+
+    assert_success(fixture.command(&["fmt", &path]));
+    let once = fs::read(&markdown).expect("formatted markdown");
+    let text = String::from_utf8_lossy(&once);
+    assert!(text.contains("title: 中文ABC:原样"));
+    assert!(text.contains("| 中文ABC, | value:raw |"));
+    assert!(text.contains("let value = \"中文ABC:raw\";"));
+    assert!(text.contains("正文中文 ABC"));
+    assert!(text.contains("``code:中文ABC``"));
+
+    assert_success(fixture.command(&["fmt", &path]));
+    let twice = fs::read(&markdown).expect("formatted twice");
+    assert_eq!(once, twice);
+}
+
+#[test]
 fn publish_no_build_copies_existing_artifacts() {
     let fixture = Fixture::new("publish");
     let project = fixture.project_arg();

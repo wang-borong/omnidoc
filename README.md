@@ -480,11 +480,21 @@ omnidoc plugin --validate
     ```
 
     Options:
+
     - `--backup`: Create backup files before formatting
     - `--semantic`: Enable semantic formatting
     - `--symbol`: Enable symbol formatting (Chinese punctuation)
 
+    The default formatter is conservative and block/token-aware. It leaves
+    front matter, fenced and indented code, display math, raw HTML containers,
+    tables, reference definitions, LaTeX environments, inline code/math,
+    escapes, and raw inline HTML byte-stable. `.tex` files use a separate mode
+    that protects command and environment lines. `--semantic` and `--symbol`
+    remain explicit opt-ins, and repeated formatting is required to be
+    idempotent.
+
     Examples:
+
     ```bash
     omnidoc fmt main.md                    # Format a single file
     omnidoc fmt md/                        # Format all files in md directory
