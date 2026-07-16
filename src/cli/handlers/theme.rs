@@ -43,6 +43,12 @@ pub(crate) struct ThemeResources {
     pub(crate) lua_filters: Vec<String>,
     #[serde(default)]
     pub(crate) templates: Vec<String>,
+    #[serde(default)]
+    pub(crate) html_template: Option<String>,
+    #[serde(default)]
+    pub(crate) epub_template: Option<String>,
+    #[serde(default)]
+    pub(crate) latex_template: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -285,6 +291,9 @@ fn validate_manifest(
         && manifest.resources.latex_headers.is_empty()
         && manifest.resources.lua_filters.is_empty()
         && manifest.resources.templates.is_empty()
+        && manifest.resources.html_template.is_none()
+        && manifest.resources.epub_template.is_none()
+        && manifest.resources.latex_template.is_none()
     {
         report
             .errors
@@ -336,6 +345,46 @@ fn validate_manifest(
                     .errors
                     .push(format!("missing theme resource: {}", relative)),
             }
+        }
+    }
+    for (kind, resource) in [
+        ("html_template", manifest.resources.html_template.as_deref()),
+        ("epub_template", manifest.resources.epub_template.as_deref()),
+        (
+            "latex_template",
+            manifest.resources.latex_template.as_deref(),
+        ),
+    ] {
+        let Some(relative) = resource else {
+            continue;
+        };
+        let Some(safe) = safe_relative_path(relative) else {
+            report
+                .errors
+                .push(format!("unsafe theme resource path: {}", relative));
+            continue;
+        };
+        let resolved = library.join(safe);
+        match resolved.symlink_metadata() {
+            Ok(metadata) if metadata.file_type().is_symlink() => report.errors.push(format!(
+                "theme resource must not be a symbolic link: {}",
+                relative
+            )),
+            Ok(metadata) if metadata.is_file() => {
+                if let (Some(root), Ok(canonical_resource)) =
+                    (&canonical_library, fs::canonicalize(&resolved))
+                {
+                    if !canonical_resource.starts_with(root) {
+                        report.errors.push(format!(
+                            "theme resource resolves outside the library: {}",
+                            relative
+                        ));
+                    }
+                }
+            }
+            _ => report
+                .errors
+                .push(format!("missing {} theme resource: {}", kind, relative)),
         }
     }
     let mut fonts = BTreeSet::new();
@@ -538,6 +587,30 @@ fn print_reports(reports: &[ThemeReport], json: bool, detailed: bool) -> Result<
                     theme.resources.latex_headers.join(", ")
                 );
                 println!("  Lua filters: {}", theme.resources.lua_filters.join(", "));
+                println!(
+                    "  HTML template: {}",
+                    theme
+                        .resources
+                        .html_template
+                        .as_deref()
+                        .unwrap_or("default")
+                );
+                println!(
+                    "  EPUB template: {}",
+                    theme
+                        .resources
+                        .epub_template
+                        .as_deref()
+                        .unwrap_or("default")
+                );
+                println!(
+                    "  LaTeX template: {}",
+                    theme
+                        .resources
+                        .latex_template
+                        .as_deref()
+                        .unwrap_or("default")
+                );
                 println!("  fonts: {}", theme.requirements.fonts.join(", "));
                 println!(
                     "  system LaTeX packages: {}",

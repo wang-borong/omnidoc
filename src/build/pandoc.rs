@@ -153,7 +153,7 @@ impl PandocBuilder {
         };
         options.push(resource_path);
 
-        self.push_template(&mut options, output_kind);
+        self.push_template(&mut options, output_kind, &omnidoc_lib);
         self.push_theme_latex_headers(&mut options, output_kind, &omnidoc_lib);
         self.push_css(&mut options, output_kind, &omnidoc_lib, profile);
         self.push_format_assets(&mut options, output_kind, &omnidoc_lib);
@@ -219,24 +219,46 @@ impl PandocBuilder {
         }
     }
 
-    fn push_template(&self, options: &mut Vec<String>, output_kind: PandocOutputKind) {
+    fn push_template(
+        &self,
+        options: &mut Vec<String>,
+        output_kind: PandocOutputKind,
+        omnidoc_lib: &str,
+    ) {
+        let theme_template = self.theme.as_ref().and_then(|theme| match output_kind {
+            PandocOutputKind::Pdf | PandocOutputKind::Latex => {
+                theme.resources.latex_template.as_ref()
+            }
+            PandocOutputKind::Html => theme.resources.html_template.as_ref(),
+            PandocOutputKind::Epub => theme.resources.epub_template.as_ref(),
+            PandocOutputKind::Docx => None,
+        });
+        let theme_template = theme_template.map(|relative| {
+            PathBuf::from(omnidoc_lib)
+                .join(relative)
+                .to_string_lossy()
+                .to_string()
+        });
         let template = match output_kind {
             PandocOutputKind::Pdf | PandocOutputKind::Latex => self
                 .config
                 .pandoc_latex_template
                 .clone()
                 .or_else(|| self.config.pandoc_template.clone())
+                .or_else(|| theme_template.clone())
                 .or_else(|| Some(pandoc::DEFAULT_TEMPLATE_LATEX.to_string())),
             PandocOutputKind::Html => self
                 .config
                 .pandoc_html_template
                 .clone()
-                .or_else(|| self.config.pandoc_template.clone()),
+                .or_else(|| self.config.pandoc_template.clone())
+                .or_else(|| theme_template.clone()),
             PandocOutputKind::Epub => self
                 .config
                 .pandoc_epub_template
                 .clone()
-                .or_else(|| self.config.pandoc_template.clone()),
+                .or_else(|| self.config.pandoc_template.clone())
+                .or(theme_template),
             PandocOutputKind::Docx => None,
         };
 
@@ -732,7 +754,7 @@ mod tests {
         };
         let html_builder = PandocBuilder::new(html_config).expect("html builder");
         let mut html_options = Vec::new();
-        html_builder.push_template(&mut html_options, PandocOutputKind::Html);
+        html_builder.push_template(&mut html_options, PandocOutputKind::Html, "/tmp/omnidoc");
         assert_eq!(
             html_options,
             vec!["--template".to_string(), "html-template.html".to_string()]
@@ -745,7 +767,7 @@ mod tests {
         };
         let epub_builder = PandocBuilder::new(epub_config).expect("epub builder");
         let mut epub_options = Vec::new();
-        epub_builder.push_template(&mut epub_options, PandocOutputKind::Epub);
+        epub_builder.push_template(&mut epub_options, PandocOutputKind::Epub, "/tmp/omnidoc");
         assert_eq!(
             epub_options,
             vec!["--template".to_string(), "epub-template.html".to_string()]
@@ -757,7 +779,7 @@ mod tests {
         };
         let docx_builder = PandocBuilder::new(docx_config).expect("docx builder");
         let mut docx_options = Vec::new();
-        docx_builder.push_template(&mut docx_options, PandocOutputKind::Docx);
+        docx_builder.push_template(&mut docx_options, PandocOutputKind::Docx, "/tmp/omnidoc");
         assert!(docx_options.is_empty());
     }
 
@@ -825,10 +847,13 @@ mod tests {
         fs::create_dir_all(library.join("themes")).expect("theme dir");
         fs::create_dir_all(library.join("pandoc/css")).expect("css dir");
         fs::create_dir_all(library.join("pandoc/headers")).expect("headers dir");
+        fs::create_dir_all(library.join("pandoc/data/templates")).expect("templates dir");
         let css = library.join("pandoc/css/engineering-book.css");
         let header = library.join("pandoc/headers/engineering-book.tex");
+        let template = library.join("pandoc/data/templates/engineering-book.latex");
         fs::write(&css, "body { max-width: 56rem; }\n").expect("theme css");
         fs::write(&header, "\\usepackage{omni-engineering-book}\n").expect("theme header");
+        fs::write(&template, "$body$\n").expect("theme template");
         fs::write(
             library.join("themes/engineering-book.toml"),
             r#"manifest_version = 1
@@ -840,6 +865,7 @@ compatibility = "readium"
 [resources]
 html_css = ["pandoc/css/engineering-book.css"]
 latex_headers = ["pandoc/headers/engineering-book.tex"]
+latex_template = "pandoc/data/templates/engineering-book.latex"
 
 [metadata.defaults]
 lang = "zh-CN"
@@ -879,6 +905,39 @@ documentclass = "scrbook"
             vec![
                 "--include-in-header".to_string(),
                 header.to_string_lossy().to_string()
+            ]
+        );
+        let mut template_options = Vec::new();
+        builder.push_template(
+            &mut template_options,
+            PandocOutputKind::Pdf,
+            library.to_str().expect("library path"),
+        );
+        assert_eq!(
+            template_options,
+            vec![
+                "--template".to_string(),
+                template.to_string_lossy().to_string()
+            ]
+        );
+        let explicit_template = PandocBuilder::new(MergedConfig {
+            lib_path: Some(library.to_string_lossy().to_string()),
+            theme_name: Some("engineering-book".to_string()),
+            pandoc_latex_template: Some("project-template.latex".to_string()),
+            ..Default::default()
+        })
+        .expect("explicit template builder");
+        let mut explicit_template_options = Vec::new();
+        explicit_template.push_template(
+            &mut explicit_template_options,
+            PandocOutputKind::Pdf,
+            library.to_str().expect("library path"),
+        );
+        assert_eq!(
+            explicit_template_options,
+            vec![
+                "--template".to_string(),
+                "project-template.latex".to_string()
             ]
         );
 

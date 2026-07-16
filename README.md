@@ -409,6 +409,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    epub_css = ["pandoc/css/engineering-book.css"]
    latex_packages = ["texmf/tex/common/omni-engineering-book.sty"]
    latex_headers = ["pandoc/headers/engineering-book.tex"]
+   latex_template = "pandoc/data/templates/pantext.latex"
    lua_filters = ["pandoc/data/filters/admonition.lua"]
 
    [requirements]
@@ -432,6 +433,11 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    `pandoc.lang`, project author/title defaults, and user-supplied Pandoc
    options take precedence. Metadata keys are validated as portable scalar
    identifiers and values must remain single-line strings.
+
+   `html_template`, `epub_template`, and `latex_template` bind a template to a
+   specific writer. Explicit project format templates and the generic
+   `pandoc.template` override the theme; PDF/LaTeX falls back to
+   `pantext.latex` only when neither project nor theme selects one.
 
 ### Project Quality and CI Commands
 

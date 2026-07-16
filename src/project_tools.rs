@@ -956,7 +956,12 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
             config
                 .pandoc_latex_template
                 .as_deref()
-                .or(config.pandoc_template.as_deref()),
+                .or(config.pandoc_template.as_deref())
+                .or_else(|| {
+                    theme
+                        .as_ref()
+                        .and_then(|theme| theme.resources.latex_template.as_deref())
+                }),
             Some(pandoc::DEFAULT_TEMPLATE_LATEX),
         )),
         PandocOutputKind::Html => Some((
@@ -964,7 +969,12 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
             config
                 .pandoc_html_template
                 .as_deref()
-                .or(config.pandoc_template.as_deref()),
+                .or(config.pandoc_template.as_deref())
+                .or_else(|| {
+                    theme
+                        .as_ref()
+                        .and_then(|theme| theme.resources.html_template.as_deref())
+                }),
             None,
         )),
         PandocOutputKind::Epub => Some((
@@ -972,7 +982,12 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
             config
                 .pandoc_epub_template
                 .as_deref()
-                .or(config.pandoc_template.as_deref()),
+                .or(config.pandoc_template.as_deref())
+                .or_else(|| {
+                    theme
+                        .as_ref()
+                        .and_then(|theme| theme.resources.epub_template.as_deref())
+                }),
             None,
         )),
         PandocOutputKind::Docx => None,

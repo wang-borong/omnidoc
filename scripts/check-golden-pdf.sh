@@ -178,6 +178,7 @@ for expected in {
     "theme-manifest:engineering-book",
     "theme-latex-header:pandoc/headers/engineering-book.tex",
     "theme-latex-package:texmf/tex/common/omni-engineering-book.sty",
+    "latex-template",
 }:
     if expected not in resources:
         raise SystemExit(f"missing PDF resource: {expected}")
@@ -225,6 +226,16 @@ jq -e '
 printf '\n%% cache invalidation probe\n' >> "$work/data/omnidoc/texmf/tex/common/omni-engineering-book.sty"
 "$bin" build "$work/book" --to pdf --report
 jq -e '.reports[0].skipped == false and .reports[0].cache_reason == "input_digest_changed"' "$report" >/dev/null
+
+printf '\n%% theme template invalidation probe\n' \
+  >> "$work/data/omnidoc/pandoc/data/templates/pantext.latex"
+"$bin" build "$work/book" --to pdf --report
+jq -e '
+  .reports[0]
+  | .skipped == false
+    and .cache_reason == "input_digest_changed"
+    and any(.cache_details[]; startswith("resource_changed:omnidoc-libs:latex-template"))
+' "$report" >/dev/null
 
 cp "$work/book/assets/cover.pdf" "$work/book/assets/diagram.pdf"
 "$bin" build "$work/book" --to pdf --report
