@@ -142,6 +142,81 @@ fn quality_commands_work_on_minimal_project() {
 }
 
 #[test]
+fn doctor_checks_only_the_configured_output_toolchain() {
+    let fixture = Fixture::new("doctor-html");
+    let project = fixture.project_arg();
+
+    let output = assert_success(fixture.command(&["doctor", "--json", &project]));
+    let checks: serde_json::Value = serde_json::from_str(&output).expect("doctor JSON");
+    let checks = checks.as_array().expect("doctor check array");
+    let names = checks
+        .iter()
+        .filter_map(|check| check["name"].as_str())
+        .collect::<Vec<_>>();
+
+    assert!(names.contains(&"pandoc"));
+    assert!(names.contains(&"pandoc-crossref"));
+    assert!(names.contains(&"omnidoc-libs"));
+    assert!(names.contains(&"config"));
+    assert!(!names.contains(&"latex-engine"));
+    assert!(!names.contains(&"latexmk"));
+    assert!(!names.contains(&"epubcheck"));
+    assert!(checks
+        .iter()
+        .all(|check| { check["ok"].is_boolean() && check["detail"].is_string() }));
+}
+
+#[test]
+fn doctor_reports_configured_missing_tools_and_themes() {
+    let fixture = Fixture::new("doctor-missing");
+    fs::write(
+        fixture.env_root.join("config/omnidoc.toml"),
+        "[tools]\npandoc = \"__omnidoc_missing_pandoc__\"\n",
+    )
+    .expect("global tool config");
+    fs::write(
+        fixture.project.join(".omnidoc.toml"),
+        r#"[project]
+entry = "main.md"
+from = "markdown"
+to = "html"
+target = "smoke"
+
+[build]
+outdir = "build"
+outputs = ["html"]
+
+[theme]
+name = "missing-theme"
+"#,
+    )
+    .expect("themed project config");
+
+    let output = assert_success(fixture.command(&["doctor", "--json", &fixture.project_arg()]));
+    let checks: serde_json::Value = serde_json::from_str(&output).expect("doctor JSON");
+    let checks = checks.as_array().expect("doctor check array");
+    let pandoc = checks
+        .iter()
+        .find(|check| check["name"] == "pandoc")
+        .expect("pandoc check");
+    let theme = checks
+        .iter()
+        .find(|check| check["name"] == "theme:missing-theme")
+        .expect("theme check");
+
+    assert_eq!(pandoc["ok"], false);
+    assert!(pandoc["detail"]
+        .as_str()
+        .is_some_and(|detail| detail.contains("__omnidoc_missing_pandoc__")));
+    assert_eq!(theme["ok"], false);
+    assert!(theme["detail"].as_str().is_some_and(|detail| {
+        detail.contains("missing-theme")
+            || detail.contains("theme manifest")
+            || detail.contains("configured library")
+    }));
+}
+
+#[test]
 fn lock_check_detects_stale_inputs() {
     let fixture = Fixture::new("lock-stale");
     let project = fixture.project_arg();

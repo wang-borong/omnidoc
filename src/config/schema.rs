@@ -220,6 +220,8 @@ pub struct ToolsSection {
     pub tectonic: Option<String>,
     /// pandoc-crossref 可执行文件路径
     pub pandoc_crossref: Option<String>,
+    /// EPUBCheck executable path
+    pub epubcheck: Option<String>,
     /// kroki 服务 URL 或本地可执行文件路径（用于 mermaid 生成）
     pub kroki: Option<String>,
 }

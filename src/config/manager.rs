@@ -326,6 +326,9 @@ impl ConfigManager {
                 if let Some(p) = &tools.pandoc_crossref {
                     tool_paths.insert("pandoc-crossref".to_string(), Some(p.clone()));
                 }
+                if let Some(p) = &tools.epubcheck {
+                    tool_paths.insert("epubcheck".to_string(), Some(p.clone()));
+                }
                 if let Some(p) = &tools.kroki {
                     tool_paths.insert("kroki".to_string(), Some(p.clone()));
                 }

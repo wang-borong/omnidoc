@@ -142,6 +142,35 @@ pub(crate) fn load_theme_manifest(library: &Path, name: &str) -> Result<ThemeMan
     })
 }
 
+pub(crate) fn theme_diagnostic(
+    library: &Path,
+    name: &str,
+    check_environment: bool,
+) -> (bool, String) {
+    let report = match load_named_theme(library, name, check_environment, check_environment) {
+        Ok(report) => report,
+        Err(error) => return (false, error.to_string()),
+    };
+    let detail = if report.valid {
+        let theme = report.theme.as_ref();
+        format!(
+            "version {}; {} fonts and {} system LaTeX packages declared",
+            theme
+                .map(|theme| theme.version.as_str())
+                .unwrap_or("unknown"),
+            theme
+                .map(|theme| theme.requirements.fonts.len())
+                .unwrap_or(0),
+            theme
+                .map(|theme| theme.requirements.system_latex_packages.len())
+                .unwrap_or(0)
+        )
+    } else {
+        report.errors.join("; ")
+    };
+    (report.valid, detail)
+}
+
 fn load_theme_reports(
     library: &Path,
     check_fonts: bool,

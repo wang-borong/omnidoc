@@ -1,11 +1,15 @@
+use crate::build::executor::BuildExecutor;
 use crate::cli::handlers::build::{build_project_outputs, BuildRunOptions};
 use crate::cli::handlers::common::{create_config_manager, create_config_manager_default};
+use crate::cli::handlers::lib::library_diagnostic;
+use crate::cli::handlers::theme::theme_diagnostic;
 use crate::config::CliOverrides;
 use crate::error::{OmniDocError, Result};
 use crate::project_tools;
 use crate::utils::path;
 use serde::Serialize;
 use std::path::Path;
+use std::process::Command;
 
 #[derive(Debug, Serialize)]
 struct DoctorCheck {
@@ -19,31 +23,95 @@ pub fn handle_doctor(path: Option<String>, json: bool) -> Result<()> {
     let config_manager = create_config_manager_default(Some(&project_path))?;
     let config = config_manager.get_merged().clone();
     let mut checks = Vec::new();
-
-    for tool in ["pandoc", "pandoc-crossref", "latexmk", "xelatex"] {
-        let found = which::which(tool).ok();
-        checks.push(DoctorCheck {
-            name: tool.to_string(),
-            ok: found.is_some(),
-            detail: found
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "not found".to_string()),
+    let executor = BuildExecutor::new(config.tool_paths.clone());
+    let entry_is_latex = config
+        .from
+        .as_deref()
+        .is_some_and(|format| format.eq_ignore_ascii_case("latex"))
+        || config.entry.as_deref().is_some_and(|entry| {
+            Path::new(entry)
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("tex"))
         });
+    let outputs = if config.outputs.is_empty() {
+        vec![config.to.clone().unwrap_or_else(|| "pdf".to_string())]
+    } else {
+        config.outputs.clone()
+    };
+    let has_pdf = outputs
+        .iter()
+        .any(|output| output.eq_ignore_ascii_case("pdf"));
+    let has_epub = outputs.iter().any(|output| {
+        matches!(
+            output.trim().to_ascii_lowercase().as_str(),
+            "epub" | "epub2" | "epub3"
+        )
+    });
+    if !entry_is_latex {
+        checks.push(doctor_tool(&executor, "pandoc", "pandoc"));
+        checks.push(doctor_tool(&executor, "pandoc-crossref", "pandoc-crossref"));
+    }
+    if has_pdf {
+        checks.push(doctor_tool(&executor, "latex_engine", "latex-engine"));
+        let engine = executor.check_tool("latex_engine").ok();
+        let tectonic = engine.as_deref().is_some_and(|engine| {
+            Path::new(engine)
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("tectonic"))
+        });
+        if entry_is_latex && config.latex_backend.eq_ignore_ascii_case("latexmk") && !tectonic {
+            checks.push(doctor_tool(&executor, "latexmk", "latexmk"));
+        }
+    }
+    if has_epub {
+        checks.push(doctor_tool(&executor, "epubcheck", "epubcheck"));
     }
 
     if let Some(lib_path) = &config.lib_path {
+        let (ok, detail) = library_diagnostic(Path::new(lib_path));
         checks.push(DoctorCheck {
             name: "omnidoc-libs".to_string(),
-            ok: Path::new(lib_path).exists(),
-            detail: lib_path.clone(),
+            ok,
+            detail,
         });
+        if let Some(theme) = config.theme_name.as_deref() {
+            let (ok, detail) = theme_diagnostic(Path::new(lib_path), theme, has_pdf);
+            checks.push(DoctorCheck {
+                name: format!("theme:{theme}"),
+                ok,
+                detail,
+            });
+        }
+    } else {
+        checks.push(DoctorCheck {
+            name: "omnidoc-libs".to_string(),
+            ok: false,
+            detail: "library path is not configured".to_string(),
+        });
+        if let Some(theme) = config.theme_name.as_deref() {
+            checks.push(DoctorCheck {
+                name: format!("theme:{theme}"),
+                ok: false,
+                detail: "theme cannot be resolved without a configured library path".to_string(),
+            });
+        }
     }
 
     let issues = project_tools::validate_config(&project_path, &config);
     checks.push(DoctorCheck {
         name: "config".to_string(),
         ok: !project_tools::has_errors(&issues),
-        detail: format!("{} issue(s)", issues.len()),
+        detail: if issues.is_empty() {
+            "valid".to_string()
+        } else {
+            issues
+                .iter()
+                .map(|issue| issue.message.as_str())
+                .collect::<Vec<_>>()
+                .join("; ")
+        },
     });
 
     if json {
@@ -65,6 +133,38 @@ pub fn handle_doctor(path: Option<String>, json: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn doctor_tool(executor: &BuildExecutor, key: &str, name: &str) -> DoctorCheck {
+    match executor.check_tool(key) {
+        Ok(path) => {
+            let version = Command::new(&path)
+                .arg("--version")
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .and_then(|output| {
+                    String::from_utf8_lossy(&output.stdout)
+                        .lines()
+                        .next()
+                        .map(str::trim)
+                        .filter(|line| !line.is_empty())
+                        .map(str::to_string)
+                });
+            DoctorCheck {
+                name: name.to_string(),
+                ok: true,
+                detail: version
+                    .map(|version| format!("{} ({version})", path))
+                    .unwrap_or(path),
+            }
+        }
+        Err(error) => DoctorCheck {
+            name: name.to_string(),
+            ok: false,
+            detail: error.to_string(),
+        },
+    }
 }
 
 pub fn handle_config_validate(path: Option<String>) -> Result<()> {

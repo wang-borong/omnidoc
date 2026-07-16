@@ -448,6 +448,15 @@ omnidoc doctor [PATH]
 omnidoc doctor --json
 ```
 
+`doctor` derives its checks from the configured entry format and outputs. It
+reports the resolved executable and version for required Pandoc, cross-reference,
+LaTeX, and EPUB tools; verifies the omnidoc-libs manifest, checksums, and version
+compatibility; validates the selected theme resources; and, for PDF themes,
+checks declared fonts and system LaTeX packages. JSON output preserves failed
+checks as structured results so it can be consumed by CI and support tooling.
+Explicit executable paths can be configured under `[tools]`, including
+`pandoc`, `pandoc_crossref`, `latex_engine`, `latexmk`, and `epubcheck`.
+
 Validate project configuration:
 
 ```bash

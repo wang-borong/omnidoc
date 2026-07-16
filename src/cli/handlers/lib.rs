@@ -450,6 +450,30 @@ pub(crate) fn configured_library_path(global_config: &GlobalConfig) -> Result<Pa
         .ok_or_else(|| OmniDocError::Other("Local data directory not found".to_string()))
 }
 
+pub(crate) fn library_diagnostic(path: &Path) -> (bool, String) {
+    let status = inspect_library(path, None);
+    let ok = status.exists
+        && status.manifest_valid
+        && status.integrity_verified
+        && status.errors.is_empty()
+        && status.omnidoc_compatible != Some(false)
+        && status.pandoc_compatible != Some(false);
+    let detail = if ok {
+        format!(
+            "version {}; source {}; revision {}; {} payload files verified",
+            status.version.as_deref().unwrap_or("unknown"),
+            status.source.as_deref().unwrap_or("local"),
+            status.revision.as_deref().unwrap_or("unknown"),
+            status.checked_files
+        )
+    } else if status.errors.is_empty() {
+        format!("library verification failed at {}", path.display())
+    } else {
+        status.errors.join("; ")
+    };
+    (ok, detail)
+}
+
 fn configured_library_url(global_config: &GlobalConfig) -> String {
     global_config
         .get_config()

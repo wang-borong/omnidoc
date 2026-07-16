@@ -50,6 +50,14 @@ impl BuildExecutor {
             if PathBuf::from(path).exists() {
                 return Ok(path.clone());
             }
+            if let Ok(resolved) = which::which(path) {
+                return Ok(resolved.to_string_lossy().to_string());
+            }
+
+            return Err(OmniDocError::Other(format!(
+                "Configured tool '{}' for '{}' not found. Please install it or update the configured path.",
+                path, tool_name
+            )));
         }
 
         // 检查系统 PATH
@@ -230,6 +238,22 @@ mod tests {
             .expect_err("missing configured engine should fail");
 
         assert!(err.to_string().contains("__omnidoc_missing_latex_engine__"));
+    }
+
+    #[test]
+    fn configured_missing_tool_does_not_fallback() {
+        let mut tool_paths = HashMap::new();
+        tool_paths.insert(
+            "pandoc".to_string(),
+            Some("__omnidoc_missing_pandoc__".to_string()),
+        );
+        let executor = BuildExecutor::new(tool_paths);
+
+        let err = executor
+            .check_tool("pandoc")
+            .expect_err("missing configured tool should fail");
+
+        assert!(err.to_string().contains("__omnidoc_missing_pandoc__"));
     }
 
     #[cfg(unix)]
