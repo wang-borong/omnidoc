@@ -6,8 +6,10 @@ use crate::cli::handlers::theme::{load_theme_manifest, ThemeManifest};
 use crate::config::MergedConfig;
 use crate::constants::pandoc;
 use crate::error::{OmniDocError, Result};
+use crate::latex_recorder;
 use crate::project_tools::{
     filter_depfile_metadata_key, filter_depfile_name, INCLUDE_CODE_DEPFILE, INCLUDE_DEPFILE,
+    LATEX_INPUT_DEPFILE,
 };
 use crate::utils::fs;
 use dirs::data_local_dir;
@@ -570,11 +572,40 @@ impl BuildPipeline for PandocBuilder {
             }
         }
 
+        let mut recorder_environment = Vec::new();
+        if output_kind == PandocOutputKind::Pdf {
+            let depfile = cache_dir.join(LATEX_INPUT_DEPFILE);
+            let real_engine = self.executor.check_tool("latex_engine")?;
+            match latex_recorder::prepare_wrapper(project_path, Path::new(&real_engine), &depfile)?
+            {
+                Some(recorder) => {
+                    if let Some(index) = options
+                        .iter()
+                        .position(|option| option == pandoc::FLAG_PDF_ENGINE)
+                    {
+                        if let Some(engine) = options.get_mut(index + 1) {
+                            *engine = recorder.wrapper.to_string_lossy().to_string();
+                        }
+                    }
+                    options.push("--pdf-engine-opt=-recorder".to_string());
+                    recorder_environment = recorder.environment;
+                }
+                None => {
+                    if depfile.exists() {
+                        fs::remove_file(&depfile)?;
+                    }
+                }
+            }
+        }
+
         let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
-        if let Err(err) =
-            self.executor
-                .execute_in_dir(pandoc::CMD, &args[..], verbose, Some(project_path))
-        {
+        if let Err(err) = self.executor.execute_in_dir_with_env(
+            pandoc::CMD,
+            &args[..],
+            verbose,
+            Some(project_path),
+            &recorder_environment,
+        ) {
             let mut message = err.to_string();
             if let Some(source_hint) =
                 locate_markdown_error(&self.executor, project_path, &entry_file, &message)

@@ -17,9 +17,10 @@ use walkdir::WalkDir;
 const CACHE_DIR: &str = ".omnidoc-cache";
 pub(crate) const INCLUDE_DEPFILE: &str = "include-files.d";
 pub(crate) const INCLUDE_CODE_DEPFILE: &str = "include-code-files.d";
+pub(crate) const LATEX_INPUT_DEPFILE: &str = "latex-inputs.d";
 const LOCK_FILE: &str = "omnidoc.lock";
 const REPORT_FILE: &str = "omnidoc-report.json";
-const CACHE_VERSION: u32 = 4;
+const CACHE_VERSION: u32 = 5;
 const LOCK_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -476,6 +477,50 @@ pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> Dependenc
     }
 
     let output_kind = PandocOutputKind::from_config(config).unwrap_or(PandocOutputKind::Pdf);
+    let library_root = omnidoc_library_root(config);
+    let mut effective_pandoc_options = config.pandoc_options.clone();
+    if let Some(options) = config.pandoc_format_options.get(output_kind.config_key()) {
+        effective_pandoc_options.extend(options.clone());
+    }
+    let canonical_project = project_path
+        .canonicalize()
+        .unwrap_or_else(|_| project_path.to_path_buf());
+    for (flag, configured) in pandoc_option_file_references(&effective_pandoc_options) {
+        let candidate = PathBuf::from(&configured);
+        if candidate.is_absolute() {
+            if let Ok(canonical) = candidate.canonicalize() {
+                if canonical.is_file() && canonical.starts_with(&canonical_project) {
+                    track_dependency(
+                        project_path,
+                        project_path,
+                        Path::new(&display_relative(&canonical_project, &canonical)),
+                        &mut files,
+                        &mut pending,
+                    );
+                } else if canonical.is_file() {
+                    add_resolved_resource(
+                        &mut depfile_resources,
+                        project_path,
+                        &library_root,
+                        format!(
+                            "pandoc-option:{}:{}",
+                            flag.trim_start_matches('-'),
+                            portable_external_resource_name(&canonical)
+                        ),
+                        canonical,
+                    );
+                }
+            }
+        } else if is_local_path(&configured) {
+            track_dependency(
+                project_path,
+                project_path,
+                &candidate,
+                &mut files,
+                &mut pending,
+            );
+        }
+    }
     let active_filters = output_kind.filters(config);
     let depfiles = active_filters
         .iter()
@@ -484,7 +529,20 @@ pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> Dependenc
     for depfile in depfiles {
         load_depfile_dependencies(
             project_path,
+            &library_root,
             &depfile,
+            &format!("filter-depfile:{depfile}"),
+            &mut files,
+            &mut pending,
+            &mut depfile_resources,
+        );
+    }
+    if output_kind == PandocOutputKind::Pdf {
+        load_depfile_dependencies(
+            project_path,
+            &library_root,
+            LATEX_INPUT_DEPFILE,
+            "latex-fls-input",
             &mut files,
             &mut pending,
             &mut depfile_resources,
@@ -550,6 +608,45 @@ pub(crate) fn filter_depfile_metadata_key(filter: &str) -> Option<String> {
         .map(|stem| format!("omnidoc-depfile-{stem}"))
 }
 
+fn pandoc_option_file_references(options: &[String]) -> Vec<(String, String)> {
+    const FILE_FLAGS: &[&str] = &[
+        "--bibliography",
+        "--csl",
+        "--css",
+        "--epub-cover-image",
+        "--include-after-body",
+        "--include-before-body",
+        "--include-in-header",
+        "--lua-filter",
+        "--metadata-file",
+        "--reference-doc",
+        "--template",
+        "-A",
+        "-B",
+        "-H",
+    ];
+    let mut references = Vec::new();
+    let mut index = 0;
+    while index < options.len() {
+        let option = &options[index];
+        if let Some((flag, value)) = option.split_once('=') {
+            if FILE_FLAGS.contains(&flag) && !value.trim().is_empty() {
+                references.push((flag.to_string(), value.to_string()));
+            }
+        } else if FILE_FLAGS.contains(&option.as_str()) {
+            if let Some(value) = options
+                .get(index + 1)
+                .filter(|value| !value.trim().is_empty())
+            {
+                references.push((option.clone(), value.clone()));
+                index += 1;
+            }
+        }
+        index += 1;
+    }
+    references
+}
+
 fn track_svg_pdf_sibling(
     project_path: &Path,
     base: &Path,
@@ -576,7 +673,9 @@ fn track_svg_pdf_sibling(
 
 fn load_depfile_dependencies(
     project_path: &Path,
+    library_root: &Path,
     depfile_name: &str,
+    logical_name: &str,
     files: &mut BTreeSet<String>,
     pending: &mut Vec<PathBuf>,
     external: &mut BTreeMap<String, ResolvedResource>,
@@ -621,17 +720,37 @@ fn load_depfile_dependencies(
                 pending.push(canonical);
             }
         } else {
-            let path_text = canonical.to_string_lossy().to_string();
-            external.insert(
-                path_text.clone(),
-                ResolvedResource {
-                    logical_name: format!("filter-depfile:{}", depfile_name),
-                    resolved_from: "external".to_string(),
-                    path: path_text,
-                },
+            let resource_name = if logical_name == "latex-fls-input" {
+                format!(
+                    "latex-fls-input:{}",
+                    portable_external_resource_name(&canonical)
+                )
+            } else {
+                logical_name.to_string()
+            };
+            add_resolved_resource(
+                external,
+                project_path,
+                library_root,
+                resource_name,
+                canonical,
             );
         }
     }
+}
+
+fn portable_external_resource_name(path: &Path) -> String {
+    let components = path
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .collect::<Vec<_>>();
+    if let Some(index) = components
+        .iter()
+        .rposition(|component| matches!(*component, "texmf-dist" | "texmf" | "fonts"))
+    {
+        return components[index..].join("/");
+    }
+    components[components.len().saturating_sub(5)..].join("/")
 }
 
 fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<ResolvedResource> {
@@ -2424,10 +2543,11 @@ fn warning(message: String, path: Option<String>, line: Option<usize>) -> Projec
 mod tests {
     use super::{
         build_input_digest, build_report, cache_hit, dependency_graph, filter_depfile_metadata_key,
-        filter_depfile_name, hook_argv, manifest_hook_names, parse_lint_rule_output,
-        supported_outputs, validate_config, validate_hook_command, write_cache, write_lock,
-        write_lock_targets, HookCommand, LoadedPlugin, LockFile, LockTargetInput, PluginHooks,
-        PluginInfo, PluginManifest, CACHE_DIR, INCLUDE_DEPFILE,
+        filter_depfile_name, hook_argv, manifest_hook_names, pandoc_option_file_references,
+        parse_lint_rule_output, supported_outputs, validate_config, validate_hook_command,
+        write_cache, write_lock, write_lock_targets, HookCommand, LoadedPlugin, LockFile,
+        LockTargetInput, PluginHooks, PluginInfo, PluginManifest, CACHE_DIR, INCLUDE_DEPFILE,
+        LATEX_INPUT_DEPFILE,
     };
     use crate::config::MergedConfig;
     use std::fs;
@@ -2568,6 +2688,66 @@ mod tests {
             },
         );
         assert!(!html_graph.files.contains(&"assets/diagram.pdf".to_string()));
+    }
+
+    #[test]
+    fn extracts_file_references_from_pandoc_options() {
+        let references = pandoc_option_file_references(&[
+            "--toc".to_string(),
+            "--include-in-header=header.tex".to_string(),
+            "--bibliography".to_string(),
+            "references.bib".to_string(),
+            "-H".to_string(),
+            "short-header.tex".to_string(),
+        ]);
+        assert_eq!(
+            references,
+            [
+                ("--include-in-header".to_string(), "header.tex".to_string()),
+                ("--bibliography".to_string(), "references.bib".to_string()),
+                ("-H".to_string(), "short-header.tex".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn pdf_dependency_graph_hashes_fls_inputs() {
+        let project = tempfile::tempdir().expect("project tempdir");
+        let external = tempfile::tempdir().expect("external texmf");
+        let chapter = project.path().join("chapter.tex");
+        let package = external.path().join("indirect-theme.sty");
+        fs::write(project.path().join("main.md"), "# Main\n").expect("entry");
+        fs::write(&chapter, "Project LaTeX input\n").expect("project TeX input");
+        fs::write(&package, "External package v1\n").expect("external package");
+        fs::create_dir_all(project.path().join(CACHE_DIR)).expect("cache dir");
+        fs::write(
+            project.path().join(CACHE_DIR).join(LATEX_INPUT_DEPFILE),
+            format!(
+                "# omnidoc-depfile-v1\n# source=latex-fls\n{}\n{}\n",
+                chapter.display(),
+                package.display()
+            ),
+        )
+        .expect("LaTeX depfile");
+        let config = MergedConfig {
+            entry: Some("main.md".to_string()),
+            to: Some("pdf".to_string()),
+            ..Default::default()
+        };
+
+        let graph = dependency_graph(project.path(), &config);
+        assert!(graph.files.contains(&"chapter.tex".to_string()));
+        assert!(graph.resources.iter().any(|resource| {
+            resource.logical_name.ends_with("indirect-theme.sty")
+                && resource.resolved_from == "external"
+                && resource.path == package.to_string_lossy()
+        }));
+        let before =
+            build_input_digest(project.path(), &graph, &config, "pdf").expect("initial PDF digest");
+        fs::write(&package, "External package v2\n").expect("updated external package");
+        let after =
+            build_input_digest(project.path(), &graph, &config, "pdf").expect("updated PDF digest");
+        assert_ne!(before, after);
     }
 
     #[test]

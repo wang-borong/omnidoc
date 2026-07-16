@@ -4,6 +4,8 @@ use crate::config::MergedConfig;
 use crate::diagnostics::summarize_latex_log;
 use crate::doc::services::FigureService;
 use crate::error::{OmniDocError, Result};
+use crate::latex_recorder;
+use crate::project_tools::LATEX_INPUT_DEPFILE;
 use crate::utils::fs;
 use dirs::data_local_dir;
 use regex::Regex;
@@ -296,6 +298,7 @@ impl LatexBuilder {
 
         // Job name (输出文件名)
         options.push(format!("-jobname={}", target_name));
+        options.push("-recorder".to_string());
 
         // 输入文件
         options.push(entry_file.to_string_lossy().to_string());
@@ -324,6 +327,7 @@ impl LatexBuilder {
             "-halt-on-error".to_string(),
             "-file-line-error".to_string(),
             "-shell-escape".to_string(),
+            "-recorder".to_string(),
             format!("-output-directory={}", outdir.display()),
             format!("-jobname={}", target_name),
             entry_file.to_string_lossy().to_string(),
@@ -658,6 +662,28 @@ impl BuildPipeline for LatexBuilder {
 
         if use_tectonic {
             self.copy_tectonic_output(&entry_file, &outdir, &target_name)?;
+        }
+
+        let cache_dir = project_path.join(".omnidoc-cache");
+        let depfile = cache_dir.join(LATEX_INPUT_DEPFILE);
+        let entry_stem = entry_file.file_stem().and_then(|name| name.to_str());
+        let recorder = [
+            outdir.join(format!("{target_name}.fls")),
+            project_path.join(format!("{target_name}.fls")),
+            entry_stem
+                .map(|stem| outdir.join(format!("{stem}.fls")))
+                .unwrap_or_default(),
+        ]
+        .into_iter()
+        .find(|path| path.is_file());
+        if let Some(recorder) = recorder {
+            latex_recorder::write_depfile_from_fls(
+                &recorder,
+                &depfile,
+                std::slice::from_ref(&outdir),
+            )?;
+        } else if depfile.exists() {
+            fs::remove_file(&depfile)?;
         }
 
         // 检查输出文件

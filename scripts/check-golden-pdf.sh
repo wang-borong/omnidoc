@@ -29,16 +29,26 @@ import sys
 path = pathlib.Path(sys.argv[1])
 content = path.read_text(encoding="utf-8")
 path.write_text(
-    content.replace('outputs = ["html", "epub"]', 'outputs = ["pdf"]'),
+    content.replace('outputs = ["html", "epub"]', 'outputs = ["pdf"]')
+    .replace(
+        'epub = ["--toc", "--toc-depth=3"]',
+        'epub = ["--toc", "--toc-depth=3"]\n'
+        'pdf = ["--include-in-header=fls-probe.tex"]',
+    ),
     encoding="utf-8",
 )
 PY
 mkdir -p "$work/data" "$work/config" "$work/home"
+mkdir -p "$work/texmf/tex/latex/omnidoc-fls-probe"
+printf '\\usepackage{omnidoc-fls-probe}\n' > "$work/book/fls-probe.tex"
+printf '\\ProvidesPackage{omnidoc-fls-probe}[2026/07/16 OmniDoc FLS probe]\n' \
+  > "$work/texmf/tex/latex/omnidoc-fls-probe/omnidoc-fls-probe.sty"
 cp -a "$libs" "$work/data/omnidoc"
 
 export XDG_DATA_HOME="$work/data"
 export XDG_CONFIG_HOME="$work/config"
 export HOME="$work/home"
+export TEXINPUTS="$work/texmf//:"
 
 bin="$root/target/debug/omnidoc"
 pdf="$work/book/build/golden-book.pdf"
@@ -46,6 +56,7 @@ report="$work/book/build/omnidoc-report.json"
 lock="$work/book/omnidoc.lock"
 include_depfile="$work/book/.omnidoc-cache/include-files.d"
 include_code_depfile="$work/book/.omnidoc-cache/include-code-files.d"
+latex_input_depfile="$work/book/.omnidoc-cache/latex-inputs.d"
 
 "$bin" theme validate engineering-book --check-fonts --check-latex --json > "$work/theme.json"
 jq -e '
@@ -57,6 +68,18 @@ jq -e '
     and (.missing_latex_packages | length == 0)
 ' "$work/theme.json" >/dev/null
 
+python3 - "$work/config/omnidoc.toml" "$work/texmf" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+content = path.read_text(encoding="utf-8")
+path.write_text(
+    content.replace('texinputs = "./tex//:"', f'texinputs = "{sys.argv[2]}//:"'),
+    encoding="utf-8",
+)
+PY
+
 "$bin" build "$work/book" --to pdf --force --report --write-lock
 
 test -s "$pdf"
@@ -64,6 +87,7 @@ test -s "$report"
 test -s "$lock"
 test -s "$include_depfile"
 test -s "$include_code_depfile"
+test -s "$latex_input_depfile"
 
 pages="$(pdfinfo "$pdf" | awk '/^Pages:/ { print $2 }')"
 test "${pages:-0}" -ge 3 || { echo "Golden PDF has fewer than 3 pages" >&2; exit 1; }
@@ -104,6 +128,7 @@ jq -e '
     and (.toolchain["latex-package:fontspec"] | contains("digest=blake3:"))
     and (.toolchain["latex-package:xeCJK"] | contains("digest=blake3:"))
     and (.toolchain.tex_kpathsea | startswith("kpathsea version "))
+    and ([.resources[].logical_name | select(startswith("latex-fls-input:"))] | length > 20)
 ' "$report" >/dev/null
 
 python3 - "$lock" <<'PY'
@@ -111,7 +136,11 @@ import pathlib
 import sys
 import tomllib
 
-lock = tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+lock_path = pathlib.Path(sys.argv[1])
+lock_text = lock_path.read_text(encoding="utf-8")
+if str(lock_path.parent.parent) in lock_text:
+    raise SystemExit("lock contains a machine-specific temporary path")
+lock = tomllib.loads(lock_text)
 if lock.get("lock_version") != 4:
     raise SystemExit("expected lock schema v4")
 target = lock.get("targets", {}).get("pdf")
@@ -139,6 +168,7 @@ for expected in {
     "chapters/chapter-one.md",
     "chapters/nested/details.md",
     "assets/example.rs",
+    "fls-probe.tex",
 }:
     if expected not in dependencies:
         raise SystemExit(f"missing PDF dependency: {expected}")
@@ -150,15 +180,31 @@ for expected in {
 }:
     if expected not in resources:
         raise SystemExit(f"missing PDF resource: {expected}")
+if not any(resource.startswith("latex-fls-input:") for resource in resources):
+    raise SystemExit("missing .fls-derived LaTeX resources")
+for expected in {"omnidoc-fls-probe.sty", "fontspec.sty"}:
+    if not any(resource.endswith(expected) for resource in resources):
+        raise SystemExit(f"missing .fls-derived resource: {expected}")
 PY
 
 rg -q 'chapters/chapter-one.md' "$include_depfile"
 rg -q 'chapters/nested/details.md' "$include_depfile"
 rg -q 'assets/example.rs' "$include_code_depfile"
+rg -q 'omnidoc-fls-probe.sty' "$latex_input_depfile"
+rg -q 'fontspec.sty' "$latex_input_depfile"
 "$bin" lock --check "$work/book"
 
 "$bin" build "$work/book" --to pdf --report
 jq -e '.reports[0].skipped == true and .reports[0].cache_reason == "input_digest_match"' "$report" >/dev/null
+
+printf '\n%% configured Pandoc header invalidation probe\n' >> "$work/book/fls-probe.tex"
+"$bin" build "$work/book" --to pdf --report
+jq -e '.reports[0].skipped == false and .reports[0].cache_reason == "input_digest_changed"' "$report" >/dev/null
+
+printf '\n%% indirect TeX dependency invalidation probe\n' \
+  >> "$work/texmf/tex/latex/omnidoc-fls-probe/omnidoc-fls-probe.sty"
+"$bin" build "$work/book" --to pdf --report
+jq -e '.reports[0].skipped == false and .reports[0].cache_reason == "input_digest_changed"' "$report" >/dev/null
 
 printf '\n%% cache invalidation probe\n' >> "$work/data/omnidoc/texmf/tex/common/omni-engineering-book.sty"
 "$bin" build "$work/book" --to pdf --report

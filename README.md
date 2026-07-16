@@ -482,6 +482,13 @@ provides a manifest, its declared version plus manifest/checksum digests are
 locked as well. Older lock files must be regenerated with
 `omnidoc lock --update`.
 
+For XeLaTeX, pdfLaTeX, and LuaLaTeX PDF builds, OmniDoc also enables the TeX
+recorder and converts the engine's `.fls` file into
+`.omnidoc-cache/latex-inputs.d`. Project `\input` files and indirect system
+resources actually loaded by the engine are content-hashed on later cache and
+lock checks. The first successful build adopts the depfile before writing its
+cache entry, so it does not require a second build to stabilize.
+
 Run CI-mode validation and builds:
 
 ```bash

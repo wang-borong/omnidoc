@@ -12,6 +12,7 @@ pub mod executor;
 pub mod fs;
 pub mod fs_abstract;
 pub mod git;
+pub mod latex_recorder;
 pub mod project_tools;
 pub mod utils;
 pub mod webreq;

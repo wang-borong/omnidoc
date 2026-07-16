@@ -1,6 +1,7 @@
 use crate::constants::pandoc;
 use crate::diagnostics::summarize_command_output;
 use crate::error::{OmniDocError, Result};
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -74,10 +75,22 @@ impl BuildExecutor {
         verbose: bool,
         working_dir: Option<&Path>,
     ) -> Result<()> {
+        self.execute_in_dir_with_env(cmd, args, verbose, working_dir, &[])
+    }
+
+    pub fn execute_in_dir_with_env(
+        &self,
+        cmd: &str,
+        args: &[&str],
+        verbose: bool,
+        working_dir: Option<&Path>,
+        environment: &[(OsString, OsString)],
+    ) -> Result<()> {
         let tool_path = self.check_tool(cmd)?;
 
         let mut command = Command::new(&tool_path);
         command.args(args);
+        command.envs(environment.iter().map(|(key, value)| (key, value)));
         if let Some(working_dir) = working_dir {
             command.current_dir(working_dir);
         }

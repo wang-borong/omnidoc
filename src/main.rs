@@ -5,6 +5,9 @@ use std::any::Any;
 const CLI_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 fn main() {
+    if let Some(code) = omnidoc::latex_recorder::run_wrapper_from_env() {
+        std::process::exit(code);
+    }
     if let Err(e) = run_cli() {
         eprintln!("{} Error: {}", style("✖").red().bold(), e);
         std::process::exit(1);
