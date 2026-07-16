@@ -170,12 +170,12 @@ fn build_project_once(
             .unwrap_or("document")
             .to_string()
     });
-    let input_digest = project_tools::build_input_digest(project_path, &graph, &config, &output)?;
+    let input_state = project_tools::build_input_state(project_path, &graph, &config, &output)?;
+    let input_digest = input_state.input_digest.clone();
+    let cache_probe = project_tools::probe_cache(project_path, &output, &input_state);
 
     let output_file = expected_output_file(project_path, &config, &output, &target);
-    let cache_candidate = !run_options.force
-        && output_file.exists()
-        && project_tools::cache_hit(project_path, &output, &input_digest);
+    let cache_candidate = !run_options.force && output_file.exists() && cache_probe.hit;
     let cached_compatibility = if cache_candidate {
         validate_output_compatibility(&output, &config, &output_file)
             .ok()
@@ -198,6 +198,7 @@ fn build_project_once(
                 target,
                 skipped: true,
                 cache_reason: "input_digest_match".to_string(),
+                cache_details: cache_probe.details,
                 duration_ms: started_at.elapsed().as_millis() as u64,
                 input_digest,
                 graph: &graph,
@@ -209,15 +210,21 @@ fn build_project_once(
         ));
     }
 
-    let cache_reason = if cache_candidate && !cached_compatibility_valid {
-        "artifact_compatibility_failed"
+    let (cache_reason, mut cache_details) = if cache_candidate && !cached_compatibility_valid {
+        (
+            "artifact_compatibility_failed",
+            vec!["artifact_compatibility_failed".to_string()],
+        )
     } else if run_options.force {
-        "forced_rebuild"
+        ("forced_rebuild", vec!["forced_by_user".to_string()])
     } else if !output_file.exists() {
-        "artifact_missing"
+        ("artifact_missing", vec!["artifact_missing".to_string()])
     } else {
-        "input_digest_changed"
+        ("input_digest_changed", Vec::new())
     };
+    if !cache_probe.hit {
+        cache_details.extend(cache_probe.details);
+    }
 
     let build_context = project_tools::PluginContext {
         project_path,
@@ -237,8 +244,9 @@ fn build_project_once(
     // the graph before writing the cache/report so the first successful build
     // does not require a second rebuild merely to adopt its depfile.
     let final_graph = project_tools::dependency_graph(project_path, &config);
-    let final_input_digest =
-        project_tools::build_input_digest(project_path, &final_graph, &config, &output)?;
+    let final_input_state =
+        project_tools::build_input_state(project_path, &final_graph, &config, &output)?;
+    let final_input_digest = final_input_state.input_digest.clone();
     let compatibility = validate_output_compatibility(&output, &config, &output_file)?;
     if let Some(report) = &compatibility {
         if !report.valid {
@@ -255,13 +263,14 @@ fn build_project_once(
             )));
         }
     }
-    project_tools::write_cache(project_path, &output, &final_input_digest)?;
+    project_tools::write_cache_state(project_path, &output, &final_input_state)?;
     Ok(project_tools::build_report(
         project_tools::BuildReportContext {
             output,
             target,
             skipped: false,
             cache_reason: cache_reason.to_string(),
+            cache_details,
             duration_ms: started_at.elapsed().as_millis() as u64,
             input_digest: final_input_digest,
             graph: &final_graph,

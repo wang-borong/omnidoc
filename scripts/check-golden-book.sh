@@ -48,7 +48,12 @@ rg -q 'theme-manifest:engineering-book' "$lock"
 rg -q 'chapters/chapter-one.md' "$include_depfile"
 rg -q 'chapters/nested/details.md' "$include_depfile"
 rg -q 'assets/example.rs' "$include_code_depfile"
-jq -e '.reports | length == 2 and all(.artifact_digest | startswith("blake3:"))' "$report" >/dev/null
+jq -e '
+  .reports
+  | length == 2
+    and all(.artifact_digest | startswith("blake3:"))
+    and all(.cache_details | index("forced_by_user"))
+' "$report" >/dev/null
 jq -e '
   .reports
   | map(select(.output == "epub"))[0].compatibility
@@ -82,7 +87,12 @@ for name, target in targets.items():
 PY
 "$bin" lock --check "$work/book"
 "$bin" build "$work/book" --to html --report
-jq -e '.reports[0].skipped == true and .reports[0].cache_reason == "input_digest_match"' "$report" >/dev/null
+jq -e '
+  .reports[0]
+  | .skipped == true
+    and .cache_reason == "input_digest_match"
+    and (.cache_details | length == 0)
+' "$report" >/dev/null
 python3 - "$epub" <<'PY'
 import pathlib
 import sys
@@ -98,6 +108,7 @@ jq -e '
   .reports[0]
   | .skipped == false
     and .cache_reason == "artifact_compatibility_failed"
+    and (.cache_details | index("artifact_compatibility_failed"))
     and .compatibility.profile == "readium"
     and .compatibility.valid == true
 ' "$report" >/dev/null
@@ -128,15 +139,30 @@ PY
 
 printf '\nDepfile invalidation probe.\n' >> "$work/book/chapters/nested/details.md"
 "$bin" build "$work/book" --to html --report
-jq -e '.reports[0].skipped == false and .reports[0].cache_reason == "input_digest_changed"' "$report" >/dev/null
+jq -e '
+  .reports[0]
+  | .skipped == false
+    and .cache_reason == "input_digest_changed"
+    and (.cache_details | index("dependency_changed:chapters/nested/details.md"))
+' "$report" >/dev/null
 
 printf '\n/* cache invalidation probe */\n' >> "$work/data/omnidoc/pandoc/css/omnidoc-base.css"
 "$bin" build "$work/book" --to html --report
-jq -e '.reports[0].skipped == false and .reports[0].cache_reason == "input_digest_changed"' "$report" >/dev/null
+jq -e '
+  .reports[0]
+  | .skipped == false
+    and .cache_reason == "input_digest_changed"
+    and any(.cache_details[]; startswith("resource_changed:omnidoc-libs:omnidoc-base-css"))
+' "$report" >/dev/null
 
 printf '\n# theme contract invalidation probe\n' >> "$work/data/omnidoc/themes/engineering-book.toml"
 "$bin" build "$work/book" --to html --report
-jq -e '.reports[0].skipped == false and .reports[0].cache_reason == "input_digest_changed"' "$report" >/dev/null
+jq -e '
+  .reports[0]
+  | .skipped == false
+    and .cache_reason == "input_digest_changed"
+    and any(.cache_details[]; startswith("resource_changed:omnidoc-libs:theme-manifest"))
+' "$report" >/dev/null
 
 if command -v epubcheck >/dev/null; then
   epubcheck "$epub"

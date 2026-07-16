@@ -20,7 +20,7 @@ pub(crate) const INCLUDE_CODE_DEPFILE: &str = "include-code-files.d";
 pub(crate) const LATEX_INPUT_DEPFILE: &str = "latex-inputs.d";
 const LOCK_FILE: &str = "omnidoc.lock";
 const REPORT_FILE: &str = "omnidoc-report.json";
-const CACHE_VERSION: u32 = 5;
+const CACHE_VERSION: u32 = 6;
 const LOCK_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -57,6 +57,7 @@ pub struct BuildReport {
     pub target: String,
     pub skipped: bool,
     pub cache_reason: String,
+    pub cache_details: Vec<String>,
     pub duration_ms: u64,
     pub input_digest: String,
     pub artifact_digest: Option<String>,
@@ -80,6 +81,7 @@ pub struct BuildReportContext<'a> {
     pub target: String,
     pub skipped: bool,
     pub cache_reason: String,
+    pub cache_details: Vec<String>,
     pub duration_ms: u64,
     pub input_digest: String,
     pub graph: &'a DependencyGraph,
@@ -93,6 +95,20 @@ pub struct BuildReportContext<'a> {
 struct BuildCache {
     cache_version: u32,
     input_digest: String,
+    #[serde(default)]
+    components: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BuildInputState {
+    pub input_digest: String,
+    pub components: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CacheProbe {
+    pub hit: bool,
+    pub details: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1230,9 +1246,39 @@ pub fn build_input_digest(
     config: &MergedConfig,
     output: &str,
 ) -> Result<String> {
-    let mut hasher = Hasher::new();
-    hash_dependency_files(project_path, graph, &mut hasher)?;
-    hash_resolved_resources(graph, &mut hasher)?;
+    Ok(build_input_state(project_path, graph, config, output)?.input_digest)
+}
+
+pub fn build_input_state(
+    project_path: &Path,
+    graph: &DependencyGraph,
+    config: &MergedConfig,
+    output: &str,
+) -> Result<BuildInputState> {
+    let mut components = BTreeMap::new();
+    components.insert("model:cache-schema".to_string(), CACHE_VERSION.to_string());
+    for file in &graph.files {
+        let path = project_path.join(file);
+        let digest = if path.is_file() {
+            content_digest(&path)?
+        } else {
+            "missing".to_string()
+        };
+        components.insert(format!("dependency:{file}"), digest);
+    }
+    let mut resource_occurrences = BTreeMap::<String, usize>::new();
+    for resource in &graph.resources {
+        let base = format!(
+            "resource:{}:{}",
+            resource.resolved_from, resource.logical_name
+        );
+        let occurrence = resource_occurrences.entry(base.clone()).or_default();
+        *occurrence += 1;
+        components.insert(
+            format!("{base}#{}", *occurrence),
+            content_digest(Path::new(&resource.path))?,
+        );
+    }
     for (label, value) in [
         ("output", format!("{output:?}")),
         ("from", format!("{:?}", config.from)),
@@ -1315,13 +1361,26 @@ pub fn build_input_digest(
             format!("{:?}", sorted_tool_paths(&config.tool_paths)),
         ),
     ] {
-        hash_field(&mut hasher, label, value.as_bytes());
+        components.insert(format!("config:{label}"), digest_value(value.as_bytes()));
     }
     for (name, version) in toolchain_versions(config, output) {
-        hash_field(&mut hasher, "toolchain-name", name.as_bytes());
-        hash_field(&mut hasher, "toolchain-version", version.as_bytes());
+        components.insert(
+            format!("toolchain:{name}"),
+            digest_value(version.as_bytes()),
+        );
     }
-    Ok(format_digest(hasher.finalize()))
+    let mut hasher = Hasher::new();
+    for (name, value) in &components {
+        hash_field(&mut hasher, name, value.as_bytes());
+    }
+    Ok(BuildInputState {
+        input_digest: format_digest(hasher.finalize()),
+        components,
+    })
+}
+
+fn digest_value(value: &[u8]) -> String {
+    format_digest(blake3::hash(value))
 }
 
 fn hash_dependency_files(
@@ -1397,25 +1456,122 @@ fn sorted_tool_paths(
 }
 
 pub fn cache_hit(project_path: &Path, output: &str, digest: &str) -> bool {
-    let path = cache_path(project_path, output);
-    let Ok(content) = fs::read_to_string(path) else {
-        return false;
-    };
-    serde_json::from_str::<BuildCache>(&content)
-        .map(|cache| cache.cache_version == CACHE_VERSION && cache.input_digest == digest)
-        .unwrap_or(false)
+    read_build_cache(project_path, output)
+        .is_some_and(|cache| cache.cache_version == CACHE_VERSION && cache.input_digest == digest)
 }
 
 pub fn write_cache(project_path: &Path, output: &str, digest: &str) -> Result<()> {
+    write_build_cache(
+        project_path,
+        output,
+        &BuildInputState {
+            input_digest: digest.to_string(),
+            components: BTreeMap::new(),
+        },
+    )
+}
+
+pub fn probe_cache(project_path: &Path, output: &str, state: &BuildInputState) -> CacheProbe {
+    let path = cache_path(project_path, output);
+    let content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) => {
+            let detail = if error.kind() == std::io::ErrorKind::NotFound {
+                "cache_record_missing".to_string()
+            } else {
+                format!("cache_record_unreadable:{error}")
+            };
+            return CacheProbe {
+                hit: false,
+                details: vec![detail],
+            };
+        }
+    };
+    let cache = match serde_json::from_str::<BuildCache>(&content) {
+        Ok(cache) => cache,
+        Err(error) => {
+            return CacheProbe {
+                hit: false,
+                details: vec![format!("cache_record_invalid:{error}")],
+            };
+        }
+    };
+    if cache.cache_version != CACHE_VERSION {
+        return CacheProbe {
+            hit: false,
+            details: vec![format!(
+                "cache_schema_changed:{}->{}",
+                cache.cache_version, CACHE_VERSION
+            )],
+        };
+    }
+    if cache.input_digest == state.input_digest {
+        return CacheProbe {
+            hit: true,
+            details: Vec::new(),
+        };
+    }
+    CacheProbe {
+        hit: false,
+        details: changed_cache_components(&cache.components, &state.components),
+    }
+}
+
+pub fn write_cache_state(project_path: &Path, output: &str, state: &BuildInputState) -> Result<()> {
+    write_build_cache(project_path, output, state)
+}
+
+fn read_build_cache(project_path: &Path, output: &str) -> Option<BuildCache> {
+    let content = fs::read_to_string(cache_path(project_path, output)).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+fn write_build_cache(project_path: &Path, output: &str, state: &BuildInputState) -> Result<()> {
     fs::create_dir_all(project_path.join(CACHE_DIR))?;
     let cache = BuildCache {
         cache_version: CACHE_VERSION,
-        input_digest: digest.to_string(),
+        input_digest: state.input_digest.clone(),
+        components: state.components.clone(),
     };
     let content =
         serde_json::to_string_pretty(&cache).map_err(|err| OmniDocError::Other(err.to_string()))?;
     fs::write(cache_path(project_path, output), content)?;
     Ok(())
+}
+
+fn changed_cache_components(
+    previous: &BTreeMap<String, String>,
+    current: &BTreeMap<String, String>,
+) -> Vec<String> {
+    const MAX_DETAILS: usize = 32;
+    let keys = previous
+        .keys()
+        .chain(current.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut details = Vec::new();
+    let mut omitted = 0;
+    for key in keys {
+        let action = match (previous.get(&key), current.get(&key)) {
+            (None, Some(_)) => "added",
+            (Some(_), None) => "removed",
+            (Some(left), Some(right)) if left != right => "changed",
+            _ => continue,
+        };
+        if details.len() >= MAX_DETAILS {
+            omitted += 1;
+            continue;
+        }
+        let (kind, name) = key.split_once(':').unwrap_or(("input", key.as_str()));
+        details.push(format!("{kind}_{action}:{name}"));
+    }
+    if omitted > 0 {
+        details.push(format!("additional_changes:{omitted}"));
+    }
+    if details.is_empty() {
+        details.push("input_digest_changed_without_component_delta".to_string());
+    }
+    details
 }
 
 pub fn write_report(
@@ -1983,6 +2139,7 @@ pub fn build_report(context: BuildReportContext<'_>) -> BuildReport {
         target: context.target,
         skipped: context.skipped,
         cache_reason: context.cache_reason,
+        cache_details: context.cache_details,
         duration_ms: context.duration_ms,
         input_digest: context.input_digest,
         artifact_digest: context
@@ -2542,14 +2699,15 @@ fn warning(message: String, path: Option<String>, line: Option<usize>) -> Projec
 #[cfg(test)]
 mod tests {
     use super::{
-        build_input_digest, build_report, cache_hit, dependency_graph, filter_depfile_metadata_key,
-        filter_depfile_name, hook_argv, manifest_hook_names, pandoc_option_file_references,
-        parse_lint_rule_output, supported_outputs, validate_config, validate_hook_command,
-        write_cache, write_lock, write_lock_targets, HookCommand, LoadedPlugin, LockFile,
-        LockTargetInput, PluginHooks, PluginInfo, PluginManifest, CACHE_DIR, INCLUDE_DEPFILE,
-        LATEX_INPUT_DEPFILE,
+        build_input_digest, build_report, cache_hit, changed_cache_components, dependency_graph,
+        filter_depfile_metadata_key, filter_depfile_name, hook_argv, manifest_hook_names,
+        pandoc_option_file_references, parse_lint_rule_output, supported_outputs, validate_config,
+        validate_hook_command, write_cache, write_lock, write_lock_targets, HookCommand,
+        LoadedPlugin, LockFile, LockTargetInput, PluginHooks, PluginInfo, PluginManifest,
+        CACHE_DIR, INCLUDE_DEPFILE, LATEX_INPUT_DEPFILE,
     };
     use crate::config::MergedConfig;
+    use std::collections::BTreeMap;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -2708,6 +2866,27 @@ mod tests {
                 ("-H".to_string(), "short-header.tex".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn explains_changed_cache_components() {
+        let previous = BTreeMap::from([
+            ("dependency:main.md".to_string(), "v1".to_string()),
+            ("toolchain:pandoc".to_string(), "3.9".to_string()),
+        ]);
+        let current = BTreeMap::from([
+            ("dependency:main.md".to_string(), "v2".to_string()),
+            (
+                "resource:external:latex-fls-input:fontspec.sty#1".to_string(),
+                "digest".to_string(),
+            ),
+        ]);
+        let details = changed_cache_components(&previous, &current);
+        assert!(details.contains(&"dependency_changed:main.md".to_string()));
+        assert!(
+            details.contains(&"resource_added:external:latex-fls-input:fontspec.sty#1".to_string())
+        );
+        assert!(details.contains(&"toolchain_removed:pandoc".to_string()));
     }
 
     #[test]
@@ -2998,6 +3177,7 @@ mod tests {
             target: "book".to_string(),
             skipped: true,
             cache_reason: "input_digest_match".to_string(),
+            cache_details: Vec::new(),
             duration_ms: 12,
             input_digest: "blake3:input".to_string(),
             graph: &graph,
@@ -3008,6 +3188,7 @@ mod tests {
         });
 
         assert_eq!(report.cache_reason, "input_digest_match");
+        assert!(report.cache_details.is_empty());
         assert_eq!(report.duration_ms, 12);
         assert!(report
             .artifact_digest

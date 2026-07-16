@@ -155,9 +155,13 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    - Use `--verbose` to show detailed build messages
    - The build directory is `build/` (configurable via config), and the output file is named after the repository directory
 
-   Build reports include the cache decision reason, elapsed milliseconds,
-   input and artifact BLAKE3 digests, resolved resource digests, and detected
-   Pandoc/pandoc-crossref/LaTeX toolchain versions.
+   Build reports include the cache decision reason and component-level
+   `cache_details`, elapsed milliseconds, input and artifact BLAKE3 digests,
+   resolved resource digests, and detected Pandoc/pandoc-crossref/LaTeX
+   toolchain versions. Cache details identify added, removed, or changed
+   dependencies, resources, configuration fields, and toolchain components.
+   Cache schema v6 stores these component fingerprints locally; older cache
+   records are rebuilt automatically and reported as `cache_schema_changed`.
 
    The Markdown and code include filters emit authoritative depfiles under
    `.omnidoc-cache/`. After the first successful build, recursive files that

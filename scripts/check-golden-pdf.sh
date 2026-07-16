@@ -120,6 +120,7 @@ jq -e '
   .reports[0]
   | .output == "pdf"
     and .skipped == false
+    and (.cache_details | index("forced_by_user"))
     and (.artifact_digest | startswith("blake3:"))
     and (.toolchain.latex_engine | startswith("XeTeX "))
     and (.toolchain["font:Noto Serif CJK SC"] | contains("digest=blake3:"))
@@ -195,16 +196,31 @@ rg -q 'fontspec.sty' "$latex_input_depfile"
 "$bin" lock --check "$work/book"
 
 "$bin" build "$work/book" --to pdf --report
-jq -e '.reports[0].skipped == true and .reports[0].cache_reason == "input_digest_match"' "$report" >/dev/null
+jq -e '
+  .reports[0]
+  | .skipped == true
+    and .cache_reason == "input_digest_match"
+    and (.cache_details | length == 0)
+' "$report" >/dev/null
 
 printf '\n%% configured Pandoc header invalidation probe\n' >> "$work/book/fls-probe.tex"
 "$bin" build "$work/book" --to pdf --report
-jq -e '.reports[0].skipped == false and .reports[0].cache_reason == "input_digest_changed"' "$report" >/dev/null
+jq -e '
+  .reports[0]
+  | .skipped == false
+    and .cache_reason == "input_digest_changed"
+    and (.cache_details | index("dependency_changed:fls-probe.tex"))
+' "$report" >/dev/null
 
 printf '\n%% indirect TeX dependency invalidation probe\n' \
   >> "$work/texmf/tex/latex/omnidoc-fls-probe/omnidoc-fls-probe.sty"
 "$bin" build "$work/book" --to pdf --report
-jq -e '.reports[0].skipped == false and .reports[0].cache_reason == "input_digest_changed"' "$report" >/dev/null
+jq -e '
+  .reports[0]
+  | .skipped == false
+    and .cache_reason == "input_digest_changed"
+    and any(.cache_details[]; startswith("resource_changed:") and endswith("omnidoc-fls-probe.sty#1"))
+' "$report" >/dev/null
 
 printf '\n%% cache invalidation probe\n' >> "$work/data/omnidoc/texmf/tex/common/omni-engineering-book.sty"
 "$bin" build "$work/book" --to pdf --report
@@ -212,6 +228,11 @@ jq -e '.reports[0].skipped == false and .reports[0].cache_reason == "input_diges
 
 cp "$work/book/assets/cover.pdf" "$work/book/assets/diagram.pdf"
 "$bin" build "$work/book" --to pdf --report
-jq -e '.reports[0].skipped == false and .reports[0].cache_reason == "input_digest_changed"' "$report" >/dev/null
+jq -e '
+  .reports[0]
+  | .skipped == false
+    and .cache_reason == "input_digest_changed"
+    and (.cache_details | index("dependency_changed:assets/diagram.pdf"))
+' "$report" >/dev/null
 
 echo "Golden PDF checks passed"
