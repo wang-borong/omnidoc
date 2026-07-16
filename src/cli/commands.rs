@@ -220,6 +220,10 @@ pub enum Commands {
         /// emit JSON diagnostics
         #[arg(long)]
         json: bool,
+
+        /// return a non-zero exit status when any check fails
+        #[arg(long)]
+        strict: bool,
     },
 
     /// validate OmniDoc configuration files

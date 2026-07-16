@@ -58,6 +58,7 @@ include_depfile="$work/book/.omnidoc-cache/include-files.d"
 include_code_depfile="$work/book/.omnidoc-cache/include-code-files.d"
 latex_input_depfile="$work/book/.omnidoc-cache/latex-inputs.d"
 
+"$bin" doctor --strict "$work/book"
 "$bin" theme validate engineering-book --check-fonts --check-latex --json > "$work/theme.json"
 jq -e '
   .[0]

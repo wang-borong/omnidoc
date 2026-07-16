@@ -214,6 +214,14 @@ name = "missing-theme"
             || detail.contains("theme manifest")
             || detail.contains("configured library")
     }));
+
+    let strict = fixture.command(&["doctor", "--strict", "--json", &fixture.project_arg()]);
+    let strict_json = assert_failure(strict);
+    let strict_checks: serde_json::Value =
+        serde_json::from_str(&strict_json).expect("strict doctor JSON");
+    assert!(strict_checks
+        .as_array()
+        .is_some_and(|checks| checks.iter().any(|check| check["ok"] == false)));
 }
 
 #[test]

@@ -22,6 +22,9 @@ export XDG_CONFIG_HOME="$work/config"
 export HOME="$work/home"
 
 bin="$root/target/debug/omnidoc"
+if command -v epubcheck >/dev/null; then
+  "$bin" doctor --strict "$work/book"
+fi
 "$bin" build "$work/book" --all --force --report --write-lock
 
 html="$work/book/build/golden-book.html"

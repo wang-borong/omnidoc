@@ -18,7 +18,7 @@ struct DoctorCheck {
     detail: String,
 }
 
-pub fn handle_doctor(path: Option<String>, json: bool) -> Result<()> {
+pub fn handle_doctor(path: Option<String>, json: bool, strict: bool) -> Result<()> {
     let project_path = path::determine_project_path(path)?.canonicalize()?;
     let config_manager = create_config_manager_default(Some(&project_path))?;
     let config = config_manager.get_merged().clone();
@@ -113,6 +113,7 @@ pub fn handle_doctor(path: Option<String>, json: bool) -> Result<()> {
                 .join("; ")
         },
     });
+    let failed = checks.iter().filter(|check| !check.ok).count();
 
     if json {
         let content = serde_json::to_string_pretty(&checks)
@@ -130,6 +131,12 @@ pub fn handle_doctor(path: Option<String>, json: bool) -> Result<()> {
         if !issues.is_empty() {
             project_tools::print_issues(&issues);
         }
+    }
+
+    if strict && failed > 0 {
+        return Err(OmniDocError::Project(format!(
+            "environment diagnostics failed: {failed} check(s) failed"
+        )));
     }
 
     Ok(())

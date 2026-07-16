@@ -186,8 +186,8 @@ pub fn cli() -> Result<()> {
                 verbose,
             )?;
         }
-        Commands::Doctor { path, json } => {
-            handle_doctor(path, json)?;
+        Commands::Doctor { path, json, strict } => {
+            handle_doctor(path, json, strict)?;
         }
         Commands::ConfigValidate { path } => {
             handle_config_validate(path)?;

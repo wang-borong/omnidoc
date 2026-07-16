@@ -446,6 +446,7 @@ Run environment diagnostics:
 ```bash
 omnidoc doctor [PATH]
 omnidoc doctor --json
+omnidoc doctor --strict [PATH]
 ```
 
 `doctor` derives its checks from the configured entry format and outputs. It
@@ -454,6 +455,8 @@ LaTeX, and EPUB tools; verifies the omnidoc-libs manifest, checksums, and versio
 compatibility; validates the selected theme resources; and, for PDF themes,
 checks declared fonts and system LaTeX packages. JSON output preserves failed
 checks as structured results so it can be consumed by CI and support tooling.
+Use `--strict` to return a non-zero status when any diagnostic fails; without
+it, `doctor` retains its informational exit behavior.
 Explicit executable paths can be configured under `[tools]`, including
 `pandoc`, `pandoc_crossref`, `latex_engine`, `latexmk`, and `epubcheck`.
 
