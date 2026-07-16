@@ -59,7 +59,7 @@ profile or documented release note rather than an untracked CSS patch.
 ## 4. Publish OmniDoc
 
 1. Confirm `Cargo.toml`, `Cargo.lock`, and `release/omnidoc-libs.toml` agree.
-2. Commit, create and push the signed `v1.3.2` tag.
+2. Commit, create and push the signed `v1.3.3` tag.
 3. Require quality, Golden Book, Golden PDF, portable document smoke, package,
    and installed-release smoke jobs to pass.
 4. Download every archive and run its packaged-binary smoke test.

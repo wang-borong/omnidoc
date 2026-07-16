@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.3
+
+- Fixed installed-release smoke archive discovery when GitHub artifact
+  directories use the same name as the contained archive.
+
 ## 1.3.2
 
 - Restored isolated XDG config/data paths on macOS and Windows.

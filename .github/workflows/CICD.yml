@@ -456,8 +456,9 @@ jobs:
       - name: Install release-bound library and build Golden Book
         shell: bash
         run: |
-          archive="$(find artifacts -name '*x86_64-unknown-linux-gnu.tar.gz' -print -quit)"
-          test -n "$archive"
+          mapfile -t archives < <(find artifacts -type f -name '*x86_64-unknown-linux-gnu.tar.gz' -print)
+          test "${#archives[@]}" -eq 1
+          archive="${archives[0]}"
           mkdir -p /tmp/omnidoc-release
           tar -xzf "$archive" -C /tmp/omnidoc-release
           bin="$(find /tmp/omnidoc-release -type f -name omnidoc -print -quit)"

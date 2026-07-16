@@ -1,5 +1,5 @@
 contract_version = 1
-omnidoc_version = "1.3.2"
+omnidoc_version = "1.3.3"
 
 [library]
 version = "1.0.1"
