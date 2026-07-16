@@ -5,7 +5,9 @@ use crate::config::MergedConfig;
 use crate::constants::pandoc;
 use crate::epub::{is_supported_epub_profile, EpubCompatibilityReport};
 use crate::error::{OmniDocError, Result};
+use crate::utils;
 use blake3::Hasher;
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -20,8 +22,41 @@ pub(crate) const INCLUDE_CODE_DEPFILE: &str = "include-code-files.d";
 pub(crate) const LATEX_INPUT_DEPFILE: &str = "latex-inputs.d";
 const LOCK_FILE: &str = "omnidoc.lock";
 const REPORT_FILE: &str = "omnidoc-report.json";
+const PROJECT_LOCK_FILE: &str = "project.lock";
 const CACHE_VERSION: u32 = 6;
 const LOCK_VERSION: u32 = 4;
+
+pub struct ProjectWriteLock {
+    file: fs::File,
+}
+
+impl Drop for ProjectWriteLock {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.file);
+    }
+}
+
+pub fn acquire_project_write_lock(
+    project_path: &Path,
+    operation: &str,
+) -> Result<ProjectWriteLock> {
+    let cache_dir = project_path.join(CACHE_DIR);
+    fs::create_dir_all(&cache_dir)?;
+    let path = cache_dir.join(PROJECT_LOCK_FILE);
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)?;
+    file.try_lock_exclusive().map_err(|error| {
+        OmniDocError::Project(format!(
+            "cannot {operation}: another OmniDoc process holds {} ({error})",
+            path.display()
+        ))
+    })?;
+    Ok(ProjectWriteLock { file })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum IssueSeverity {
@@ -173,8 +208,10 @@ pub struct LockTargetStatus {
 pub struct PluginInfo {
     pub path: String,
     pub key: String,
+    pub manifest_version: u32,
     pub name: Option<String>,
     pub version: Option<String>,
+    pub compatible_omnidoc: Option<String>,
     pub description: Option<String>,
     pub kind: String,
     pub hooks: Vec<String>,
@@ -184,9 +221,11 @@ pub struct PluginInfo {
 
 #[derive(Debug, Clone, Deserialize)]
 struct PluginManifest {
+    manifest_version: Option<u32>,
     key: Option<String>,
     name: Option<String>,
     version: Option<String>,
+    compatible_omnidoc: Option<String>,
     description: Option<String>,
     kind: Option<String>,
     language: Option<String>,
@@ -1550,7 +1589,7 @@ fn write_build_cache(project_path: &Path, output: &str, state: &BuildInputState)
     };
     let content =
         serde_json::to_string_pretty(&cache).map_err(|err| OmniDocError::Other(err.to_string()))?;
-    fs::write(cache_path(project_path, output), content)?;
+    utils::fs::atomic_write(cache_path(project_path, output), content)?;
     Ok(())
 }
 
@@ -1615,7 +1654,7 @@ pub fn write_reports(
     };
     let content = serde_json::to_string_pretty(&document)
         .map_err(|err| OmniDocError::Other(err.to_string()))?;
-    fs::write(outdir.join(REPORT_FILE), content)?;
+    utils::fs::atomic_write(outdir.join(REPORT_FILE), content)?;
     Ok(())
 }
 
@@ -1670,7 +1709,7 @@ pub fn write_lock_targets(project_path: &Path, inputs: &[LockTargetInput<'_>]) -
     };
     let content =
         toml::to_string_pretty(&lock).map_err(|err| OmniDocError::Other(err.to_string()))?;
-    fs::write(project_path.join(LOCK_FILE), content)?;
+    utils::fs::atomic_write(project_path.join(LOCK_FILE), content)?;
     Ok(())
 }
 
@@ -2386,8 +2425,10 @@ fn load_plugin_manifest(path: &Path) -> LoadedPlugin {
     let info = PluginInfo {
         path: path.display().to_string(),
         key,
+        manifest_version: manifest.manifest_version.unwrap_or(1),
         name: manifest.name.clone(),
         version: manifest.version.clone(),
+        compatible_omnidoc: manifest.compatible_omnidoc.clone(),
         description: manifest.description.clone(),
         kind,
         hooks,
@@ -2412,8 +2453,10 @@ fn invalid_loaded_plugin(
         info: PluginInfo {
             path: path.display().to_string(),
             key,
+            manifest_version: 0,
             name: None,
             version: None,
+            compatible_omnidoc: None,
             description: None,
             kind: "plugin".to_string(),
             hooks: Vec::new(),
@@ -2421,9 +2464,11 @@ fn invalid_loaded_plugin(
             error: Some(error),
         },
         manifest: PluginManifest {
+            manifest_version: None,
             key: None,
             name: None,
             version: None,
+            compatible_omnidoc: None,
             description: None,
             kind: None,
             language: None,
@@ -2494,6 +2539,10 @@ fn run_hook_command_capture(
         .env("OMNIDOC_PROJECT_DIR", context.project_path)
         .env("OMNIDOC_PLUGIN_DIR", &plugin.base_dir)
         .env("OMNIDOC_PLUGIN_KEY", &plugin.info.key)
+        .env(
+            "OMNIDOC_PLUGIN_MANIFEST_VERSION",
+            plugin.info.manifest_version.to_string(),
+        )
         .env("OMNIDOC_HOOK", hook_name(hook))
         .env("OMNIDOC_OUTPUT", context.output.unwrap_or(""))
         .env("OMNIDOC_TARGET", context.target.unwrap_or(""))
@@ -2620,6 +2669,26 @@ fn compact_snippet(input: &str) -> String {
 }
 
 fn validate_plugin_manifest(path: &Path, manifest: &PluginManifest) -> Option<String> {
+    let manifest_version = manifest.manifest_version.unwrap_or(1);
+    if manifest_version != 1 {
+        return Some(format!(
+            "Unsupported plugin manifest_version: {manifest_version}"
+        ));
+    }
+    if let Some(requirement) = manifest.compatible_omnidoc.as_deref() {
+        let requirement = match semver::VersionReq::parse(requirement) {
+            Ok(requirement) => requirement,
+            Err(error) => return Some(format!("Invalid OmniDoc compatibility range: {error}")),
+        };
+        let version = semver::Version::parse(env!("CARGO_PKG_VERSION"))
+            .expect("Cargo package version should be valid semver");
+        if !requirement.matches(&version) {
+            return Some(format!(
+                "Plugin requires OmniDoc {}, installed {}",
+                requirement, version
+            ));
+        }
+    }
     if let Some(language) = &manifest.language {
         if !matches!(language.to_ascii_lowercase().as_str(), "markdown" | "latex") {
             return Some(format!("Unsupported template language: {}", language));
@@ -2714,12 +2783,13 @@ fn warning(message: String, path: Option<String>, line: Option<usize>) -> Projec
 #[cfg(test)]
 mod tests {
     use super::{
-        build_input_digest, build_report, cache_hit, changed_cache_components, dependency_graph,
-        filter_depfile_metadata_key, filter_depfile_name, hook_argv, manifest_hook_names,
-        pandoc_option_file_references, parse_lint_rule_output, supported_outputs, validate_config,
-        validate_hook_command, write_cache, write_lock, write_lock_targets, HookCommand,
-        LoadedPlugin, LockFile, LockTargetInput, PluginHooks, PluginInfo, PluginManifest,
-        CACHE_DIR, INCLUDE_DEPFILE, LATEX_INPUT_DEPFILE,
+        acquire_project_write_lock, build_input_digest, build_report, cache_hit,
+        changed_cache_components, dependency_graph, filter_depfile_metadata_key,
+        filter_depfile_name, hook_argv, manifest_hook_names, pandoc_option_file_references,
+        parse_lint_rule_output, supported_outputs, validate_config, validate_hook_command,
+        write_cache, write_lock, write_lock_targets, HookCommand, LoadedPlugin, LockFile,
+        LockTargetInput, PluginHooks, PluginInfo, PluginManifest, CACHE_DIR, INCLUDE_DEPFILE,
+        LATEX_INPUT_DEPFILE,
     };
     use crate::config::MergedConfig;
     use std::collections::BTreeMap;
@@ -2733,6 +2803,20 @@ mod tests {
             .expect("clock")
             .as_nanos();
         std::env::temp_dir().join(format!("omnidoc-{name}-{}-{nonce}", std::process::id()))
+    }
+
+    #[test]
+    fn project_write_lock_rejects_concurrent_writers_and_recovers() {
+        let project = tempfile::tempdir().expect("project");
+        let first = acquire_project_write_lock(project.path(), "first build").expect("first lock");
+
+        let error = acquire_project_write_lock(project.path(), "second build")
+            .err()
+            .expect("second writer should fail");
+        assert!(error.to_string().contains("another OmniDoc process"));
+
+        drop(first);
+        acquire_project_write_lock(project.path(), "retry build").expect("released lock");
     }
 
     #[test]
@@ -3356,9 +3440,11 @@ mod tests {
     #[test]
     fn lists_and_validates_hook_metadata() {
         let manifest = PluginManifest {
+            manifest_version: Some(1),
             key: Some("sample".to_string()),
             name: None,
             version: None,
+            compatible_omnidoc: None,
             description: None,
             kind: None,
             language: None,
@@ -3388,13 +3474,57 @@ mod tests {
     }
 
     #[test]
+    fn validates_plugin_manifest_schema_and_compatibility() {
+        let compatible = PluginManifest {
+            manifest_version: Some(1),
+            key: Some("sample".to_string()),
+            name: None,
+            version: Some("1.0.0".to_string()),
+            compatible_omnidoc: Some(">=1.3.0,<2.0.0".to_string()),
+            description: None,
+            kind: None,
+            language: None,
+            template_file: None,
+            hooks: None,
+        };
+        assert!(super::validate_plugin_manifest(
+            Path::new("plugins/sample/manifest.toml"),
+            &compatible
+        )
+        .is_none());
+
+        let unsupported_schema = PluginManifest {
+            manifest_version: Some(2),
+            ..compatible.clone()
+        };
+        assert!(super::validate_plugin_manifest(
+            Path::new("plugins/sample/manifest.toml"),
+            &unsupported_schema
+        )
+        .is_some_and(|error| error.contains("manifest_version")));
+
+        let incompatible = PluginManifest {
+            manifest_version: Some(1),
+            compatible_omnidoc: Some(">=2.0.0".to_string()),
+            ..compatible
+        };
+        assert!(super::validate_plugin_manifest(
+            Path::new("plugins/sample/manifest.toml"),
+            &incompatible
+        )
+        .is_some_and(|error| error.contains("requires OmniDoc")));
+    }
+
+    #[test]
     fn parses_plugin_lint_rule_output() {
         let plugin = LoadedPlugin {
             info: PluginInfo {
                 path: "plugins/sample/manifest.toml".to_string(),
                 key: "sample".to_string(),
+                manifest_version: 1,
                 name: None,
                 version: None,
+                compatible_omnidoc: None,
                 description: None,
                 kind: "plugin".to_string(),
                 hooks: Vec::new(),
@@ -3402,9 +3532,11 @@ mod tests {
                 error: None,
             },
             manifest: PluginManifest {
+                manifest_version: Some(1),
                 key: Some("sample".to_string()),
                 name: None,
                 version: None,
+                compatible_omnidoc: None,
                 description: None,
                 kind: None,
                 language: None,
@@ -3456,8 +3588,10 @@ mod tests {
             info: PluginInfo {
                 path: plugin_dir.join("manifest.toml").display().to_string(),
                 key: "hook-test".to_string(),
+                manifest_version: 1,
                 name: None,
                 version: None,
+                compatible_omnidoc: None,
                 description: None,
                 kind: "plugin".to_string(),
                 hooks: Vec::new(),
@@ -3465,9 +3599,11 @@ mod tests {
                 error: None,
             },
             manifest: PluginManifest {
+                manifest_version: Some(1),
                 key: Some("hook-test".to_string()),
                 name: None,
                 version: None,
+                compatible_omnidoc: None,
                 description: None,
                 kind: None,
                 language: None,

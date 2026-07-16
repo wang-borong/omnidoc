@@ -56,9 +56,11 @@ outputs = ["html"]
             .expect("html output");
         fs::write(
             project.join("plugins").join("sample").join("manifest.toml"),
-            r#"key = "sample"
+            r#"manifest_version = 1
+key = "sample"
 name = "Sample Plugin"
 version = "0.1.0"
+compatible_omnidoc = ">=1.3.0,<2.0.0"
 kind = "template"
 language = "markdown"
 template_file = "template.md"
@@ -457,6 +459,27 @@ fn formatter_is_conservative_and_idempotent_on_structured_markdown() {
     assert_success(fixture.command(&["fmt", &path]));
     let twice = fs::read(&markdown).expect("formatted twice");
     assert_eq!(once, twice);
+
+    assert_success(fixture.command(&["fmt", "--check", &path]));
+    fs::write(&markdown, "正文中文ABC。\n").expect("unformatted markdown");
+    let before_check = fs::read(&markdown).expect("source before check");
+    let check = assert_failure(fixture.command(&["fmt", "--check", &path]));
+    assert!(check.contains("would format"));
+    assert_eq!(
+        fs::read(&markdown).expect("source after check"),
+        before_check
+    );
+
+    let diff = assert_failure(fixture.command(&["fmt", "--diff", &path]));
+    assert!(diff.contains("--- a/"));
+    assert!(diff.contains("+++ b/"));
+    assert_eq!(
+        fs::read(&markdown).expect("source after diff"),
+        before_check
+    );
+
+    assert_success(fixture.command(&["fmt", &path]));
+    assert_success(fixture.command(&["fmt", "--check", &path]));
 }
 
 #[test]
@@ -576,9 +599,11 @@ fn plugin_lint_rule_runs_from_cli() {
     fs::set_permissions(&lint_script, permissions).expect("permissions");
     fs::write(
         plugin_dir.join("manifest.toml"),
-        r#"key = "sample"
+        r#"manifest_version = 1
+key = "sample"
 name = "Sample Plugin"
 version = "0.1.0"
+compatible_omnidoc = ">=1.3.0,<2.0.0"
 kind = "template"
 language = "markdown"
 template_file = "template.md"

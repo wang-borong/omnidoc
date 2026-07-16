@@ -45,7 +45,9 @@ pub mod error {
 /// 统一使用 `Result<OmniDocError>` 类型
 pub mod fs {
     use super::*;
+    use atomic_write_file::AtomicWriteFile;
     use std::fs;
+    use std::io::Write;
 
     /// 创建目录（包括所有父目录）
     pub fn create_dir_all(path: impl AsRef<Path>) -> Result<()> {
@@ -60,6 +62,14 @@ pub mod fs {
     /// 写入文件
     pub fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Result<()> {
         error::io_err(fs::write(path.as_ref(), contents.as_ref()))
+    }
+
+    /// Atomically replace a file after all new contents have reached stable storage.
+    pub fn atomic_write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Result<()> {
+        let path = path.as_ref();
+        let mut file = error::io_err(AtomicWriteFile::open(path))?;
+        error::io_err(file.write_all(contents.as_ref()))?;
+        error::io_err(file.commit())
     }
 
     /// 检查路径是否存在
@@ -101,6 +111,44 @@ pub mod fs {
     /// 返回 ReadDir 迭代器，需要手动处理错误
     pub fn read_dir(path: impl AsRef<Path>) -> Result<std::fs::ReadDir> {
         error::io_err(fs::read_dir(path.as_ref()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fs;
+
+    #[test]
+    fn atomic_write_replaces_existing_contents() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("state.json");
+        std::fs::write(&path, "old").expect("old state");
+
+        fs::atomic_write(&path, "new state").expect("atomic replacement");
+
+        assert_eq!(
+            std::fs::read_to_string(path).expect("new state"),
+            "new state"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_preserves_unix_mode() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("document.md");
+        std::fs::write(&path, "old").expect("old document");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640))
+            .expect("document mode");
+
+        fs::atomic_write(&path, "new").expect("atomic replacement");
+
+        assert_eq!(
+            std::fs::metadata(path).expect("metadata").mode() & 0o777,
+            0o640
+        );
     }
 }
 

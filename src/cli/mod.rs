@@ -280,10 +280,12 @@ pub fn cli() -> Result<()> {
         Commands::Fmt {
             paths,
             backup,
+            check,
+            diff,
             semantic,
             symbol,
         } => {
-            handle_fmt(paths, backup, semantic, symbol)?;
+            handle_fmt(paths, backup, check, diff, semantic, symbol)?;
         }
         Commands::Figure {
             subcommand,

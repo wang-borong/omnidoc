@@ -434,8 +434,16 @@ pub enum Commands {
     /// format documents (recursively format directories or format files)
     Fmt {
         /// create backup files
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with_all = ["check", "diff"])]
         backup: bool,
+
+        /// report files that would change without writing them
+        #[arg(long, conflicts_with = "diff")]
+        check: bool,
+
+        /// print unified diffs without writing files
+        #[arg(long, conflicts_with = "check")]
+        diff: bool,
 
         /// enable semantic formatting
         #[arg(short, long)]

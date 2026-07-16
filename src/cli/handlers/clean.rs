@@ -7,6 +7,8 @@ use crate::utils::path;
 pub fn handle_clean(path: Option<String>, distclean: bool) -> Result<()> {
     let project_path = path::determine_project_path(path)?;
     check_omnidoc_project(&project_path)?;
+    let _project_lock =
+        crate::project_tools::acquire_project_write_lock(&project_path, "clean project")?;
 
     let build_service = create_build_service(Some(&project_path), CliOverrides::new())?;
 

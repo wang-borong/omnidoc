@@ -311,6 +311,7 @@ TSWLatexianTemp*
 *.bak
 .*.drawio.bkp
 build
+.omnidoc-cache/
 figures
 *.err
 *~

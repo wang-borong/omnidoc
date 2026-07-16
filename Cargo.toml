@@ -35,6 +35,9 @@ semver = "1.0.27"
 sha2 = "0.10.9"
 tar = "0.4.44"
 zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
+atomic-write-file = "0.3.0"
+fs2 = "0.4.3"
+similar = "3.1.1"
 
 [dev-dependencies]
 tempfile = "3.23.0"

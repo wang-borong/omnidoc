@@ -1,48 +1,86 @@
 use crate::doc::services::FormatService;
 use crate::error::{OmniDocError, Result};
 use std::path::Path;
+use walkdir::WalkDir;
 
 /// Handle the 'fmt' command
-pub fn handle_fmt(paths: Vec<String>, backup: bool, semantic: bool, symbol: bool) -> Result<()> {
-    // 创建格式化服务
-    // 检测是否为 markdown 文件（通过扩展名）
+pub fn handle_fmt(
+    paths: Vec<String>,
+    backup: bool,
+    check: bool,
+    diff: bool,
+    semantic: bool,
+    symbol: bool,
+) -> Result<()> {
     let format_service = FormatService::new(backup, semantic, symbol, true);
-
-    if paths.is_empty() {
-        // 如果没有指定路径，格式化当前目录
-        let current_dir = std::env::current_dir().map_err(OmniDocError::Io)?;
-
-        format_service.format_directory(&current_dir, &["md", "tex"])?;
-        println!("✓ Formatted all markdown and latex files in current directory");
+    let roots = if paths.is_empty() {
+        vec![std::env::current_dir().map_err(OmniDocError::Io)?]
     } else {
-        // 处理指定的路径
-        for path_str in &paths {
-            let path = Path::new(path_str);
-
-            if !path.exists() {
-                eprintln!("Warning: Path not found: {}, skipping", path_str);
-                continue;
-            }
-
-            if path.is_file() {
-                // 格式化单个文件
-                if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                    if ext == "md" || ext == "tex" {
-                        format_service.format_file(path)?;
-                        println!("✓ Formatted: {}", path_str);
-                    } else {
-                        eprintln!("Warning: Unsupported file type: {}, skipping", path_str);
-                    }
-                }
-            } else if path.is_dir() {
-                // 递归格式化目录
-                format_service.format_directory(path, &["md", "tex"])?;
-                println!("✓ Formatted all markdown and latex files in: {}", path_str);
+        paths.iter().map(Path::new).map(Path::to_path_buf).collect()
+    };
+    let mut files = Vec::new();
+    for root in roots {
+        if !root.exists() {
+            return Err(OmniDocError::Project(format!(
+                "Path not found: {}",
+                root.display()
+            )));
+        }
+        if root.is_file() {
+            if supported_file(&root) {
+                files.push(root);
             } else {
-                eprintln!("Warning: Invalid path: {}, skipping", path_str);
+                return Err(OmniDocError::Project(format!(
+                    "Unsupported file type: {}",
+                    root.display()
+                )));
+            }
+            continue;
+        }
+        for entry in WalkDir::new(&root) {
+            let entry = entry?;
+            if entry.file_type().is_file() && supported_file(entry.path()) {
+                files.push(entry.into_path());
             }
         }
     }
+    files.sort();
+    files.dedup();
+
+    let mut changed = Vec::new();
+    for file in files {
+        if diff {
+            if let Some(output) = format_service.unified_diff(&file)? {
+                print!("{output}");
+                changed.push(file);
+            }
+        } else if check {
+            if format_service.would_change(&file)? {
+                println!("would format {}", file.display());
+                changed.push(file);
+            }
+        } else if format_service.format_file(&file)? {
+            println!("formatted {}", file.display());
+            changed.push(file);
+        }
+    }
+
+    if (check || diff) && !changed.is_empty() {
+        return Err(OmniDocError::Project(format!(
+            "{} file(s) require formatting",
+            changed.len()
+        )));
+    }
+
+    if !check && !diff {
+        println!("format complete: {} file(s) changed", changed.len());
+    }
 
     Ok(())
+}
+
+fn supported_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension, "md" | "markdown" | "mdown" | "tex"))
 }

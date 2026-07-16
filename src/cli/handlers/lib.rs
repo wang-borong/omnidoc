@@ -244,7 +244,7 @@ fn write_installed_release(root: &Path, release: &InstalledRelease) -> Result<()
     let content = toml::to_string_pretty(release).map_err(|error| {
         OmniDocError::Other(format!("cannot serialize release metadata: {error}"))
     })?;
-    fs::write(root.join(INSTALLED_RELEASE_FILE), content.as_bytes())
+    fs::atomic_write(root.join(INSTALLED_RELEASE_FILE), content.as_bytes())
 }
 
 fn read_release_contract() -> Result<LibraryReleaseContract> {

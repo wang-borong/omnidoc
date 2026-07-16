@@ -61,7 +61,7 @@ pub fn handle_config(
     let toml_content = toml::to_string_pretty(&config)
         .map_err(|e| OmniDocError::Config(format!("Failed to serialize config: {}", e)))?;
 
-    crate::utils::fs::write(&config_file, toml_content.as_bytes())?;
+    crate::utils::fs::atomic_write(&config_file, toml_content.as_bytes())?;
 
     println!(
         "{} Configuration generated successfully at {}",

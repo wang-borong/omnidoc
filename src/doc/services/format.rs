@@ -1,6 +1,7 @@
 use crate::error::{OmniDocError, Result};
 use crate::utils::fs;
 use regex::Regex;
+use similar::TextDiff;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -480,7 +481,42 @@ impl FormatService {
     }
 
     /// 格式化文件
-    pub fn format_file(&self, file_path: &Path) -> Result<()> {
+    pub fn format_file(&self, file_path: &Path) -> Result<bool> {
+        let (original, formatted) = self.formatted_file(file_path)?;
+        if original == formatted {
+            return Ok(false);
+        }
+
+        if self.backup {
+            let backup_path = format!("{}.bak", file_path.display());
+            fs::copy(file_path, &backup_path)?;
+        }
+        fs::atomic_write(file_path, formatted)?;
+        Ok(true)
+    }
+
+    pub fn would_change(&self, file_path: &Path) -> Result<bool> {
+        let (original, formatted) = self.formatted_file(file_path)?;
+        Ok(original != formatted)
+    }
+
+    pub fn unified_diff(&self, file_path: &Path) -> Result<Option<String>> {
+        let (original, formatted) = self.formatted_file(file_path)?;
+        if original == formatted {
+            return Ok(None);
+        }
+        let original = String::from_utf8_lossy(&original);
+        let formatted = String::from_utf8_lossy(&formatted);
+        let path = file_path.display().to_string();
+        Ok(Some(
+            TextDiff::from_lines(original.as_ref(), formatted.as_ref())
+                .unified_diff()
+                .header(&format!("a/{path}"), &format!("b/{path}"))
+                .to_string(),
+        ))
+    }
+
+    fn formatted_file(&self, file_path: &Path) -> Result<(Vec<u8>, Vec<u8>)> {
         if !fs::exists(file_path) {
             return Err(OmniDocError::Project(format!(
                 "File not found: {}",
@@ -488,31 +524,42 @@ impl FormatService {
             )));
         }
 
-        // 读取文件
-        let content = fs::read_to_string(file_path)?;
+        let original = std::fs::read(file_path)?;
+        let (bom, content_bytes) = original
+            .strip_prefix(&[0xef, 0xbb, 0xbf])
+            .map(|content| (true, content))
+            .unwrap_or((false, original.as_slice()));
+        let content = std::str::from_utf8(content_bytes).map_err(|error| {
+            OmniDocError::Project(format!(
+                "File is not valid UTF-8: {} ({error})",
+                file_path.display()
+            ))
+        })?;
+        let newline = if content.contains("\r\n") {
+            "\r\n"
+        } else {
+            "\n"
+        };
+        let trailing_newline = content.ends_with('\n');
+        let normalized = content.replace("\r\n", "\n");
         let markdown = file_path
             .extension()
             .and_then(|extension| extension.to_str())
             .map(|extension| matches!(extension, "md" | "markdown" | "mdown"))
             .unwrap_or(self.default_markdown);
-        let formatted_content = self.format_content_with_mode(&content, markdown);
-
-        // 备份文件（如果需要）
-        if self.backup {
-            let backup_path = format!("{}.bak", file_path.display());
-            fs::copy(file_path, &backup_path)?;
+        let mut formatted_content = self.format_content_with_mode(&normalized, markdown);
+        if trailing_newline {
+            formatted_content.push('\n');
         }
-
-        // 写入格式化后的内容
-        // 注意：需要保留原始文件的换行符处理方式，并在文件末尾添加换行符
-        let mut content_bytes = formatted_content.as_bytes().to_vec();
-        // 如果原始文件以换行符结尾，或者格式化后内容不为空，添加换行符
-        if content.ends_with('\n') || !content_bytes.is_empty() {
-            content_bytes.push(b'\n');
+        if newline == "\r\n" {
+            formatted_content = formatted_content.replace('\n', "\r\n");
         }
-        fs::write(file_path, &content_bytes)?;
-
-        Ok(())
+        let mut formatted = Vec::with_capacity(formatted_content.len() + usize::from(bom) * 3);
+        if bom {
+            formatted.extend_from_slice(&[0xef, 0xbb, 0xbf]);
+        }
+        formatted.extend_from_slice(formatted_content.as_bytes());
+        Ok((original, formatted))
     }
 
     /// Format Markdown content while preserving structural regions that must be byte-stable.
@@ -558,25 +605,24 @@ impl FormatService {
     }
 
     /// 递归格式化目录
-    pub fn format_directory(&self, dir_path: &Path, extensions: &[&str]) -> Result<()> {
+    pub fn format_directory(&self, dir_path: &Path, extensions: &[&str]) -> Result<usize> {
         use walkdir::WalkDir;
 
+        let mut changed = 0;
         for entry in WalkDir::new(dir_path) {
             let entry = entry?;
             let path = entry.path();
 
             if fs::is_file(path) {
                 if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                    if extensions.contains(&ext) {
-                        if let Err(e) = self.format_file(path) {
-                            eprintln!("Warning: Failed to format {}: {}", path.display(), e);
-                        }
+                    if extensions.contains(&ext) && self.format_file(path)? {
+                        changed += 1;
                     }
                 }
             }
         }
 
-        Ok(())
+        Ok(changed)
     }
 
     /// 格式化单行
@@ -954,5 +1000,44 @@ mod tests {
         assert!(output.contains("\\newcommand{\\BookName}{中文ABC:原样}"));
         assert!(output.contains("\\begin{align}\n中文ABC &= a+b, raw\\\\\n\\end{align}"));
         assert!(output.ends_with("正文中文 ABC。"));
+    }
+
+    #[test]
+    fn file_formatting_preserves_bom_crlf_and_missing_final_newline() {
+        let directory = tempfile::tempdir().expect("formatter directory");
+        let path = directory.path().join("book.md");
+        let original = b"\xef\xbb\xbf---\r\ntitle: \xe4\xb8\xad\xe6\x96\x87ABC:\xe5\x8e\x9f\xe6\xa0\xb7\r\n---\r\n\r\n\xe6\xad\xa3\xe6\x96\x87\xe4\xb8\xad\xe6\x96\x87ABC\xe3\x80\x82";
+        std::fs::write(&path, original).expect("source document");
+        let service = FormatService::new(false, false, false, true);
+
+        assert!(service.format_file(&path).expect("format document"));
+        let formatted = std::fs::read(&path).expect("formatted document");
+
+        assert!(formatted.starts_with(&[0xef, 0xbb, 0xbf]));
+        assert!(formatted.windows(2).any(|window| window == b"\r\n"));
+        assert!(!formatted.ends_with(b"\n"));
+        assert!(String::from_utf8_lossy(&formatted).contains("正文中文 ABC。"));
+        assert!(!service.format_file(&path).expect("idempotent format"));
+    }
+
+    #[test]
+    fn preview_modes_do_not_modify_the_source() {
+        let directory = tempfile::tempdir().expect("formatter directory");
+        let path = directory.path().join("book.md");
+        std::fs::write(&path, "正文中文ABC。\n").expect("source document");
+        let service = FormatService::new(false, false, false, true);
+
+        assert!(service.would_change(&path).expect("format check"));
+        let diff = service
+            .unified_diff(&path)
+            .expect("format diff")
+            .expect("changed diff");
+
+        assert!(diff.contains("--- a/"));
+        assert!(diff.contains("+++ b/"));
+        assert_eq!(
+            std::fs::read_to_string(path).expect("unchanged source"),
+            "正文中文ABC。\n"
+        );
     }
 }

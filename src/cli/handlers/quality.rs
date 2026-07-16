@@ -294,6 +294,8 @@ pub fn handle_lock(path: Option<String>, check: bool, update: bool) -> Result<()
         println!("omnidoc.lock already exists; use --update to rewrite it");
         return Ok(());
     }
+    let _project_lock =
+        project_tools::acquire_project_write_lock(&project_path, "update lock file")?;
     project_tools::write_lock_targets(&project_path, &inputs)?;
     println!("Wrote {}", project_path.join("omnidoc.lock").display());
     Ok(())

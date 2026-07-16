@@ -1,5 +1,5 @@
 use crate::cli::handlers::build::{
-    build_cli_overrides, build_project_outputs, expected_output_file, resolve_outputs,
+    build_cli_overrides, build_project_outputs_unlocked, expected_output_file, resolve_outputs,
     BuildRunOptions,
 };
 use crate::cli::handlers::common::create_config_manager;
@@ -151,6 +151,8 @@ pub fn handle_publish(
         let tag = tag.expect("clap requires --tag with --verify");
         return verify_published_release(&project_path, &dist_dir, &tag, json);
     }
+    let _project_lock =
+        crate::project_tools::acquire_project_write_lock(&project_path, "publish project")?;
     let cli_overrides = build_cli_overrides(
         to,
         outputs,
@@ -161,7 +163,7 @@ pub fn handle_publish(
     );
 
     if !no_build {
-        build_project_outputs(
+        build_project_outputs_unlocked(
             &project_path,
             cli_overrides.clone(),
             all,

@@ -80,6 +80,17 @@ pub fn build_project_outputs(
     run_options: BuildRunOptions,
     verbose: bool,
 ) -> Result<()> {
+    let _project_lock = project_tools::acquire_project_write_lock(project_path, "build project")?;
+    build_project_outputs_unlocked(project_path, cli_overrides, all, run_options, verbose)
+}
+
+pub(crate) fn build_project_outputs_unlocked(
+    project_path: &Path,
+    cli_overrides: CliOverrides,
+    all: bool,
+    run_options: BuildRunOptions,
+    verbose: bool,
+) -> Result<()> {
     let config_manager = create_config_manager(Some(project_path), cli_overrides.clone())?;
     let merged = config_manager.get_merged().clone();
     let outputs = resolve_outputs(&merged, &cli_overrides, all);
