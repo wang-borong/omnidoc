@@ -18,7 +18,12 @@ struct DoctorCheck {
     detail: String,
 }
 
-pub fn handle_doctor(path: Option<String>, json: bool, strict: bool) -> Result<()> {
+pub fn handle_doctor(
+    path: Option<String>,
+    json: bool,
+    strict: bool,
+    requested_outputs: Vec<String>,
+) -> Result<()> {
     let project_path = path::determine_project_path(path)?.canonicalize()?;
     let config_manager = create_config_manager_default(Some(&project_path))?;
     let config = config_manager.get_merged().clone();
@@ -34,7 +39,9 @@ pub fn handle_doctor(path: Option<String>, json: bool, strict: bool) -> Result<(
                 .and_then(|extension| extension.to_str())
                 .is_some_and(|extension| extension.eq_ignore_ascii_case("tex"))
         });
-    let outputs = if config.outputs.is_empty() {
+    let outputs = if !requested_outputs.is_empty() {
+        requested_outputs
+    } else if config.outputs.is_empty() {
         vec![config.to.clone().unwrap_or_else(|| "pdf".to_string())]
     } else {
         config.outputs.clone()

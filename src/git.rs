@@ -9,13 +9,21 @@ pub fn git_clone<P>(url: &str, p: P, recurse: bool) -> Result<(), git2::Error>
 where
     P: AsRef<Path>,
 {
-    if recurse {
-        Repository::clone_recurse(url, p)?;
+    let repository = if recurse {
+        Repository::clone_recurse(url, p)?
     } else {
-        Repository::clone(url, p)?;
-    }
+        Repository::clone(url, p)?
+    };
+    // omnidoc-libs verifies byte-for-byte payload checksums. A user's global
+    // core.autocrlf setting must not rewrite text resources during checkout.
+    checkout_without_line_ending_conversion(&repository)?;
 
     Ok(())
+}
+
+fn checkout_without_line_ending_conversion(repository: &Repository) -> Result<(), git2::Error> {
+    repository.config()?.set_bool("core.autocrlf", false)?;
+    repository.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
 }
 
 /// Unlike regular "git init", this example shows how to create an initial empty
@@ -410,6 +418,25 @@ mod tests {
 
         assert!(target.join(".git").exists());
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn checkout_restores_repository_bytes_without_line_ending_conversion() {
+        let root = temp_dir_path("git_checkout_bytes");
+        let source = root.join("source");
+        let target = root.join("target");
+        create_source_repo(&source);
+        git_clone(source.to_str().expect("source path"), &target, false).expect("clone repo");
+        fs::write(target.join("README.md"), b"source\r\n").expect("converted checkout");
+        let repository = Repository::open(&target).expect("target repository");
+
+        super::checkout_without_line_ending_conversion(&repository).expect("clean checkout");
+
+        assert_eq!(
+            fs::read(target.join("README.md")).expect("checked out bytes"),
+            b"# source\n"
+        );
         let _ = fs::remove_dir_all(root);
     }
 

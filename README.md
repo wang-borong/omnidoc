@@ -358,19 +358,19 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    ```bash
    omnidoc lib --install       # Install to the configured library path
    omnidoc lib --update        # Pull main, then verify the installed payload
-   omnidoc lib --install --revision v1.0.0
+   omnidoc lib --install --revision v1.0.1
    omnidoc lib --update --revision 428c8e6
    omnidoc lib --install --release # Download the archive bound to this OmniDoc release
    omnidoc lib --update --release  # Verify checksum and replace transactionally
    omnidoc libs --status       # Show version, revision and compatibility
-   omnidoc libs --status --revision v1.0.0
+   omnidoc libs --status --revision v1.0.1
    omnidoc libs --verify       # Verify required files and every SHA-256 entry
    omnidoc libs --verify --json
    ```
 
    Install and update fail if the downloaded manifest, compatibility contract,
    required resources, payload checksums, or requested revision do not verify.
-   Set `revision = "v1.0.0"` under `[lib]` in the global configuration to pin
+   Set `revision = "v1.0.1"` under `[lib]` in the global configuration to pin
    all subsequent install, update, status, and verify operations. Updates also
    refuse to overwrite a dirty library checkout. Install and update are
    transactional: OmniDoc clones into a sibling staging directory, validates
@@ -447,6 +447,7 @@ Run environment diagnostics:
 omnidoc doctor [PATH]
 omnidoc doctor --json
 omnidoc doctor --strict [PATH]
+omnidoc doctor --strict --output html [PATH]
 ```
 
 `doctor` derives its checks from the configured entry format and outputs. It
@@ -457,6 +458,8 @@ checks declared fonts and system LaTeX packages. JSON output preserves failed
 checks as structured results so it can be consumed by CI and support tooling.
 Use `--strict` to return a non-zero status when any diagnostic fails; without
 it, `doctor` retains its informational exit behavior.
+Repeat `--output` to diagnose only the formats a particular build invocation
+will produce instead of every output configured by the project.
 Explicit executable paths can be configured under `[tools]`, including
 `pandoc`, `pandoc_crossref`, `latex_engine`, `latexmk`, and `epubcheck`.
 

@@ -224,6 +224,10 @@ pub enum Commands {
         /// return a non-zero exit status when any check fails
         #[arg(long)]
         strict: bool,
+
+        /// diagnose one or more output formats instead of every configured output
+        #[arg(long = "output", value_name = "FORMAT")]
+        outputs: Vec<String>,
     },
 
     /// validate OmniDoc configuration files

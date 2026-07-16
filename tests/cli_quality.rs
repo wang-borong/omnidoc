@@ -169,6 +169,41 @@ fn doctor_checks_only_the_configured_output_toolchain() {
 }
 
 #[test]
+fn doctor_can_scope_checks_to_one_output() {
+    let fixture = Fixture::new("doctor-output");
+    fs::write(
+        fixture.project.join(".omnidoc.toml"),
+        r#"[project]
+entry = "main.md"
+from = "markdown"
+to = "html"
+target = "smoke"
+
+[build]
+outdir = "build"
+outputs = ["html", "epub"]
+"#,
+    )
+    .expect("multi-output config");
+
+    let output = assert_success(fixture.command(&[
+        "doctor",
+        "--json",
+        "--output",
+        "html",
+        &fixture.project_arg(),
+    ]));
+    let checks: serde_json::Value = serde_json::from_str(&output).expect("doctor JSON");
+    let names = checks
+        .as_array()
+        .expect("doctor checks")
+        .iter()
+        .filter_map(|check| check["name"].as_str())
+        .collect::<Vec<_>>();
+    assert!(!names.contains(&"epubcheck"));
+}
+
+#[test]
 fn doctor_reports_configured_missing_tools_and_themes() {
     let fixture = Fixture::new("doctor-missing");
     fs::write(
@@ -506,7 +541,7 @@ fn publish_no_build_copies_existing_artifacts() {
     let manifest: serde_json::Value = serde_json::from_str(&manifest).expect("publish JSON");
     assert_eq!(manifest["manifest_version"], 2);
     assert_eq!(manifest["tag"], "release/1");
-    assert_eq!(manifest["library_contract"]["library"]["version"], "1.0.0");
+    assert_eq!(manifest["library_contract"]["library"]["version"], "1.0.1");
     let artifacts = manifest["artifacts"].as_array().expect("publish artifacts");
     assert!(artifacts.iter().any(|artifact| {
         artifact["destination"] == "smoke.html"

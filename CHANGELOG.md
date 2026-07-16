@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.1
+
+- Fixed macOS and Windows real-document smoke configuration.
+- Added output-scoped `doctor --output` diagnostics.
+- Normalized dependency and CSS paths across Windows and macOS.
+- Disabled Git line-ending conversion for checksum-verified library clones.
+- Vendored OpenSSL for portable release builds.
+- Fixed release publishing from artifact-only jobs.
+- Bound OmniDoc 1.3.1 to omnidoc-libs 1.0.1.
+
 ## 1.3.0
 
 ### Build reproducibility

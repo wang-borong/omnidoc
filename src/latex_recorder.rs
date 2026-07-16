@@ -231,15 +231,18 @@ mod tests {
 
     #[test]
     fn locates_pandoc_style_recorder_output() {
+        let root = tempfile::tempdir().expect("recorder output directory");
+        let output = root.path().join("render");
+        let input = output.join("input.tex");
         let args = [
             OsString::from("-output-directory"),
-            OsString::from("/tmp/render"),
+            output.as_os_str().to_os_string(),
             OsString::from("-recorder"),
-            OsString::from("/tmp/render/input.tex"),
+            input.as_os_str().to_os_string(),
         ];
         let (fls, directory) = locate_fls(&args).expect("recorder output");
-        assert_eq!(directory.to_string_lossy(), "/tmp/render");
-        assert_eq!(fls.to_string_lossy(), "/tmp/render/input.fls");
+        assert_eq!(directory, output);
+        assert_eq!(fls, output.join("input.fls"));
     }
 
     #[test]
@@ -270,8 +273,18 @@ mod tests {
             write_depfile_from_fls(&fls, &depfile, std::slice::from_ref(&output)).expect("depfile");
         assert_eq!(count, 2);
         let content = fs::read_to_string(depfile).expect("depfile content");
-        assert!(content.contains(&source.to_string_lossy().to_string()));
-        assert!(content.contains(&package.to_string_lossy().to_string()));
+        let canonical_source = source
+            .canonicalize()
+            .expect("canonical source")
+            .to_string_lossy()
+            .to_string();
+        let canonical_package = package
+            .canonicalize()
+            .expect("canonical package")
+            .to_string_lossy()
+            .to_string();
+        assert!(content.contains(&canonical_source));
+        assert!(content.contains(&canonical_package));
         assert!(!content.contains("book.aux"));
     }
 }

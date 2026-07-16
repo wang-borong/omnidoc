@@ -23,7 +23,7 @@ env:
   CICD_INTERMEDIATES_DIR: _cicd-intermediates
   PANDOC_VERSION: '3.10'
   PANDOC_CROSSREF_VERSION: '0.3.24'
-  OMNIDOC_LIBS_RELEASE_REF: 'v1.0.0'
+  OMNIDOC_LIBS_RELEASE_REF: 'v1.0.1'
 
 jobs:
   all-jobs:
@@ -130,7 +130,7 @@ jobs:
         run: |
           pandoc --version
           pandoc-crossref --version
-          epubcheck --version
+          epubcheck --version || true
       - name: Verify OmniDoc and library release contract
         run: python3 scripts/check-library-contract.py omnidoc-libs
       - name: Build and verify Golden Book
@@ -192,13 +192,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, windows-latest]
+        os: [macos-13, windows-latest]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: wang-borong/omnidoc-libs
           path: omnidoc-libs
+          ref: ${{ startsWith(github.ref, 'refs/tags/v') && env.OMNIDOC_LIBS_RELEASE_REF || 'main' }}
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1
@@ -240,11 +241,9 @@ jobs:
             "$LOCALAPPDATA" \
             "$XDG_CONFIG_HOME" \
             "$XDG_DATA_HOME"
-          cp -a omnidoc-libs "$HOME/.local/share/omnidoc"
-          cp -a omnidoc-libs "$HOME/Library/Application Support/omnidoc"
-          cp -a omnidoc-libs "$LOCALAPPDATA/omnidoc"
-          cp -a omnidoc-libs "$XDG_DATA_HOME/omnidoc"
-          "$bin" doctor --strict tests/fixtures/golden-book
+          libs="$PWD/omnidoc-libs"
+          "$bin" config --authors CI --lib "$libs" --force
+          "$bin" doctor --strict --output html tests/fixtures/golden-book
           "$bin" build tests/fixtures/golden-book --to html --force
           test -s tests/fixtures/golden-book/build/golden-book.html
 
@@ -328,7 +327,7 @@ jobs:
             archive: tar.gz
             deb_arch: amd64
           - target: x86_64-apple-darwin
-            os: macos-15
+            os: macos-13
             archive: tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest

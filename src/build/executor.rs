@@ -261,12 +261,17 @@ mod tests {
     fn executes_commands_in_the_requested_working_directory() {
         let directory = tempfile::tempdir().expect("working directory");
         let executor = BuildExecutor::new(HashMap::new());
-        let expected = directory.path().to_string_lossy().to_string();
+        let expected = directory
+            .path()
+            .canonicalize()
+            .expect("canonical working directory")
+            .to_string_lossy()
+            .to_string();
 
         executor
             .execute_in_dir(
                 "sh",
-                &["-c", "test \"$PWD\" = \"$1\"", "sh", &expected],
+                &["-c", "test \"$(pwd -P)\" = \"$1\"", "sh", &expected],
                 false,
                 Some(directory.path()),
             )

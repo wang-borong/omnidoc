@@ -2756,10 +2756,12 @@ fn cache_path(project_path: &Path, output: &str) -> PathBuf {
 }
 
 fn display_relative(project_path: &Path, path: &Path) -> String {
-    path.strip_prefix(project_path)
+    let relative = path
+        .strip_prefix(project_path)
         .unwrap_or(path)
         .to_string_lossy()
-        .to_string()
+        .to_string();
+    relative.replace('\\', "/")
 }
 
 fn error(message: String, path: Option<String>, line: Option<usize>) -> ProjectIssue {
@@ -2803,6 +2805,13 @@ mod tests {
             .expect("clock")
             .as_nanos();
         std::env::temp_dir().join(format!("omnidoc-{name}-{}-{nonce}", std::process::id()))
+    }
+
+    fn canonical_text(path: &Path) -> String {
+        path.canonicalize()
+            .unwrap_or_else(|_| path.to_path_buf())
+            .to_string_lossy()
+            .to_string()
     }
 
     #[test]
@@ -3018,7 +3027,7 @@ mod tests {
         assert!(graph.resources.iter().any(|resource| {
             resource.logical_name.ends_with("indirect-theme.sty")
                 && resource.resolved_from == "external"
-                && resource.path == package.to_string_lossy()
+                && resource.path == canonical_text(&package)
         }));
         let before =
             build_input_digest(project.path(), &graph, &config, "pdf").expect("initial PDF digest");
@@ -3067,7 +3076,7 @@ mod tests {
         assert!(graph.resources.iter().any(|resource| {
             resource.logical_name == format!("filter-depfile:{}", INCLUDE_DEPFILE)
                 && resource.resolved_from == "external"
-                && resource.path == external.path().to_string_lossy()
+                && resource.path == canonical_text(external.path())
         }));
 
         fs::write(
@@ -3189,7 +3198,7 @@ mod tests {
         assert!(graph.resources.iter().any(|resource| {
             resource.logical_name == "html-css"
                 && resource.resolved_from == "omnidoc-libs"
-                && resource.path == css.to_string_lossy()
+                && resource.path == canonical_text(&css)
         }));
         assert!(graph
             .resources

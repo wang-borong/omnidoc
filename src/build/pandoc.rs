@@ -279,7 +279,7 @@ impl PandocBuilder {
             return;
         }
 
-        let base_css = PathBuf::from(omnidoc_lib).join(pandoc::LIB_PANDOC_CSS_BASE);
+        let base_css = join_portable_relative(omnidoc_lib, pandoc::LIB_PANDOC_CSS_BASE);
         if base_css.exists() {
             options.push(pandoc::FLAG_CSS.to_string());
             options.push(base_css.to_string_lossy().to_string());
@@ -524,15 +524,13 @@ pub(crate) fn load_selected_theme(config: &MergedConfig) -> Result<Option<ThemeM
 
 fn resolve_css_path(configured: Option<&str>, omnidoc_lib: &str, fallback: &str) -> PathBuf {
     let Some(configured) = configured else {
-        return PathBuf::from(omnidoc_lib).join(fallback);
+        return join_portable_relative(omnidoc_lib, fallback);
     };
     let project_path = PathBuf::from(configured);
     if project_path.exists() {
         return project_path;
     }
-    let shared_path = PathBuf::from(omnidoc_lib)
-        .join("pandoc/css")
-        .join(configured);
+    let shared_path = join_portable_relative(omnidoc_lib, "pandoc/css").join(configured);
     if shared_path.exists() {
         return shared_path;
     }
@@ -541,6 +539,13 @@ fn resolve_css_path(configured: Option<&str>, omnidoc_lib: &str, fallback: &str)
         return bundle_path;
     }
     project_path
+}
+
+fn join_portable_relative(root: &str, relative: &str) -> PathBuf {
+    relative
+        .split(['/', '\\'])
+        .filter(|component| !component.is_empty())
+        .fold(PathBuf::from(root), |path, component| path.join(component))
 }
 
 impl BuildPipeline for PandocBuilder {
@@ -790,7 +795,7 @@ mod tests {
             .expect("clock")
             .as_nanos();
         let library = std::env::temp_dir().join(format!("omnidoc-css-{nonce}"));
-        let css_dir = library.join("pandoc/css");
+        let css_dir = library.join("pandoc").join("css");
         fs::create_dir_all(&css_dir).expect("css dir");
         let base_css = css_dir.join("omnidoc-base.css");
         fs::write(&base_css, ".omni-display-math { text-align: center; }\n").expect("base css");
