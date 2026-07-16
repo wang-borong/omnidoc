@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -34,6 +34,7 @@ jobs:
       - crate-metadata
       - quality
       - golden-book
+      - portable-document-smoke
       - msrv
       - audit
       - package
@@ -51,8 +52,8 @@ jobs:
       homepage: ${{ steps.metadata.outputs.homepage }}
       msrv: ${{ steps.metadata.outputs.msrv }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - name: Extract metadata
         id: metadata
         shell: bash
@@ -68,11 +69,11 @@ jobs:
     name: Quality gates
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install native dependencies
         run: |
           sudo apt-get update
@@ -105,15 +106,15 @@ jobs:
     name: Golden Book (HTML and EPUB)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: wang-borong/omnidoc-libs
           path: omnidoc-libs
           ref: ${{ startsWith(github.ref, 'refs/tags/v') && env.OMNIDOC_LIBS_RELEASE_REF || 'main' }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: pandoc/actions/setup@v1
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1
         with:
           version: ${{ env.PANDOC_VERSION }}
       - name: Install integration dependencies
@@ -142,15 +143,15 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: wang-borong/omnidoc-libs
           path: omnidoc-libs
           ref: ${{ startsWith(github.ref, 'refs/tags/v') && env.OMNIDOC_LIBS_RELEASE_REF || 'main' }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: pandoc/actions/setup@v1
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1
         with:
           version: ${{ env.PANDOC_VERSION }}
       - name: Install PDF integration dependencies
@@ -178,23 +179,85 @@ jobs:
         run: scripts/check-golden-pdf.sh
       - name: Upload Golden PDF visual diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: golden-pdf-visual-${{ github.run_attempt }}
           path: ${{ env.CICD_INTERMEDIATES_DIR }}/golden-pdf-visual
           if-no-files-found: warn
           retention-days: 14
 
+  portable-document-smoke:
+    name: Document smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-latest]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: wang-borong/omnidoc-libs
+          path: omnidoc-libs
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1
+        with:
+          version: ${{ env.PANDOC_VERSION }}
+      - name: Install pandoc-crossref
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/crossref"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            curl --fail --location --retry 3 \
+              --output "$RUNNER_TEMP/pandoc-crossref.7z" \
+              "https://github.com/lierdakil/pandoc-crossref/releases/download/v${PANDOC_CROSSREF_VERSION}/pandoc-crossref-Windows-X64.7z"
+            7z x -y "$RUNNER_TEMP/pandoc-crossref.7z" "-o$RUNNER_TEMP/crossref"
+          else
+            curl --fail --location --retry 3 \
+              --output "$RUNNER_TEMP/pandoc-crossref.tar.xz" \
+              "https://github.com/lierdakil/pandoc-crossref/releases/download/v${PANDOC_CROSSREF_VERSION}/pandoc-crossref-macOS-X64.tar.xz"
+            tar --extract --xz --file "$RUNNER_TEMP/pandoc-crossref.tar.xz" \
+              --directory "$RUNNER_TEMP/crossref" pandoc-crossref
+            chmod +x "$RUNNER_TEMP/crossref/pandoc-crossref"
+          fi
+          echo "$RUNNER_TEMP/crossref" >> "$GITHUB_PATH"
+      - name: Build a real HTML document
+        shell: bash
+        run: |
+          cargo build --locked
+          bin="target/debug/omnidoc"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            bin="${bin}.exe"
+          fi
+          export HOME="$RUNNER_TEMP/home"
+          export LOCALAPPDATA="$RUNNER_TEMP/local-app-data"
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/config"
+          export XDG_DATA_HOME="$RUNNER_TEMP/data"
+          mkdir -p \
+            "$HOME/.local/share" \
+            "$HOME/Library/Application Support" \
+            "$LOCALAPPDATA" \
+            "$XDG_CONFIG_HOME" \
+            "$XDG_DATA_HOME"
+          cp -a omnidoc-libs "$HOME/.local/share/omnidoc"
+          cp -a omnidoc-libs "$HOME/Library/Application Support/omnidoc"
+          cp -a omnidoc-libs "$LOCALAPPDATA/omnidoc"
+          cp -a omnidoc-libs "$XDG_DATA_HOME/omnidoc"
+          "$bin" doctor --strict tests/fixtures/golden-book
+          "$bin" build tests/fixtures/golden-book --to html --force
+          test -s tests/fixtures/golden-book/build/golden-book.html
+
   msrv:
     name: Minimum supported Rust version
     runs-on: ubuntu-latest
     needs: crate-metadata
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
           toolchain: ${{ needs.crate-metadata.outputs.msrv }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install native dependencies
         run: |
           sudo apt-get update
@@ -206,13 +269,51 @@ jobs:
     name: Cargo audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Audit dependencies
         run: cargo audit
+
+  benchmark:
+    name: Large Book benchmark
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: wang-borong/omnidoc-libs
+          path: omnidoc-libs
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1
+        with:
+          version: ${{ env.PANDOC_VERSION }}
+      - name: Install benchmark dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq libssl-dev pkg-config xz-utils
+          curl --fail --location --retry 3 \
+            --output /tmp/pandoc-crossref.tar.xz \
+            "https://github.com/lierdakil/pandoc-crossref/releases/download/v${PANDOC_CROSSREF_VERSION}/pandoc-crossref-Linux-X64.tar.xz"
+          tar --extract --xz --file /tmp/pandoc-crossref.tar.xz --directory /tmp pandoc-crossref
+          sudo install -m 0755 /tmp/pandoc-crossref /usr/local/bin/pandoc-crossref
+      - name: Benchmark cold and cached builds
+        env:
+          OMNIDOC_LIBS: ${{ github.workspace }}/omnidoc-libs
+          OMNIDOC_BENCHMARK_DIR: ${{ github.workspace }}/${{ env.CICD_INTERMEDIATES_DIR }}/benchmark
+        run: scripts/benchmark-large-book.sh
+      - name: Upload benchmark report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: large-book-benchmark-${{ github.run_attempt }}
+          path: ${{ env.CICD_INTERMEDIATES_DIR }}/benchmark
+          if-no-files-found: error
+          retention-days: 30
 
   package:
     name: Package ${{ matrix.job.target }}
@@ -227,7 +328,7 @@ jobs:
             archive: tar.gz
             deb_arch: amd64
           - target: x86_64-apple-darwin
-            os: macos-15-intel
+            os: macos-15
             archive: tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
@@ -236,11 +337,11 @@ jobs:
             os: windows-latest
             archive: zip
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           targets: ${{ matrix.job.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install Linux native dependencies
         if: runner.os == 'Linux'
         run: |
@@ -273,7 +374,7 @@ jobs:
           staging="${{ env.CICD_INTERMEDIATES_DIR }}/archive/${base}"
           mkdir -p "$staging"
           cp "${{ steps.bin.outputs.path }}" "$staging/"
-          cp README.md LICENSE release/omnidoc-libs.toml "$staging/"
+          cp README.md CHANGELOG.md LICENSE release/omnidoc-libs.toml "$staging/"
           mkdir -p "${{ env.CICD_INTERMEDIATES_DIR }}/dist"
           if [[ "${{ matrix.job.archive }}" == "zip" ]]; then
             archive_name="${base}.zip"
@@ -284,6 +385,9 @@ jobs:
           fi
           echo "name=${archive_name}" >> "$GITHUB_OUTPUT"
           echo "path=${{ env.CICD_INTERMEDIATES_DIR }}/dist/${archive_name}" >> "$GITHUB_OUTPUT"
+      - name: Smoke test packaged binary
+        shell: bash
+        run: scripts/check-packaged-binary.sh "${{ steps.archive.outputs.path }}"
       - name: Package Debian artifact
         id: deb
         if: runner.os == 'Linux'
@@ -296,6 +400,7 @@ jobs:
           rm -rf "$deb_root"
           install -Dm755 "${{ steps.bin.outputs.path }}" "$deb_root/usr/bin/${{ steps.bin.outputs.name }}"
           install -Dm644 README.md "$deb_root/usr/share/doc/${package_name}/README.md"
+          install -Dm644 CHANGELOG.md "$deb_root/usr/share/doc/${package_name}/CHANGELOG.md"
           install -Dm644 LICENSE "$deb_root/usr/share/doc/${package_name}/copyright"
           install -Dm644 release/omnidoc-libs.toml "$deb_root/usr/share/doc/${package_name}/omnidoc-libs.toml"
           mkdir -p "$deb_root/DEBIAN"
@@ -314,16 +419,51 @@ jobs:
           echo "name=${deb_name}" >> "$GITHUB_OUTPUT"
           echo "path=${{ env.CICD_INTERMEDIATES_DIR }}/dist/${deb_name}" >> "$GITHUB_OUTPUT"
       - name: Upload archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ steps.archive.outputs.name }}
           path: ${{ steps.archive.outputs.path }}
       - name: Upload Debian package
         if: steps.deb.outputs.path
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ steps.deb.outputs.name }}
           path: ${{ steps.deb.outputs.path }}
+
+  release-smoke:
+    name: Installed release Golden Book
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs:
+      - package
+      - golden-book
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+      - uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1
+        with:
+          version: ${{ env.PANDOC_VERSION }}
+      - name: Install release smoke dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y epubcheck jq ripgrep unzip xz-utils
+          curl --fail --location --retry 3 \
+            --output /tmp/pandoc-crossref.tar.xz \
+            "https://github.com/lierdakil/pandoc-crossref/releases/download/v${PANDOC_CROSSREF_VERSION}/pandoc-crossref-Linux-X64.tar.xz"
+          tar --extract --xz --file /tmp/pandoc-crossref.tar.xz --directory /tmp pandoc-crossref
+          sudo install -m 0755 /tmp/pandoc-crossref /usr/local/bin/pandoc-crossref
+      - name: Install release-bound library and build Golden Book
+        shell: bash
+        run: |
+          archive="$(find artifacts -name '*x86_64-unknown-linux-gnu.tar.gz' -print -quit)"
+          test -n "$archive"
+          mkdir -p /tmp/omnidoc-release
+          tar -xzf "$archive" -C /tmp/omnidoc-release
+          bin="$(find /tmp/omnidoc-release -type f -name omnidoc -print -quit)"
+          test -x "$bin"
+          OMNIDOC_BIN="$bin" scripts/check-release-install.sh
 
   release:
     name: Publish GitHub release
@@ -332,14 +472,17 @@ jobs:
       - all-jobs
       - golden-pdf
       - package
+      - release-smoke
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
           merge-multiple: true
       - name: Publish release artifacts
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: artifacts/*
         env:

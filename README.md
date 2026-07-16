@@ -509,6 +509,9 @@ XeLaTeX, or a font invalidates existing outputs. When the library bundle
 provides a manifest, its declared version plus manifest/checksum digests are
 locked as well. Older lock files must be regenerated with
 `omnidoc lock --update`.
+Lock, cache, and build-report files are replaced atomically. Mutating build and
+lock-update commands also hold `.omnidoc-cache/project.lock`, so
+two OmniDoc processes cannot concurrently publish inconsistent project state.
 
 For XeLaTeX, pdfLaTeX, and LuaLaTeX PDF builds, OmniDoc also enables the TeX
 recorder and converts the engine's `.fls` file into
@@ -530,6 +533,13 @@ Run the real Pandoc Golden Book gate locally before release-oriented changes:
 ```bash
 OMNIDOC_LIBS=../omnidoc-libs scripts/check-golden-book.sh
 OMNIDOC_LIBS=../omnidoc-libs scripts/check-golden-pdf.sh
+```
+
+Scheduled and manually dispatched CI also records cold and cached timings for
+a generated 100-chapter/1,000-section benchmark. Run the same workload locally:
+
+```bash
+OMNIDOC_LIBS=../omnidoc-libs scripts/benchmark-large-book.sh
 ```
 
 The PDF gate also renders every page at a fixed DPI and checks the committed
@@ -559,6 +569,12 @@ versions and requires EPUBCheck, so pull requests exercise the real HTML/EPUB
 toolchain rather than only the Rust command-construction layer.
 The heavier PDF gate runs weekly, for version tags, and when manually
 dispatched.
+macOS and Windows jobs additionally install Pandoc and pandoc-crossref and build
+a real HTML fixture. Every packaged archive is extracted and its contained
+binary and release contract are smoke-tested. Version-tag workflows download
+the release-bound omnidoc-libs archive through the embedded contract, verify
+its checksum, run `doctor --strict`, and build the Golden Book with the packaged
+OmniDoc binary before publishing the GitHub release.
 
 Official OmniDoc archives and Debian packages include
 `omnidoc-libs.toml`, a machine-readable release contract declaring the matching
@@ -570,6 +586,9 @@ that contract with OmniDoc's Cargo version and the checked-out
 python3 scripts/check-library-contract.py ../omnidoc-libs
 ```
 
+The ordered tag, release-archive, packaged-install, and EPUB reader acceptance
+procedure is maintained in [`release/CHECKLIST.md`](release/CHECKLIST.md).
+
 List discovered local plugins and external template manifests:
 
 ```bash
@@ -580,6 +599,19 @@ omnidoc plugin --validate
 
 `plugin --validate` parses discovered `manifest.toml` files and checks template plugin fields such as `language` and `template_file`.
 `plugin --json` also reports declared hooks, and validation checks local hook command paths when the command contains a path separator.
+Plugin manifests use schema version 1 and may declare their OmniDoc compatibility:
+
+```toml
+manifest_version = 1
+key = "project-lint"
+version = "1.0.0"
+compatible_omnidoc = ">=1.3.0,<2.0.0"
+```
+
+For compatibility with existing local plugins, an omitted `manifest_version`
+is interpreted as version 1. Unsupported schema versions, invalid compatibility
+ranges, and plugins incompatible with the running OmniDoc version fail
+`plugin --validate`. Hook processes receive `OMNIDOC_PLUGIN_MANIFEST_VERSION`.
 
 ### Document Formatting Commands
 
@@ -594,6 +626,8 @@ omnidoc plugin --validate
     Options:
 
     - `--backup`: Create backup files before formatting
+    - `--check`: Report files requiring formatting and return a non-zero status without writing
+    - `--diff`: Print unified diffs and return a non-zero status without writing
     - `--semantic`: Enable semantic formatting
     - `--symbol`: Enable symbol formatting (Chinese punctuation)
 
@@ -607,6 +641,9 @@ omnidoc plugin --validate
     files use a separate mode that protects command and environment lines.
     `--semantic` and `--symbol` remain explicit opt-ins, and repeated formatting
     is required to be idempotent.
+    Writes use an atomic replacement and preserve UTF-8 BOM, CRLF/LF style,
+    final-newline state, and Unix file mode. Files whose bytes are already
+    formatted are not rewritten.
 
     Examples:
 
@@ -614,6 +651,8 @@ omnidoc plugin --validate
     omnidoc fmt main.md                    # Format a single file
     omnidoc fmt md/                        # Format all files in md directory
     omnidoc fmt --backup --semantic .      # Format all files in current directory with backup
+    omnidoc fmt --check .                   # CI-safe formatting gate
+    omnidoc fmt --diff main.md              # Review changes without writing
     ```
 
 ### Figure Generation Commands

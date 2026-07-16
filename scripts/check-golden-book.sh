@@ -7,12 +7,22 @@ libs="${OMNIDOC_LIBS:-$root/../omnidoc-libs}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-for tool in cargo pandoc pandoc-crossref unzip zipinfo jq python3; do
+required_tools=(pandoc pandoc-crossref unzip zipinfo jq python3)
+if [[ -z "${OMNIDOC_BIN:-}" ]]; then
+  required_tools+=(cargo)
+fi
+for tool in "${required_tools[@]}"; do
   command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
 done
 test -d "$libs/pandoc" || { echo "invalid OMNIDOC_LIBS: $libs" >&2; exit 1; }
 
-cargo build --manifest-path "$root/Cargo.toml" --locked
+if [[ -n "${OMNIDOC_BIN:-}" ]]; then
+  bin="$OMNIDOC_BIN"
+  test -x "$bin" || { echo "invalid OMNIDOC_BIN: $bin" >&2; exit 1; }
+else
+  cargo build --manifest-path "$root/Cargo.toml" --locked
+  bin="$root/target/debug/omnidoc"
+fi
 cp -a "$fixture" "$work/book"
 mkdir -p "$work/data" "$work/config" "$work/home"
 cp -a "$libs" "$work/data/omnidoc"
@@ -21,7 +31,6 @@ export XDG_DATA_HOME="$work/data"
 export XDG_CONFIG_HOME="$work/config"
 export HOME="$work/home"
 
-bin="$root/target/debug/omnidoc"
 if command -v epubcheck >/dev/null; then
   "$bin" doctor --strict "$work/book"
 fi

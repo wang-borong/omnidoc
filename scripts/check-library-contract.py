@@ -57,6 +57,14 @@ def main() -> int:
             raise ValueError(
                 f"contract OmniDoc version {contract.get('omnidoc_version')} does not match Cargo version {omnidoc_version}"
             )
+        release_tag = os.environ.get("OMNIDOC_RELEASE_TAG")
+        if not release_tag and os.environ.get("GITHUB_REF_TYPE") == "tag":
+            release_tag = os.environ.get("GITHUB_REF_NAME")
+        expected_omnidoc_tag = f"v{omnidoc_version}"
+        if release_tag and release_tag != expected_omnidoc_tag:
+            raise ValueError(
+                f"release tag {release_tag} does not match OmniDoc version {expected_omnidoc_tag}"
+            )
         if not matches(manifest["compatible_omnidoc"], omnidoc_version):
             raise ValueError(
                 f"omnidoc-libs {manifest['version']} is incompatible with OmniDoc {omnidoc_version}"

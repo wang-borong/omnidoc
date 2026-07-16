@@ -7,7 +7,11 @@ libs="${OMNIDOC_LIBS:-$root/../omnidoc-libs}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-for tool in cargo pandoc pandoc-crossref xelatex pdfinfo pdffonts pdftotext pdftoppm jq rg fc-match python3; do
+required_tools=(pandoc pandoc-crossref xelatex pdfinfo pdffonts pdftotext pdftoppm jq rg fc-match python3)
+if [[ -z "${OMNIDOC_BIN:-}" ]]; then
+  required_tools+=(cargo)
+fi
+for tool in "${required_tools[@]}"; do
   command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
 done
 test -d "$libs/pandoc" || { echo "invalid OMNIDOC_LIBS: $libs" >&2; exit 1; }
@@ -20,7 +24,13 @@ for family in "Noto Serif CJK SC" "Noto Sans CJK SC" "Noto Sans Mono CJK SC"; do
   }
 done
 
-cargo build --manifest-path "$root/Cargo.toml" --locked
+if [[ -n "${OMNIDOC_BIN:-}" ]]; then
+  bin="$OMNIDOC_BIN"
+  test -x "$bin" || { echo "invalid OMNIDOC_BIN: $bin" >&2; exit 1; }
+else
+  cargo build --manifest-path "$root/Cargo.toml" --locked
+  bin="$root/target/debug/omnidoc"
+fi
 cp -a "$fixture" "$work/book"
 python3 - "$work/book/.omnidoc.toml" <<'PY'
 import pathlib
@@ -50,7 +60,6 @@ export XDG_CONFIG_HOME="$work/config"
 export HOME="$work/home"
 export TEXINPUTS="$work/texmf//:"
 
-bin="$root/target/debug/omnidoc"
 pdf="$work/book/build/golden-book.pdf"
 report="$work/book/build/omnidoc-report.json"
 lock="$work/book/omnidoc.lock"
