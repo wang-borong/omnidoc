@@ -101,7 +101,6 @@ pub mod pandoc {
     pub const DEFAULT_TO_HTML: &str = "html";
     pub const DEFAULT_ENGINE_LATEX: &str = "xelatex";
     pub const DEFAULT_SYNTAX: &str = "idiomatic";
-    pub const DEFAULT_TEMPLATE_LATEX: &str = "pantext.latex";
     pub const DEFAULT_PYTHON: &str = "python3";
     pub const DEFAULT_PLUGIN_CROSSREF: &str = "pandoc-crossref";
 

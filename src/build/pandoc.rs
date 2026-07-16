@@ -123,6 +123,22 @@ impl PandocBuilder {
             .clone()
             .unwrap_or_else(|| pandoc::DEFAULT_SYNTAX.to_string());
         options.push(syntax_highlighting);
+        // External filters such as pandoc-crossref may rewrite Code and
+        // CodeBlock nodes to raw LaTeX before Pandoc decides which template
+        // feature variables are needed. Preserve the writer contract for the
+        // idiomatic LaTeX backend so Pandoc's own default template still loads
+        // listings and defines \passthrough.
+        if matches!(output_kind, PandocOutputKind::Pdf | PandocOutputKind::Latex)
+            && self
+                .config
+                .pandoc_syntax_highlighting
+                .as_deref()
+                .unwrap_or(pandoc::DEFAULT_SYNTAX)
+                == "idiomatic"
+        {
+            options.push("--variable".to_string());
+            options.push("listings=true".to_string());
+        }
 
         options.push(pandoc::FLAG_DATA_DIR.to_string());
         let data_dir = self
@@ -245,8 +261,7 @@ impl PandocBuilder {
                 .pandoc_latex_template
                 .clone()
                 .or_else(|| self.config.pandoc_template.clone())
-                .or_else(|| theme_template.clone())
-                .or_else(|| Some(pandoc::DEFAULT_TEMPLATE_LATEX.to_string())),
+                .or_else(|| theme_template.clone()),
             PandocOutputKind::Html => self
                 .config
                 .pandoc_html_template
@@ -995,6 +1010,31 @@ documentclass = "scrbook"
             .any(|option| option == "documentclass=scrbook"));
 
         fs::remove_dir_all(library).expect("cleanup");
+    }
+
+    #[test]
+    fn latex_uses_pandoc_default_template_and_preserves_idiomatic_listings() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let builder = PandocBuilder::new(MergedConfig {
+            lib_path: Some(root.path().to_string_lossy().to_string()),
+            pandoc_standalone: true,
+            ..Default::default()
+        })
+        .expect("pandoc builder");
+
+        let options = builder
+            .build_command_options(
+                std::path::Path::new("input.md"),
+                std::path::Path::new("output.tex"),
+                PandocOutputKind::Latex,
+                &PandocCommandProfile::Project,
+            )
+            .expect("latex options");
+
+        assert!(!options.iter().any(|option| option == "--template"));
+        assert!(options
+            .windows(2)
+            .any(|pair| pair == ["--variable".to_string(), "listings=true".to_string()]));
     }
 
     #[test]

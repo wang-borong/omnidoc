@@ -436,8 +436,11 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
    `html_template`, `epub_template`, and `latex_template` bind a template to a
    specific writer. Explicit project format templates and the generic
-   `pandoc.template` override the theme; PDF/LaTeX falls back to
-   `pantext.latex` only when neither project nor theme selects one.
+   `pandoc.template` override the theme. When no PDF/LaTeX template is
+   selected, OmniDoc deliberately lets Pandoc use the version-matched built-in
+   template (the same template printed by `pandoc -D latex`). Book styling is
+   layered through theme headers and `.sty` packages, so routine Pandoc
+   upgrades do not require copying and rebasing the full upstream template.
 
 ### Project Quality and CI Commands
 

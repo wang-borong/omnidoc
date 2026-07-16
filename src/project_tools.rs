@@ -1002,7 +1002,7 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
                         .as_ref()
                         .and_then(|theme| theme.resources.latex_template.as_deref())
                 }),
-            Some(pandoc::DEFAULT_TEMPLATE_LATEX),
+            None,
         )),
         PandocOutputKind::Html => Some((
             "html-template",
