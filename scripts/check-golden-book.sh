@@ -42,6 +42,7 @@ rg -q 'display="inline"' "$html"
 rg -q 'display="block"' "$html"
 rg -q 'nested include-code works' "$html"
 rg -q 'id="本章小结-1"|id="本章小结-2"' "$html"
+rg -q '<html[^>]+lang="zh-CN"' "$html"
 rg -q 'omnidoc-base-css' "$lock"
 rg -q 'lua-filter:display-math.lua' "$lock"
 rg -q 'theme-manifest:engineering-book' "$lock"
@@ -120,6 +121,7 @@ zipinfo -1 "$epub" | rg -q '\.css$'
 while IFS= read -r member; do
   unzip -p "$epub" "$member"
 done < <(zipinfo -1 "$epub" | rg '\.(xhtml|html)$') > "$work/epub-content.html"
+rg -q 'xml:lang="zh-CN"|lang="zh-CN"' "$work/epub-content.html"
 while IFS= read -r member; do
   unzip -p "$epub" "$member"
 done < <(zipinfo -1 "$epub" | rg '\.css$') > "$work/epub-style.css"

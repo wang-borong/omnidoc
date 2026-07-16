@@ -427,6 +427,12 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    `kpsewhich`. PDF lock/cache entries include the TeX distribution identity
    plus each resolved `.sty` version, file name, and BLAKE3 digest.
 
+   Theme metadata defaults are emitted as Pandoc `-M key=value` arguments for
+   projects without an authoritative `build.metadata_file`. Explicit
+   `pandoc.lang`, project author/title defaults, and user-supplied Pandoc
+   options take precedence. Metadata keys are validated as portable scalar
+   identifiers and values must remain single-line strings.
+
 ### Project Quality and CI Commands
 
 Run environment diagnostics:

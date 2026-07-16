@@ -371,6 +371,32 @@ fn validate_manifest(
     if check_latex && !manifest.requirements.system_latex_packages.is_empty() {
         validate_installed_latex_packages(&manifest.requirements.system_latex_packages, report);
     }
+    for (key, value) in &manifest.metadata.defaults {
+        if !valid_theme_metadata_key(key) {
+            report
+                .errors
+                .push(format!("invalid theme metadata default key: {}", key));
+        }
+        if value
+            .chars()
+            .any(|character| matches!(character, '\0' | '\n' | '\r'))
+        {
+            report.errors.push(format!(
+                "theme metadata default '{}' must be a single-line scalar",
+                key
+            ));
+        }
+    }
+}
+
+pub(crate) fn valid_theme_metadata_key(key: &str) -> bool {
+    let mut characters = key.chars();
+    characters
+        .next()
+        .is_some_and(|character| character.is_ascii_alphanumeric() || character == '_')
+        && characters.all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        })
 }
 
 fn validate_installed_fonts(fonts: &[String], report: &mut ThemeReport) {
@@ -517,6 +543,16 @@ fn print_reports(reports: &[ThemeReport], json: bool, detailed: bool) -> Result<
                     "  system LaTeX packages: {}",
                     theme.requirements.system_latex_packages.join(", ")
                 );
+                println!(
+                    "  metadata defaults: {}",
+                    theme
+                        .metadata
+                        .defaults
+                        .iter()
+                        .map(|(key, value)| format!("{key}={value}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
             }
         }
         for error in &report.errors {
@@ -543,7 +579,9 @@ fn ensure_valid(reports: &[ThemeReport]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{font_family_matches, safe_relative_path, valid_latex_package_name};
+    use super::{
+        font_family_matches, safe_relative_path, valid_latex_package_name, valid_theme_metadata_key,
+    };
 
     #[test]
     fn rejects_unsafe_theme_paths() {
@@ -567,5 +605,15 @@ mod tests {
         assert!(valid_latex_package_name("xeCJK"));
         assert!(!valid_latex_package_name("../outside"));
         assert!(!valid_latex_package_name("package.sty"));
+    }
+
+    #[test]
+    fn validates_theme_metadata_keys() {
+        assert!(valid_theme_metadata_key("lang"));
+        assert!(valid_theme_metadata_key("link-citations"));
+        assert!(valid_theme_metadata_key("pdf.documentclass"));
+        assert!(!valid_theme_metadata_key(""));
+        assert!(!valid_theme_metadata_key("bad key"));
+        assert!(!valid_theme_metadata_key("-bad"));
     }
 }

@@ -364,10 +364,19 @@ impl PandocBuilder {
             options.push(metadata_file.clone());
         }
 
+        if !has_metadata_file {
+            self.push_theme_metadata_defaults(options);
+        }
+
         if let Some(lang) = self.effective_lang() {
             if lang != "en" {
                 self.push_crossref_yaml(options, omnidoc_lib, pandoc::LIB_PANDOC_CROSSREF_YAML);
             }
+        }
+
+        if let Some(lang) = self.config.pandoc_lang.as_deref() {
+            options.push(pandoc::FLAG_META_SHORT.to_string());
+            options.push(format!("lang={lang}"));
         }
 
         // A project metadata file is authoritative for publication metadata.
@@ -386,6 +395,19 @@ impl PandocBuilder {
 
         if self.config.verbose {
             options.push("--verbose".to_string());
+        }
+    }
+
+    fn push_theme_metadata_defaults(&self, options: &mut Vec<String>) {
+        let Some(theme) = self.theme.as_ref() else {
+            return;
+        };
+        for (key, value) in &theme.metadata.defaults {
+            if key == "lang" && self.config.pandoc_lang.is_some() {
+                continue;
+            }
+            options.push(pandoc::FLAG_META_SHORT.to_string());
+            options.push(format!("{key}={value}"));
         }
     }
 
@@ -818,6 +840,10 @@ compatibility = "readium"
 [resources]
 html_css = ["pandoc/css/engineering-book.css"]
 latex_headers = ["pandoc/headers/engineering-book.tex"]
+
+[metadata.defaults]
+lang = "zh-CN"
+documentclass = "scrbook"
 "#,
         )
         .expect("theme manifest");
@@ -855,6 +881,54 @@ latex_headers = ["pandoc/headers/engineering-book.tex"]
                 header.to_string_lossy().to_string()
             ]
         );
+
+        let mut metadata_options = Vec::new();
+        builder.push_metadata(
+            &mut metadata_options,
+            library.to_str().expect("library path"),
+            &PandocCommandProfile::Project,
+        );
+        assert!(metadata_options
+            .windows(2)
+            .any(|pair| pair == ["-M".to_string(), "lang=zh-CN".to_string()]));
+        assert!(metadata_options
+            .windows(2)
+            .any(|pair| pair == ["-M".to_string(), "documentclass=scrbook".to_string()]));
+
+        let explicit_lang = PandocBuilder::new(MergedConfig {
+            lib_path: Some(library.to_string_lossy().to_string()),
+            theme_name: Some("engineering-book".to_string()),
+            pandoc_lang: Some("en".to_string()),
+            ..Default::default()
+        })
+        .expect("explicit language builder");
+        let mut explicit_options = Vec::new();
+        explicit_lang.push_metadata(
+            &mut explicit_options,
+            library.to_str().expect("library path"),
+            &PandocCommandProfile::Project,
+        );
+        assert!(explicit_options
+            .windows(2)
+            .any(|pair| pair == ["-M".to_string(), "lang=en".to_string()]));
+        assert!(!explicit_options.iter().any(|option| option == "lang=zh-CN"));
+
+        let metadata_file = PandocBuilder::new(MergedConfig {
+            lib_path: Some(library.to_string_lossy().to_string()),
+            theme_name: Some("engineering-book".to_string()),
+            metadata_file: Some("book.yaml".to_string()),
+            ..Default::default()
+        })
+        .expect("metadata file builder");
+        let mut file_options = Vec::new();
+        metadata_file.push_metadata(
+            &mut file_options,
+            library.to_str().expect("library path"),
+            &PandocCommandProfile::Project,
+        );
+        assert!(!file_options
+            .iter()
+            .any(|option| option == "documentclass=scrbook"));
 
         fs::remove_dir_all(library).expect("cleanup");
     }
