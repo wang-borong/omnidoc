@@ -1,9 +1,9 @@
 use crate::config::schema::ConfigSchema;
 use crate::constants::config as config_consts;
 use crate::error::{OmniDocError, Result};
+use crate::utils::directories::{config_local_dir, data_local_dir};
 use crate::utils::fs;
 use console::style;
-use dirs::{config_local_dir, data_local_dir};
 use std::env::var;
 use std::path::PathBuf;
 

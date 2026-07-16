@@ -1,8 +1,8 @@
 use super::types::TemplateDocType;
 use crate::config::{CliOverrides, ConfigManager};
+use crate::utils::directories::config_local_dir;
 use crate::utils::fs;
 use chrono::prelude::*;
-use dirs::config_local_dir;
 use serde::Deserialize;
 use std::env;
 use std::path::{Path, PathBuf};

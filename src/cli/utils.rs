@@ -1,6 +1,7 @@
 use crate::doc::templates::generator::list_external_templates;
 use crate::doctype::DocumentTypeRegistry;
 use crate::error::{OmniDocError, Result};
+use crate::utils::directories::data_local_dir;
 use crate::utils::fs;
 use console::style;
 use inquire::Select;
@@ -91,7 +92,7 @@ where
 
 /// Check if omnidoc library exists
 pub fn omnidoc_lib_exists() -> bool {
-    let local_data_dir = match dirs::data_local_dir() {
+    let local_data_dir = match data_local_dir() {
         Some(dir) => dir,
         None => return false,
     };

@@ -6,6 +6,7 @@ use crate::constants::pandoc;
 use crate::epub::{is_supported_epub_profile, EpubCompatibilityReport};
 use crate::error::{OmniDocError, Result};
 use crate::utils;
+use crate::utils::directories::data_local_dir;
 use blake3::Hasher;
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -1134,7 +1135,7 @@ fn omnidoc_library_root(config: &MergedConfig) -> PathBuf {
         .as_ref()
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            dirs::data_local_dir()
+            data_local_dir()
                 .map(|path| path.join("omnidoc"))
                 .unwrap_or_else(|| PathBuf::from(".local/share/omnidoc"))
         })
@@ -2337,7 +2338,7 @@ fn check_configured_css_path(
     };
     let library_root = lib_path
         .map(PathBuf::from)
-        .or_else(|| dirs::data_local_dir().map(|path| path.join("omnidoc")));
+        .or_else(|| data_local_dir().map(|path| path.join("omnidoc")));
     let shared_exists = library_root
         .map(|root| root.join("pandoc/css").join(path).exists())
         .unwrap_or(false);

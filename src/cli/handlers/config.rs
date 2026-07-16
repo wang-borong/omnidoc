@@ -1,7 +1,7 @@
 use crate::constants::config as config_consts;
 use crate::error::{OmniDocError, Result};
+use crate::utils::directories::config_local_dir;
 use console::style;
-use dirs::config_local_dir;
 
 /// Handle the 'config' command
 pub fn handle_config(

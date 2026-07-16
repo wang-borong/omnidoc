@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.2
+
+- Restored isolated XDG config/data paths on macOS and Windows.
+- Fixed checksum fixtures across repeated Windows Git updates.
+- Moved Intel macOS CI jobs to the supported `macos-15-intel` runner.
+
 ## 1.3.1
 
 - Fixed macOS and Windows real-document smoke configuration.

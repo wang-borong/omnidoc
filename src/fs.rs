@@ -1,7 +1,7 @@
 pub use std::fs::*;
 
+use crate::utils::directories::data_local_dir;
 use console::style;
-use dirs::data_local_dir;
 use std::fs;
 use std::path::{Path, PathBuf};
 

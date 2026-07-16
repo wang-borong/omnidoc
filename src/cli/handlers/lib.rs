@@ -4,9 +4,9 @@ use crate::constants::git_refs;
 use crate::doc::templates::get_latexmkrc_template;
 use crate::error::{OmniDocError, Result};
 use crate::git::{git_checkout_revision, git_clone};
+use crate::utils::directories::{config_local_dir, data_local_dir};
 use crate::utils::fs;
 use console::style;
-use dirs::{config_local_dir, data_local_dir};
 use flate2::read::GzDecoder;
 use git2::{Repository, StatusOptions};
 use semver::{Version, VersionReq};
@@ -1127,6 +1127,7 @@ mod tests {
 
     fn write_library_contract(root: &Path, payload: &[u8], checksum_payload: &[u8]) {
         fs::create_dir_all(root.join("payload")).expect("payload directory");
+        fs::write(root.join(".gitattributes"), "* -text\n").expect("git attributes");
         fs::write(root.join("payload/resource.txt"), payload).expect("payload");
         fs::write(
             root.join("manifest.toml"),

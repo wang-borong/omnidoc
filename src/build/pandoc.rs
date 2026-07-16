@@ -11,8 +11,8 @@ use crate::project_tools::{
     filter_depfile_metadata_key, filter_depfile_name, INCLUDE_CODE_DEPFILE, INCLUDE_DEPFILE,
     LATEX_INPUT_DEPFILE,
 };
+use crate::utils::directories::data_local_dir;
 use crate::utils::fs;
-use dirs::data_local_dir;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 

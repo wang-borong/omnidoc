@@ -3,6 +3,7 @@ use crate::config::global::GlobalConfig;
 use crate::config::project::ProjectConfig;
 use crate::config::schema::*;
 use crate::error::Result;
+use crate::utils::directories::data_local_dir;
 use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::path::Path;
@@ -448,7 +449,7 @@ impl ConfigManager {
                 .as_ref()
                 .map(|p| format!("{}/texmf", p))
                 .or_else(|| {
-                    dirs::data_local_dir().map(|d| {
+                    data_local_dir().map(|d| {
                         d.join("omnidoc")
                             .join("texmf")
                             .to_string_lossy()

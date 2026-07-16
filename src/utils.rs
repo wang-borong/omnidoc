@@ -5,6 +5,27 @@ use crate::error::{OmniDocError, Result};
 use std::io;
 use std::path::{Path, PathBuf};
 
+/// Application directories with explicit XDG overrides on every platform.
+/// This keeps CI, portable installations, and tests isolated on macOS and Windows,
+/// where the `dirs` crate otherwise always resolves native Known Folders.
+pub mod directories {
+    use std::path::PathBuf;
+
+    fn non_empty_env(name: &str) -> Option<PathBuf> {
+        std::env::var_os(name)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    }
+
+    pub fn config_local_dir() -> Option<PathBuf> {
+        non_empty_env("XDG_CONFIG_HOME").or_else(dirs::config_local_dir)
+    }
+
+    pub fn data_local_dir() -> Option<PathBuf> {
+        non_empty_env("XDG_DATA_HOME").or_else(dirs::data_local_dir)
+    }
+}
+
 /// 错误转换辅助函数
 /// 简化错误转换代码
 pub mod error {
