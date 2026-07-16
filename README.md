@@ -586,8 +586,9 @@ omnidoc plugin --validate
     - `--symbol`: Enable symbol formatting (Chinese punctuation)
 
     The default formatter is conservative and block/token-aware. It leaves
-    front matter, fenced and indented code, display math, raw HTML containers,
-    tables, reference definitions, LaTeX environments, inline code/math,
+    front matter, fenced and indented code, display math, nested/custom raw
+    HTML containers, pipe/grid tables, definition lists, block-level raw TeX,
+    reference definitions, nested LaTeX environments, inline code/math,
     escapes, raw inline HTML, balanced links/images, reference and citation
     labels, and Pandoc attribute blocks byte-stable. Nested parentheses in
     destinations are parsed structurally rather than with URL regexes. `.tex`

@@ -123,8 +123,8 @@ enum ProtectedBlock {
     Fence { marker: u8, length: usize },
     Math(&'static str),
     HtmlComment,
-    HtmlElement(String),
-    LatexEnvironment(String),
+    HtmlElement { tag: String, depth: usize },
+    LatexEnvironment { name: String, depth: usize },
     SingleLine,
 }
 
@@ -158,19 +158,31 @@ impl ProtectedBlock {
             });
         }
         if let Some(environment) = latex_environment(trimmed) {
-            let closing = format!(r"\end{{{}}}", environment);
-            return Some(if trimmed.contains(&closing) {
+            let openings = trimmed
+                .matches(&format!(r"\begin{{{}}}", environment))
+                .count();
+            let closings = trimmed
+                .matches(&format!(r"\end{{{}}}", environment))
+                .count();
+            let depth = openings.saturating_sub(closings);
+            return Some(if depth == 0 {
                 Self::SingleLine
             } else {
-                Self::LatexEnvironment(environment)
+                Self::LatexEnvironment {
+                    name: environment,
+                    depth,
+                }
             });
         }
         if let Some(tag) = raw_html_container(trimmed) {
-            let closing = format!("</{}>", tag);
-            return Some(if trimmed.to_ascii_lowercase().contains(&closing) {
+            let lower = trimmed.to_ascii_lowercase();
+            let openings = html_tag_occurrences(&lower, &tag, false);
+            let closings = html_tag_occurrences(&lower, &tag, true);
+            let depth = openings.saturating_sub(closings);
+            return Some(if depth == 0 {
                 Self::SingleLine
             } else {
-                Self::HtmlElement(tag)
+                Self::HtmlElement { tag, depth }
             });
         }
         trimmed.starts_with('<').then_some(Self::SingleLine)
@@ -180,7 +192,7 @@ impl ProtectedBlock {
         !matches!(self, Self::SingleLine)
     }
 
-    fn closes(&self, line: &str) -> bool {
+    fn observe(&mut self, line: &str) -> bool {
         let trimmed = line.trim_start();
         match self {
             Self::FrontMatter(marker) => {
@@ -193,11 +205,18 @@ impl ProtectedBlock {
             }
             Self::Math(marker) => line.trim() == *marker,
             Self::HtmlComment => line.contains("-->"),
-            Self::HtmlElement(tag) => trimmed
-                .to_ascii_lowercase()
-                .contains(&format!("</{}>", tag)),
-            Self::LatexEnvironment(environment) => {
-                line.contains(&format!(r"\end{{{}}}", environment))
+            Self::HtmlElement { tag, depth } => {
+                let lower = trimmed.to_ascii_lowercase();
+                let openings = html_tag_occurrences(&lower, tag, false);
+                let closings = html_tag_occurrences(&lower, tag, true);
+                *depth = depth.saturating_add(openings).saturating_sub(closings);
+                *depth == 0
+            }
+            Self::LatexEnvironment { name, depth } => {
+                let openings = line.matches(&format!(r"\begin{{{}}}", name)).count();
+                let closings = line.matches(&format!(r"\end{{{}}}", name)).count();
+                *depth = depth.saturating_add(openings).saturating_sub(closings);
+                *depth == 0
             }
             Self::SingleLine => true,
         }
@@ -213,12 +232,74 @@ fn latex_environment(trimmed: &str) -> Option<String> {
 
 fn raw_html_container(trimmed: &str) -> Option<String> {
     let lower = trimmed.to_ascii_lowercase();
-    [
-        "script", "style", "pre", "code", "table", "div", "details", "summary", "math", "svg",
-    ]
-    .into_iter()
-    .find(|tag| lower.starts_with(&format!("<{}", tag)))
-    .map(str::to_string)
+    if !lower.starts_with('<')
+        || lower.starts_with("</")
+        || lower.starts_with("<!")
+        || lower.starts_with("<?")
+        || lower.starts_with("<mailto:")
+        || lower.contains("://")
+    {
+        return None;
+    }
+    let name = lower[1..]
+        .chars()
+        .take_while(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | ':' | '_')
+        })
+        .collect::<String>();
+    let name_end = 1 + name.len();
+    if name.is_empty()
+        || !name
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_alphabetic())
+        || is_void_html_tag(&name)
+        || !lower
+            .as_bytes()
+            .get(name_end)
+            .is_some_and(|byte| byte.is_ascii_whitespace() || matches!(*byte, b'>' | b'/'))
+        || lower
+            .find('>')
+            .is_some_and(|end| lower[..=end].trim_end().ends_with("/>"))
+    {
+        return None;
+    }
+    Some(name)
+}
+
+fn is_void_html_tag(tag: &str) -> bool {
+    matches!(
+        tag,
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "param"
+            | "source"
+            | "track"
+            | "wbr"
+    )
+}
+
+fn html_tag_occurrences(line: &str, tag: &str, closing: bool) -> usize {
+    let needle = if closing {
+        format!("</{tag}")
+    } else {
+        format!("<{tag}")
+    };
+    line.match_indices(&needle)
+        .filter(|(index, _)| {
+            line.as_bytes()
+                .get(index + needle.len())
+                .is_some_and(|byte| byte.is_ascii_whitespace() || matches!(*byte, b'>' | b'/'))
+        })
+        .count()
 }
 
 fn is_structural_markdown_line(line: &str, markdown: bool) -> bool {
@@ -234,6 +315,10 @@ fn is_structural_markdown_line(line: &str, markdown: bool) -> bool {
     }
     let cache = get_regex_cache();
     if trimmed.starts_with(":::")
+        || trimmed.starts_with('\\')
+        || trimmed
+            .strip_prefix(':')
+            .is_some_and(|rest| rest.starts_with(char::is_whitespace))
         || (trimmed.starts_with('{') && trimmed.ends_with('}'))
         || cache.reference_definition.is_match(trimmed)
     {
@@ -244,6 +329,14 @@ fn is_structural_markdown_line(line: &str, markdown: bool) -> bool {
         .filter(|character| *character == '|')
         .count();
     if pipe_count > 0 && (trimmed.starts_with('|') || trimmed.ends_with('|')) {
+        return true;
+    }
+    if trimmed.starts_with('+')
+        && trimmed.ends_with('+')
+        && trimmed
+            .chars()
+            .all(|character| matches!(character, '+' | '-' | '=' | ':' | ' '))
+    {
         return true;
     }
     cache.table_delimiter.is_match(trimmed)
@@ -440,9 +533,9 @@ impl FormatService {
                 formatted_lines.push(line.to_string());
                 continue;
             }
-            if let Some(block) = &protected_block {
+            if let Some(block) = protected_block.as_mut() {
                 formatted_lines.push(line.to_string());
-                if block.closes(line) {
+                if block.observe(line) {
                     protected_block = None;
                 }
                 continue;
@@ -770,6 +863,45 @@ mod tests {
         assert!(output.contains("<span data-x=\"a:b\">"));
         assert!(output.contains("\\ref{chapter-one}"));
         assert!(output.contains("\\*"));
+    }
+
+    #[test]
+    fn preserves_nested_raw_blocks_and_structural_markdown() {
+        let service = FormatService::new(false, true, true, true);
+        let input = concat!(
+            "<same-tag><same-tag></same-tag>\n",
+            "同行内层结束后中文ABC: raw\n",
+            "</same-tag>\n",
+            "<widget-panel data-label=\"中文ABC: raw\">\n",
+            "<widget-panel>\n",
+            "嵌套中文ABC: raw\n",
+            "</widget-panel>\n",
+            "内层结束后中文ABC: raw\n",
+            "</widget-panel>\n",
+            "\\begin{quote}\n",
+            "\\begin{quote}\n",
+            "嵌套环境中文ABC: raw\n",
+            "\\end{quote}\n",
+            "内层环境结束后中文ABC: raw\n",
+            "\\end{quote}\n",
+            "\\newcommand{\\RawName}{中文ABC: raw}\n",
+            "术语中文ABC: raw\n",
+            ": 定义中文ABC: raw\n",
+            "+------+-------+\n",
+            "| 中文ABC: raw | value |\n",
+            "+======+=======+\n",
+            "正文中文ABC: raw.\n",
+        );
+
+        let output = service.format_content(input);
+
+        assert!(output.contains("<same-tag><same-tag></same-tag>\n同行内层结束后中文ABC: raw"));
+        assert!(output.contains("嵌套中文ABC: raw\n</widget-panel>\n内层结束后中文ABC: raw"));
+        assert!(output.contains("嵌套环境中文ABC: raw\n\\end{quote}\n内层环境结束后中文ABC: raw"));
+        assert!(output.contains("\\newcommand{\\RawName}{中文ABC: raw}"));
+        assert!(output.contains(": 定义中文ABC: raw"));
+        assert!(output.contains("+------+-------+\n| 中文ABC: raw | value |\n+======+=======+"));
+        assert!(output.contains("正文中文 ABC：raw。"));
     }
 
     #[test]

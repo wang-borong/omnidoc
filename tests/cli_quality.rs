@@ -341,6 +341,17 @@ fn formatter_is_conservative_and_idempotent_on_structured_markdown() {
             "```rust\n",
             "let value = \"中文ABC:raw\";\n",
             "```\n\n",
+            "<widget-panel>\n",
+            "<widget-panel>\n",
+            "中文ABC:raw\n",
+            "</widget-panel>\n",
+            "结束后中文ABC:raw\n",
+            "</widget-panel>\n\n",
+            "\\newcommand{\\RawName}{中文ABC:raw}\n",
+            ": 定义中文ABC:raw\n",
+            "+------+-------+\n",
+            "| 中文ABC:raw | value |\n",
+            "+======+=======+\n\n",
             "正文中文ABC 与 ``code:中文ABC``。\n",
         ),
     )
@@ -353,6 +364,10 @@ fn formatter_is_conservative_and_idempotent_on_structured_markdown() {
     assert!(text.contains("title: 中文ABC:原样"));
     assert!(text.contains("| 中文ABC, | value:raw |"));
     assert!(text.contains("let value = \"中文ABC:raw\";"));
+    assert!(text.contains("中文ABC:raw\n</widget-panel>\n结束后中文ABC:raw"));
+    assert!(text.contains("\\newcommand{\\RawName}{中文ABC:raw}"));
+    assert!(text.contains(": 定义中文ABC:raw"));
+    assert!(text.contains("+------+-------+\n| 中文ABC:raw | value |\n+======+=======+"));
     assert!(text.contains("正文中文 ABC"));
     assert!(text.contains("``code:中文ABC``"));
 
