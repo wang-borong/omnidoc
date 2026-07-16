@@ -497,6 +497,19 @@ OMNIDOC_LIBS=../omnidoc-libs scripts/check-golden-book.sh
 OMNIDOC_LIBS=../omnidoc-libs scripts/check-golden-pdf.sh
 ```
 
+The PDF gate also renders every page at a fixed DPI and checks the committed
+page-aware visual contract (page count, canvas, ink bounds/coverage, and a
+perceptual hash). Nightly and release CI retain the PDF, rendered PGM pages,
+font inventory, extracted text, and JSON comparison report as a diagnostic
+artifact. After an intentional layout change, review the render and refresh
+the contract explicitly with:
+
+```bash
+OMNIDOC_LIBS=../omnidoc-libs \
+OMNIDOC_PDF_VISUAL_MODE=capture \
+scripts/check-golden-pdf.sh
+```
+
 The gate builds HTML and EPUB from a recursive-include fixture, checks MathML,
 display-math layout, repeated heading IDs, packaged CSS/images, lock/report
 digests, and shared-resource cache invalidation. It also runs EPUBCheck when the

@@ -7,7 +7,7 @@ libs="${OMNIDOC_LIBS:-$root/../omnidoc-libs}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-for tool in cargo pandoc pandoc-crossref xelatex pdfinfo pdffonts pdftotext jq rg fc-match python3; do
+for tool in cargo pandoc pandoc-crossref xelatex pdfinfo pdffonts pdftotext pdftoppm jq rg fc-match python3; do
   command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
 done
 test -d "$libs/pandoc" || { echo "invalid OMNIDOC_LIBS: $libs" >&2; exit 1; }
@@ -77,6 +77,20 @@ pdftotext "$pdf" "$work/content.txt"
 rg -q '第一章：递归包含' "$work/content.txt"
 rg -q '第二章：结构化内容' "$work/content.txt"
 rg -q '块级公式应居中' "$work/content.txt"
+
+visual_dir="${OMNIDOC_PDF_VISUAL_DIR:-$work/visual}"
+mkdir -p "$visual_dir"
+if [[ -n "${OMNIDOC_PDF_VISUAL_DIR:-}" ]]; then
+  cp "$pdf" "$visual_dir/golden-book.pdf"
+  cp "$work/fonts.txt" "$visual_dir/fonts.txt"
+  cp "$work/content.txt" "$visual_dir/content.txt"
+fi
+visual_mode="${OMNIDOC_PDF_VISUAL_MODE:-check}"
+python3 "$root/scripts/pdf-visual-contract.py" \
+  "$visual_mode" \
+  "$pdf" \
+  "$fixture/pdf-visual-contract.json" \
+  --output-dir "$visual_dir"
 
 jq -e '
   .reports[0]

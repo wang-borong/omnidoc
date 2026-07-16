@@ -1,0 +1,49 @@
+{
+  "contract_version": 1,
+  "dpi": 96,
+  "ink_threshold": 245,
+  "tolerances": {
+    "dimension_pixels": 2,
+    "bbox_pixels": 24,
+    "ink_ratio": 0.025,
+    "dhash_bits": 18
+  },
+  "pages": [
+    {
+      "width": 816,
+      "height": 1056,
+      "bbox": [
+        0,
+        0,
+        815,
+        1055
+      ],
+      "ink_ratio": 0.996459,
+      "dhash": "011f001800001000"
+    },
+    {
+      "width": 816,
+      "height": 1056,
+      "bbox": [
+        178,
+        143,
+        637,
+        946
+      ],
+      "ink_ratio": 0.046136,
+      "dhash": "00c0c0d054c8c010"
+    },
+    {
+      "width": 816,
+      "height": 1056,
+      "bbox": [
+        178,
+        119,
+        636,
+        946
+      ],
+      "ink_ratio": 0.005355,
+      "dhash": "049050c000000010"
+    }
+  ]
+}
