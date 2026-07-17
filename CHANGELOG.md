@@ -13,7 +13,7 @@
 - Resolved percent-encoded and angle-wrapped Markdown resource paths.
 - Restored use of Pandoc's installed LaTeX template with theme overlays.
 - Added reliable color emoji rendering for LaTeX/PDF output through the
-  release-bound omnidoc-libs 1.1.0 bundle.
+  release-bound omnidoc-libs 1.1.1 bundle.
 
 ## 1.3.3
 
