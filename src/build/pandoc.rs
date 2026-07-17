@@ -174,6 +174,7 @@ impl PandocBuilder {
         options.push(resource_path);
 
         self.push_template(&mut options, output_kind, &omnidoc_lib);
+        self.push_default_latex_headers(&mut options, output_kind, &omnidoc_lib);
         self.push_theme_latex_headers(&mut options, output_kind, &omnidoc_lib);
         self.push_css(&mut options, output_kind, &omnidoc_lib, profile);
         self.push_format_assets(&mut options, output_kind, &omnidoc_lib);
@@ -237,6 +238,26 @@ impl PandocBuilder {
                 );
             }
         }
+    }
+
+    fn push_default_latex_headers(
+        &self,
+        options: &mut Vec<String>,
+        output_kind: PandocOutputKind,
+        omnidoc_lib: &str,
+    ) {
+        if !output_kind.uses_latex_defaults()
+            || !output_kind.filters(&self.config).contains(&"emoji.lua")
+        {
+            return;
+        }
+        options.push("--include-in-header".to_string());
+        options.push(
+            PathBuf::from(omnidoc_lib)
+                .join(pandoc::LIB_PANDOC_HEADER_EMOJI)
+                .to_string_lossy()
+                .to_string(),
+        );
     }
 
     fn push_template(
@@ -768,6 +789,41 @@ mod tests {
 
         assert_eq!(options, vec!["--toc-depth=1", "--toc-depth=3"]);
         assert!(!options.iter().any(|option| option == "--pdf-option"));
+    }
+
+    #[test]
+    fn adds_emoji_header_only_when_the_latex_emoji_filter_is_active() {
+        let builder = PandocBuilder::new(MergedConfig::default()).expect("pandoc builder");
+        let mut pdf_options = Vec::new();
+        builder.push_default_latex_headers(&mut pdf_options, PandocOutputKind::Pdf, "/tmp/omnidoc");
+        assert_eq!(
+            pdf_options,
+            vec![
+                "--include-in-header".to_string(),
+                "/tmp/omnidoc/pandoc/headers/emoji.tex".to_string(),
+            ]
+        );
+
+        let mut html_options = Vec::new();
+        builder.push_default_latex_headers(
+            &mut html_options,
+            PandocOutputKind::Html,
+            "/tmp/omnidoc",
+        );
+        assert!(html_options.is_empty());
+
+        let custom = PandocBuilder::new(MergedConfig {
+            pandoc_lua_filters: vec!["custom.lua".to_string()],
+            ..Default::default()
+        })
+        .expect("custom pandoc builder");
+        let mut custom_options = Vec::new();
+        custom.push_default_latex_headers(
+            &mut custom_options,
+            PandocOutputKind::Pdf,
+            "/tmp/omnidoc",
+        );
+        assert!(custom_options.is_empty());
     }
 
     #[test]

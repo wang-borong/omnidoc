@@ -108,6 +108,7 @@ pub mod pandoc {
     pub const LIB_PANDOC_DATA: &str = "pandoc/data";
     pub const LIB_PANDOC_FILTERS: &str = "pandoc/data/filters";
     pub const LIB_PANDOC_HEADERS: &str = "pandoc/headers";
+    pub const LIB_PANDOC_HEADER_EMOJI: &str = "pandoc/headers/emoji.tex";
     pub const LIB_PANDOC_CSL: &str = "pandoc/csl";
     pub const LIB_PANDOC_CROSSREF_YAML: &str = "pandoc/crossref.yaml"; // PDF fallback
     pub const LIB_PANDOC_CROSSREF_YAML_HTML: &str = "pandoc/data/crossref.yaml"; // HTML fallback

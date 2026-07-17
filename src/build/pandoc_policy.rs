@@ -91,6 +91,7 @@ impl PandocOutputKind {
             "admonition.lua",
             "ltblr.lua",
             "latex-patch.lua",
+            "emoji.lua",
             "fonts-and-alignment.lua",
         ];
         const PORTABLE_FILTERS: &[&str] = &[
@@ -196,6 +197,12 @@ mod tests {
         assert!(PandocOutputKind::Html
             .default_filters()
             .contains(&"display-math.lua"));
+        assert!(PandocOutputKind::Pdf
+            .default_filters()
+            .contains(&"emoji.lua"));
+        assert!(!PandocOutputKind::Html
+            .default_filters()
+            .contains(&"emoji.lua"));
         assert!(!PandocOutputKind::Pdf
             .default_filters()
             .contains(&"display-math.lua"));
