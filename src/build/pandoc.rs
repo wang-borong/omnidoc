@@ -800,7 +800,10 @@ mod tests {
             pdf_options,
             vec![
                 "--include-in-header".to_string(),
-                "/tmp/omnidoc/pandoc/headers/emoji.tex".to_string(),
+                std::path::PathBuf::from("/tmp/omnidoc")
+                    .join("pandoc/headers/emoji.tex")
+                    .to_string_lossy()
+                    .to_string(),
             ]
         );
 
