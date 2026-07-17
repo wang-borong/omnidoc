@@ -223,6 +223,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    compatibility = "readium"
 
    [pandoc]
+   toc = true
    css = "styles/manual.css"
    html_template = "templates/page.html"
    latex_template = "templates/report.tex"

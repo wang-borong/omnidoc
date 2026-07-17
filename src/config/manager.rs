@@ -42,6 +42,7 @@ pub struct MergedConfig {
     pub theme_name: Option<String>,
     pub theme_version: Option<String>,
     pub theme_compatibility: Option<String>,
+    pub pandoc_toc: bool,
     pub pandoc_options: Vec<String>,
     pub pandoc_format_options: BTreeMap<String, Vec<String>>,
     pub pandoc_css: Option<String>,
@@ -254,6 +255,7 @@ impl ConfigManager {
             .and_then(|c| c.pandoc.as_ref())
             .and_then(|p| p.pandoc.as_ref());
 
+        let pandoc_toc = pandoc_config.and_then(|p| p.toc).unwrap_or(false);
         let pandoc_options = pandoc_config
             .and_then(|p| p.options.clone())
             .unwrap_or_default();
@@ -382,6 +384,7 @@ impl ConfigManager {
             theme_name,
             theme_version,
             theme_compatibility,
+            pandoc_toc,
             pandoc_options,
             pandoc_format_options,
             pandoc_css,

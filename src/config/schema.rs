@@ -153,6 +153,8 @@ pub struct PandocConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PandocSection {
+    /// Generate a table of contents (`--toc`).
+    pub toc: Option<bool>,
     /// Pandoc 额外选项列表（会被追加到默认选项之后）
     pub options: Option<Vec<String>>,
     /// Per-output Pandoc options keyed by pdf/html/epub/docx/latex.

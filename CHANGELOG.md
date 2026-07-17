@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Added first-class `[pandoc] toc = true` support so HTML and EPUB tables of
+  contents are generated instead of rendering an empty navigation block.
+- Made `latexmk` rebuild after a cached failed invocation and preserved the
+  useful LaTeX log summary before cleanup.
+- Reduced LaTeX diagnostic noise from package info messages.
+
 ## 1.3.3
 
 - Fixed installed-release smoke archive discovery when GitHub artifact

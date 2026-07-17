@@ -111,7 +111,7 @@ fn is_interesting_line(line: &str) -> bool {
         || line.contains("Emergency stop")
         || line.contains("Fatal error")
         || line.contains("LaTeX Error:")
-        || line.contains("Package ")
+        || (line.contains("Package ") && (line.contains(" Warning") || line.contains(" Error")))
         || line.contains("File ")
         || line.contains("not found")
         || line.contains("Overfull \\hbox")
@@ -121,7 +121,7 @@ fn is_interesting_line(line: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::summarize_command_output;
+    use super::{summarize_command_output, summarize_text};
 
     #[test]
     fn summarizes_latex_errors_with_context() {
@@ -140,5 +140,18 @@ mod tests {
 
         assert!(summary.contains("second"));
         assert!(summary.contains("third"));
+    }
+
+    #[test]
+    fn ignores_package_info_before_a_latex_error() {
+        let content = "Package fontspec Info: loading font.\n\
+Package hyperref Info: bookmarks enabled.\n\
+! LaTeX Error: File `missing.sty' not found.\n\
+l.12 \\usepackage{missing}\n";
+        let summary = summarize_text(content).expect("summary");
+
+        assert!(!summary.contains("Package fontspec Info"));
+        assert!(summary.contains("missing.sty"));
+        assert!(summary.contains("l.12"));
     }
 }

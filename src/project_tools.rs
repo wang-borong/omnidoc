@@ -1406,6 +1406,7 @@ pub fn build_input_state(
             "pandoc_standalone",
             format!("{:?}", config.pandoc_standalone),
         ),
+        ("pandoc_toc", format!("{:?}", config.pandoc_toc)),
         (
             "pandoc_embed_resources",
             format!("{:?}", config.pandoc_embed_resources),

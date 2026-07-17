@@ -152,6 +152,10 @@ impl PandocBuilder {
             options.push(pandoc::FLAG_STANDALONE.to_string());
         }
 
+        if self.config.pandoc_toc {
+            options.push("--toc".to_string());
+        }
+
         if self.config.pandoc_embed_resources && output_kind.supports_embed_resources() {
             options.push(pandoc::FLAG_EMBED_RESOURCES.to_string());
         }
@@ -764,6 +768,28 @@ mod tests {
 
         assert_eq!(options, vec!["--toc-depth=1", "--toc-depth=3"]);
         assert!(!options.iter().any(|option| option == "--pdf-option"));
+    }
+
+    #[test]
+    fn enables_table_of_contents_from_pandoc_config() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let builder = PandocBuilder::new(MergedConfig {
+            lib_path: Some(root.path().to_string_lossy().to_string()),
+            pandoc_toc: true,
+            ..Default::default()
+        })
+        .expect("pandoc builder");
+
+        let options = builder
+            .build_command_options(
+                std::path::Path::new("input.md"),
+                std::path::Path::new("output.html"),
+                PandocOutputKind::Html,
+                &PandocCommandProfile::Project,
+            )
+            .expect("html options");
+
+        assert!(options.iter().any(|option| option == "--toc"));
     }
 
     #[test]

@@ -291,6 +291,13 @@ impl LatexBuilder {
     ) -> Vec<String> {
         let mut options = Vec::new();
 
+        // OmniDoc already decides whether this pipeline needs to run from its
+        // own dependency cache. Once it does, require latexmk to execute at
+        // least one pass. Otherwise latexmk can keep a failed .fdb_latexmk
+        // state and report "Nothing to do" even after the environment or a
+        // missing dependency has been fixed.
+        options.push("-g".to_string());
+
         // Quiet 模式（默认）
         if !verbose {
             options.push("-quiet".to_string());
@@ -640,6 +647,11 @@ impl BuildPipeline for LatexBuilder {
 
         // 如果构建失败，尝试清理
         if let Err(err) = result {
+            // latexmk cleanup may remove or truncate the log, so preserve its
+            // useful diagnostics before cleaning generated files.
+            let log_summary =
+                self.find_latex_log_summary(project_path, &outdir, &entry_file, &target_name);
+
             if verbose && !use_tectonic && latex_backend == "latexmk" {
                 println!("⚠ Build failed, attempting to clean...");
             }
@@ -651,9 +663,7 @@ impl BuildPipeline for LatexBuilder {
             }
 
             let mut message = err.to_string();
-            if let Some(log_summary) =
-                self.find_latex_log_summary(project_path, &outdir, &entry_file, &target_name)
-            {
+            if let Some(log_summary) = log_summary {
                 message.push_str("\n\n");
                 message.push_str(&log_summary);
             }
@@ -737,5 +747,21 @@ impl BuildPipeline for LatexBuilder {
         }
 
         Ok(ProjectType::Unknown)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LatexBuilder;
+    use crate::config::MergedConfig;
+    use std::path::Path;
+
+    #[test]
+    fn latexmk_rebuilds_after_a_cached_failed_invocation() {
+        let builder = LatexBuilder::new(MergedConfig::default()).expect("latex builder");
+        let options = builder.build_latexmk_options(Path::new("main.tex"), "book", false);
+
+        assert!(options.iter().any(|option| option == "-g"));
+        assert!(options.iter().any(|option| option == "-quiet"));
     }
 }
