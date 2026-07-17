@@ -130,7 +130,7 @@ pub(crate) fn build_project_outputs_unlocked(
         project_tools::write_reports(project_path, &merged, &reports)?;
     }
     if run_options.write_lock {
-        write_lock_for_reports(project_path, &cli_overrides, &reports)?;
+        write_project_lock(project_path)?;
     }
 
     Ok(())
@@ -313,21 +313,26 @@ fn validate_output_compatibility(
     validate_epub(artifact, profile).map(Some)
 }
 
-fn write_lock_for_reports(
-    project_path: &Path,
-    cli_overrides: &CliOverrides,
-    reports: &[project_tools::BuildReport],
-) -> Result<()> {
-    let targets = reports
-        .iter()
-        .map(|report| {
+fn write_project_lock(project_path: &Path) -> Result<()> {
+    // omnidoc.lock describes the project's configured output contract, not
+    // merely the subset selected for one build invocation. Replacing a
+    // multi-target lock after `build --output pdf --write-lock` used to drop
+    // the HTML/EPUB entries and made an immediate `lock --check` fail with
+    // missing targets. Keep lock generation aligned with the standalone
+    // `omnidoc lock` command by always writing every configured target after a
+    // successful build.
+    let base_manager = create_config_manager(Some(project_path), CliOverrides::new())?;
+    let outputs = configured_lock_outputs(base_manager.get_merged());
+    let targets = outputs
+        .into_iter()
+        .map(|output| {
             let config_manager = create_config_manager(
                 Some(project_path),
-                cli_overrides.clone().with_to(Some(report.output.clone())),
+                CliOverrides::new().with_to(Some(output.clone())),
             )?;
             let config = config_manager.get_merged().clone();
             let graph = project_tools::dependency_graph(project_path, &config);
-            Ok((report.output.clone(), config, graph))
+            Ok((output, config, graph))
         })
         .collect::<Result<Vec<_>>>()?;
     let inputs = targets
@@ -339,6 +344,14 @@ fn write_lock_for_reports(
         })
         .collect::<Vec<_>>();
     project_tools::write_lock_targets(project_path, &inputs)
+}
+
+fn configured_lock_outputs(config: &MergedConfig) -> Vec<String> {
+    if config.outputs.is_empty() {
+        vec![config.to.clone().unwrap_or_else(|| "pdf".to_string())]
+    } else {
+        config.outputs.clone()
+    }
 }
 
 pub fn build_cli_overrides(
@@ -413,8 +426,10 @@ pub(crate) fn expected_output_file(
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_outputs;
+    use super::{configured_lock_outputs, resolve_outputs, write_project_lock};
     use crate::config::{CliOverrides, MergedConfig};
+    use crate::project_tools::LockFile;
+    use std::fs;
 
     #[test]
     fn plain_build_uses_project_to_even_when_all_outputs_are_configured() {
@@ -471,5 +486,52 @@ mod tests {
 
         assert_eq!(configured, vec!["pdf", "html"]);
         assert_eq!(defaults, vec!["pdf", "html", "docx", "epub"]);
+    }
+
+    #[test]
+    fn write_lock_keeps_the_configured_output_contract() {
+        let configured = MergedConfig {
+            to: Some("html".to_string()),
+            outputs: vec!["html".to_string(), "pdf".to_string(), "epub".to_string()],
+            ..Default::default()
+        };
+        let single = MergedConfig {
+            to: Some("html".to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            configured_lock_outputs(&configured),
+            vec!["html", "pdf", "epub"]
+        );
+        assert_eq!(configured_lock_outputs(&single), vec!["html"]);
+    }
+
+    #[test]
+    fn project_lock_contains_all_configured_targets() {
+        let project = tempfile::tempdir().expect("project");
+        fs::write(project.path().join("main.md"), "# Book\n").expect("entry");
+        fs::write(
+            project.path().join(".omnidoc.toml"),
+            r#"[project]
+entry = "main.md"
+from = "markdown"
+to = "html"
+target = "book"
+
+[build]
+outputs = ["html", "pdf", "epub"]
+"#,
+        )
+        .expect("config");
+
+        write_project_lock(project.path()).expect("write project lock");
+
+        let content = fs::read_to_string(project.path().join("omnidoc.lock")).expect("lock");
+        let lock: LockFile = toml::from_str(&content).expect("parse lock");
+        assert_eq!(
+            lock.targets.keys().cloned().collect::<Vec<_>>(),
+            ["epub", "html", "pdf"]
+        );
     }
 }
