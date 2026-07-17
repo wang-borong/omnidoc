@@ -23,7 +23,7 @@ env:
   CICD_INTERMEDIATES_DIR: _cicd-intermediates
   PANDOC_VERSION: '3.10'
   PANDOC_CROSSREF_VERSION: '0.3.24'
-  OMNIDOC_LIBS_RELEASE_REF: 'v1.0.1'
+  OMNIDOC_LIBS_RELEASE_REF: 'v1.1.0'
 
 jobs:
   all-jobs:

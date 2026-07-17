@@ -2,11 +2,18 @@
 
 ## Unreleased
 
+## 1.4.0
+
 - Added first-class `[pandoc] toc = true` support so HTML and EPUB tables of
   contents are generated instead of rendering an empty navigation block.
 - Made `latexmk` rebuild after a cached failed invocation and preserved the
   useful LaTeX log summary before cleanup.
 - Reduced LaTeX diagnostic noise from package info messages.
+- Preserved all configured output targets when refreshing build locks.
+- Resolved percent-encoded and angle-wrapped Markdown resource paths.
+- Restored use of Pandoc's installed LaTeX template with theme overlays.
+- Added reliable color emoji rendering for LaTeX/PDF output through the
+  release-bound omnidoc-libs 1.1.0 bundle.
 
 ## 1.3.3
 

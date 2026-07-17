@@ -541,7 +541,7 @@ fn publish_no_build_copies_existing_artifacts() {
     let manifest: serde_json::Value = serde_json::from_str(&manifest).expect("publish JSON");
     assert_eq!(manifest["manifest_version"], 2);
     assert_eq!(manifest["tag"], "release/1");
-    assert_eq!(manifest["library_contract"]["library"]["version"], "1.0.1");
+    assert_eq!(manifest["library_contract"]["library"]["version"], "1.1.0");
     let artifacts = manifest["artifacts"].as_array().expect("publish artifacts");
     assert!(artifacts.iter().any(|artifact| {
         artifact["destination"] == "smoke.html"

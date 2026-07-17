@@ -10,11 +10,11 @@ OmniDoc tag while any release-contract URL returns 404.
 
    ```bash
    python3 scripts/verify_manifest.py
-   OMNIDOC_RELEASE_TAG=v1.0.1 scripts/package-release.sh /tmp/omnidoc-libs-release
+   OMNIDOC_RELEASE_TAG=v1.1.0 scripts/package-release.sh /tmp/omnidoc-libs-release
    scripts/smoke-test.sh
    ```
 
-3. Commit, create and push the signed `v1.0.1` tag.
+3. Commit, create and push the `v1.1.0` tag.
 4. Wait for the omnidoc-libs release workflow.
 5. Download the archive and checksum from a clean environment and verify
    `sha256sum --check`.
@@ -38,9 +38,9 @@ packaged release flow:
 
 ```bash
 curl --fail --location --head \
-  https://github.com/wang-borong/omnidoc-libs/releases/download/v1.0.1/omnidoc-libs-v1.0.1.tar.gz
+  https://github.com/wang-borong/omnidoc-libs/releases/download/v1.1.0/omnidoc-libs-v1.1.0.tar.gz
 curl --fail --location --head \
-  https://github.com/wang-borong/omnidoc-libs/releases/download/v1.0.1/omnidoc-libs-v1.0.1.tar.gz.sha256
+  https://github.com/wang-borong/omnidoc-libs/releases/download/v1.1.0/omnidoc-libs-v1.1.0.tar.gz.sha256
 OMNIDOC_BIN=/path/to/extracted/omnidoc scripts/check-release-install.sh
 ```
 
@@ -59,7 +59,7 @@ profile or documented release note rather than an untracked CSS patch.
 ## 4. Publish OmniDoc
 
 1. Confirm `Cargo.toml`, `Cargo.lock`, and `release/omnidoc-libs.toml` agree.
-2. Commit, create and push the signed `v1.3.3` tag.
+2. Commit, create and push the `v1.4.0` tag.
 3. Require quality, Golden Book, Golden PDF, portable document smoke, package,
    and installed-release smoke jobs to pass.
 4. Download every archive and run its packaged-binary smoke test.
