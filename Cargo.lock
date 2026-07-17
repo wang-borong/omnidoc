@@ -1390,6 +1390,7 @@ dependencies = [
  "indoc",
  "inquire",
  "notify",
+ "percent-encoding",
  "regex",
  "reqwest",
  "semver",

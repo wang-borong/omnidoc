@@ -9,6 +9,7 @@ use crate::utils;
 use crate::utils::directories::data_local_dir;
 use blake3::Hasher;
 use fs2::FileExt;
+use percent_encoding::percent_decode_str;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -2280,15 +2281,25 @@ fn check_local_target(
     line: usize,
     issues: &mut Vec<ProjectIssue>,
 ) {
+    let target = target.trim();
+    let target = if let Some(angled) = target.strip_prefix('<') {
+        angled.split('>').next().unwrap_or(angled)
+    } else {
+        target.split_whitespace().next().unwrap_or(target)
+    };
     if !is_local_path(target) {
         return;
     }
-    let target = target.split('#').next().unwrap_or(target);
+    let target = target
+        .split(['#', '?'])
+        .next()
+        .map(|value| percent_decode_str(value).decode_utf8_lossy())
+        .unwrap_or_default();
     if target.is_empty() {
         return;
     }
     let base = source_file.parent().unwrap_or(project_path);
-    if !base.join(target).exists() && !project_path.join(target).exists() {
+    if !base.join(target.as_ref()).exists() && !project_path.join(target.as_ref()).exists() {
         issues.push(warning(
             format!("Referenced local resource not found: {}", target),
             Some(rel.to_string()),
@@ -2789,11 +2800,11 @@ mod tests {
     use super::{
         acquire_project_write_lock, build_input_digest, build_report, cache_hit,
         changed_cache_components, dependency_graph, filter_depfile_metadata_key,
-        filter_depfile_name, hook_argv, manifest_hook_names, pandoc_option_file_references,
-        parse_lint_rule_output, supported_outputs, validate_config, validate_hook_command,
-        write_cache, write_lock, write_lock_targets, HookCommand, LoadedPlugin, LockFile,
-        LockTargetInput, PluginHooks, PluginInfo, PluginManifest, CACHE_DIR, INCLUDE_DEPFILE,
-        LATEX_INPUT_DEPFILE,
+        filter_depfile_name, hook_argv, lint_project, manifest_hook_names,
+        pandoc_option_file_references, parse_lint_rule_output, supported_outputs, validate_config,
+        validate_hook_command, write_cache, write_lock, write_lock_targets, HookCommand,
+        LoadedPlugin, LockFile, LockTargetInput, PluginHooks, PluginInfo, PluginManifest,
+        CACHE_DIR, INCLUDE_DEPFILE, LATEX_INPUT_DEPFILE,
     };
     use crate::config::MergedConfig;
     use std::collections::BTreeMap;
@@ -3147,6 +3158,25 @@ mod tests {
         assert_eq!(
             filter_depfile_metadata_key("filters/Custom Reader.lua").as_deref(),
             Some("omnidoc-depfile-custom-reader")
+        );
+    }
+
+    #[test]
+    fn lint_resolves_percent_encoded_and_angle_wrapped_resource_paths() {
+        let project = tempfile::tempdir().expect("project tempdir");
+        fs::create_dir_all(project.path().join("assets")).expect("assets dir");
+        fs::write(project.path().join("assets/team map.png"), b"png").expect("image");
+        fs::write(
+            project.path().join("main.md"),
+            "![Map](assets/team%20map.png)\n\n[Map](<assets/team%20map.png>)\n\n[Site](<https://example.com/a>)\n",
+        )
+        .expect("entry");
+
+        let issues = lint_project(project.path());
+
+        assert!(
+            issues.is_empty(),
+            "encoded local paths should resolve: {issues:#?}"
         );
     }
 
