@@ -272,7 +272,7 @@ impl PandocBuilder {
             }
             PandocOutputKind::Html => theme.resources.html_template.as_ref(),
             PandocOutputKind::Epub => theme.resources.epub_template.as_ref(),
-            PandocOutputKind::Docx => None,
+            PandocOutputKind::Docx | PandocOutputKind::Pptx => None,
         });
         let theme_template = theme_template.map(|relative| {
             PathBuf::from(omnidoc_lib)
@@ -299,7 +299,7 @@ impl PandocBuilder {
                 .clone()
                 .or_else(|| self.config.pandoc_template.clone())
                 .or(theme_template),
-            PandocOutputKind::Docx => None,
+            PandocOutputKind::Docx | PandocOutputKind::Pptx => None,
         };
 
         if let Some(template) = template {
@@ -361,6 +361,29 @@ impl PandocBuilder {
             if let Some(reference_doc) = &self.config.pandoc_reference_doc {
                 options.push("--reference-doc".to_string());
                 options.push(reference_doc.clone());
+            }
+        }
+
+        if output_kind == PandocOutputKind::Pptx {
+            let configured = self
+                .config
+                .pandoc_pptx_reference_doc
+                .as_ref()
+                .or(self.config.pandoc_reference_doc.as_ref());
+            let reference_doc = configured.cloned().or_else(|| {
+                self.theme
+                    .as_ref()
+                    .and_then(|theme| theme.resources.pptx_reference_doc.as_ref())
+                    .map(|relative| {
+                        PathBuf::from(omnidoc_lib)
+                            .join(relative)
+                            .to_string_lossy()
+                            .to_string()
+                    })
+            });
+            if let Some(reference_doc) = reference_doc {
+                options.push("--reference-doc".to_string());
+                options.push(reference_doc);
             }
         }
 
@@ -852,7 +875,7 @@ mod tests {
     }
 
     #[test]
-    fn uses_format_specific_templates_without_docx_template_flag() {
+    fn uses_format_specific_templates_without_office_template_flags() {
         let html_config = MergedConfig {
             pandoc_html_template: Some("html-template.html".to_string()),
             ..Default::default()
@@ -886,6 +909,10 @@ mod tests {
         let mut docx_options = Vec::new();
         docx_builder.push_template(&mut docx_options, PandocOutputKind::Docx, "/tmp/omnidoc");
         assert!(docx_options.is_empty());
+
+        let mut pptx_options = Vec::new();
+        docx_builder.push_template(&mut pptx_options, PandocOutputKind::Pptx, "/tmp/omnidoc");
+        assert!(pptx_options.is_empty());
     }
 
     #[test]
@@ -953,12 +980,15 @@ mod tests {
         fs::create_dir_all(library.join("pandoc/css")).expect("css dir");
         fs::create_dir_all(library.join("pandoc/headers")).expect("headers dir");
         fs::create_dir_all(library.join("pandoc/data/templates")).expect("templates dir");
+        fs::create_dir_all(library.join("pandoc/data/reference-docs")).expect("reference docs dir");
         let css = library.join("pandoc/css/engineering-book.css");
         let header = library.join("pandoc/headers/engineering-book.tex");
         let template = library.join("pandoc/data/templates/engineering-book.latex");
+        let slides = library.join("pandoc/data/reference-docs/engineering-slides.pptx");
         fs::write(&css, "body { max-width: 56rem; }\n").expect("theme css");
         fs::write(&header, "\\usepackage{omni-engineering-book}\n").expect("theme header");
         fs::write(&template, "$body$\n").expect("theme template");
+        fs::write(&slides, "pptx reference").expect("pptx reference");
         fs::write(
             library.join("themes/engineering-book.toml"),
             r#"manifest_version = 1
@@ -971,6 +1001,7 @@ compatibility = "readium"
 html_css = ["pandoc/css/engineering-book.css"]
 latex_headers = ["pandoc/headers/engineering-book.tex"]
 latex_template = "pandoc/data/templates/engineering-book.latex"
+pptx_reference_doc = "pandoc/data/reference-docs/engineering-slides.pptx"
 
 [metadata.defaults]
 lang = "zh-CN"
@@ -1010,6 +1041,20 @@ documentclass = "scrbook"
             vec![
                 "--include-in-header".to_string(),
                 header.to_string_lossy().to_string()
+            ]
+        );
+
+        let mut pptx_options = Vec::new();
+        builder.push_format_assets(
+            &mut pptx_options,
+            PandocOutputKind::Pptx,
+            library.to_str().expect("library path"),
+        );
+        assert_eq!(
+            pptx_options,
+            vec![
+                "--reference-doc".to_string(),
+                slides.to_string_lossy().to_string()
             ]
         );
         let mut template_options = Vec::new();

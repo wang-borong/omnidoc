@@ -7,6 +7,7 @@ pub mod paths {
     pub const MD_DIR: &str = "md";
     pub const GITIGNORE: &str = ".gitignore";
     pub const LATEXMKRC: &str = ".latexmkrc";
+    pub const PROJECT_CONFIG: &str = ".omnidoc.toml";
 }
 
 pub mod dirs {

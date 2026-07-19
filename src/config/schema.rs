@@ -100,7 +100,7 @@ pub struct ProjectSection {
     pub entry: Option<String>,
     /// 源码类型（markdown, latex）
     pub from: Option<String>,
-    /// 生成文档类型（pdf, html, epub, docx, latex）
+    /// 生成文档类型（pdf, html, epub, docx, pptx, latex）
     pub to: Option<String>,
     /// 生成文档名称（不含扩展名）
     pub target: Option<String>,
@@ -157,7 +157,7 @@ pub struct PandocSection {
     pub toc: Option<bool>,
     /// Pandoc 额外选项列表（会被追加到默认选项之后）
     pub options: Option<Vec<String>>,
-    /// Per-output Pandoc options keyed by pdf/html/epub/docx/latex.
+    /// Per-output Pandoc options keyed by pdf/html/epub/docx/pptx/latex.
     /// These are appended after the common options so a format can override
     /// settings whose depth semantics differ between writers.
     pub format_options: Option<BTreeMap<String, Vec<String>>>,
@@ -165,6 +165,8 @@ pub struct PandocSection {
     pub css: Option<String>,
     /// DOCX reference document path
     pub reference_doc: Option<String>,
+    /// PPTX reference presentation path
+    pub pptx_reference_doc: Option<String>,
     /// EPUB CSS file path
     pub epub_css: Option<String>,
     /// Markdown 格式选项（如 "markdown+east_asian_line_breaks+footnotes"）

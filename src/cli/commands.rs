@@ -48,7 +48,7 @@ pub enum Commands {
         #[arg(value_hint = ValueHint::DirPath)]
         path: Option<String>,
 
-        /// override output format (pdf, html, epub, docx, latex)
+        /// override output format (pdf, html, epub, docx, pptx, latex)
         #[arg(long)]
         to: Option<String>,
 
@@ -99,7 +99,7 @@ pub enum Commands {
         #[arg(value_hint = ValueHint::DirPath)]
         path: Option<String>,
 
-        /// override output format (pdf, html, epub, docx, latex)
+        /// override output format (pdf, html, epub, docx, pptx, latex)
         #[arg(long)]
         to: Option<String>,
 
@@ -154,7 +154,7 @@ pub enum Commands {
         #[arg(value_hint = ValueHint::DirPath)]
         path: Option<String>,
 
-        /// override output format (pdf, html, epub, docx, latex)
+        /// override output format (pdf, html, epub, docx, pptx, latex)
         #[arg(long)]
         to: Option<String>,
 

@@ -135,14 +135,14 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
 3. **Build the repository**
 
-   Build your content. Markdown projects can output `pdf`, `html`, `epub`, `docx`, or `latex`; LaTeX projects output PDF.
+   Build your content. Markdown projects can output `pdf`, `html`, `epub`, `docx`, `pptx`, or `latex`; LaTeX projects output PDF.
 
    ```bash
    omnidoc build [PATH] [--to <FORMAT>] [--output <FORMAT>]... [--all] [OPTIONS]
    ```
 
    - If `PATH` is not specified, the current directory is used
-   - Use `--to html`, `--to epub`, `--to docx`, or `--to latex` for Markdown project builds
+   - Use `--to html`, `--to epub`, `--to docx`, `--to pptx`, or `--to latex` for Markdown project builds
    - Use repeated `--output <FORMAT>` to build a specific set of outputs
    - Use `--all` to build `[build].outputs` or the default set: `pdf`, `html`, `docx`, `epub`
    - Use `--pdf-engine tectonic` to compile PDFs with Tectonic instead of XeLaTeX
@@ -177,6 +177,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    omnidoc build --output pdf --output docx
    omnidoc build --all --report --write-lock
    omnidoc build --to docx
+   omnidoc build --to pptx
    omnidoc build --pdf-engine tectonic
    omnidoc build --latex-backend engine --pdf-engine xelatex
    ```
@@ -229,6 +230,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    latex_template = "templates/report.tex"
    epub_template = "templates/book.html"
    reference_doc = "templates/reference.docx"
+   pptx_reference_doc = "templates/reference.pptx"
    epub_css = "styles/epub.css"
 
    [pandoc.format_options]
@@ -386,7 +388,8 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 11. **Inspect versioned theme bundles**
 
    Theme bundles are declared by `themes/<name>.toml` inside omnidoc-libs and
-   can bind matching HTML CSS, EPUB CSS, LaTeX packages, Lua filters, font
+   can bind matching HTML CSS, EPUB CSS, LaTeX packages, PPTX reference decks,
+   Lua filters, font
    requirements, metadata defaults, and an OmniDoc compatibility range:
 
    ```bash
@@ -411,6 +414,7 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    latex_packages = ["texmf/tex/common/omni-engineering-book.sty"]
    latex_headers = ["pandoc/headers/engineering-book.tex"]
    latex_template = "pandoc/data/templates/pantext.latex"
+   pptx_reference_doc = "pandoc/data/reference-docs/engineering-slides.pptx"
    lua_filters = ["pandoc/data/filters/admonition.lua"]
 
    [requirements]
@@ -442,6 +446,9 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    template (the same template printed by `pandoc -D latex`). Book styling is
    layered through theme headers and `.sty` packages, so routine Pandoc
    upgrades do not require copying and rebasing the full upstream template.
+   `pptx_reference_doc` binds a Pandoc reference presentation to the theme;
+   project-level `pandoc.pptx_reference_doc` (or the legacy shared
+   `pandoc.reference_doc`) takes precedence.
 
 ### Project Quality and CI Commands
 

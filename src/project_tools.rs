@@ -272,7 +272,7 @@ pub struct PluginContext<'a> {
 }
 
 pub fn supported_outputs() -> &'static [&'static str] {
-    &["pdf", "html", "epub", "docx", "latex"]
+    &["pdf", "html", "epub", "docx", "pptx", "latex"]
 }
 
 pub fn default_all_outputs() -> Vec<String> {
@@ -320,7 +320,7 @@ pub fn validate_config(project_path: &Path, config: &MergedConfig) -> Vec<Projec
         if !is_supported_format_key(format) {
             issues.push(error(
                 format!(
-                    "Unsupported pandoc.format_options key '{}'. Supported keys: pdf, html, epub, docx, latex",
+                    "Unsupported pandoc.format_options key '{}'. Supported keys: pdf, html, epub, docx, pptx, latex",
                     format
                 ),
                 Some(".omnidoc.toml".to_string()),
@@ -439,6 +439,16 @@ pub fn validate_config(project_path: &Path, config: &MergedConfig) -> Vec<Projec
         );
     }
 
+    if let Some(reference_doc) = &config.pandoc_pptx_reference_doc {
+        check_configured_path(
+            project_path,
+            reference_doc,
+            "Configured pandoc.pptx_reference_doc not found",
+            true,
+            &mut issues,
+        );
+    }
+
     if let Some(epub_css) = &config.pandoc_epub_css {
         check_configured_css_path(
             project_path,
@@ -515,6 +525,7 @@ pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> Dependenc
         config.metadata_file.as_ref(),
         config.pandoc_css.as_ref(),
         config.pandoc_reference_doc.as_ref(),
+        config.pandoc_pptx_reference_doc.as_ref(),
         config.pandoc_epub_css.as_ref(),
         config.pandoc_template.as_ref(),
         config.pandoc_html_template.as_ref(),
@@ -1031,7 +1042,7 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
                 }),
             None,
         )),
-        PandocOutputKind::Docx => None,
+        PandocOutputKind::Docx | PandocOutputKind::Pptx => None,
     };
     if let Some((logical_name, configured, fallback)) = template {
         let selected = configured.or(fallback);
@@ -1063,6 +1074,29 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
                     project_path,
                     &library_root,
                     "reference-doc".to_string(),
+                    path,
+                );
+            }
+        }
+    }
+
+    if output_kind == PandocOutputKind::Pptx {
+        let configured = config
+            .pandoc_pptx_reference_doc
+            .as_deref()
+            .or(config.pandoc_reference_doc.as_deref());
+        let themed = theme
+            .as_ref()
+            .and_then(|theme| theme.resources.pptx_reference_doc.as_deref());
+        if let Some(reference_doc) = configured.or(themed) {
+            if let Some(path) =
+                resolve_resource_path(project_path, &library_root, reference_doc, None)
+            {
+                add_resolved_resource(
+                    &mut resources,
+                    project_path,
+                    &library_root,
+                    "pptx-reference-doc".to_string(),
                     path,
                 );
             }
@@ -1362,6 +1396,10 @@ pub fn build_input_state(
         (
             "pandoc_reference_doc",
             format!("{:?}", config.pandoc_reference_doc),
+        ),
+        (
+            "pandoc_pptx_reference_doc",
+            format!("{:?}", config.pandoc_pptx_reference_doc),
         ),
         ("pandoc_epub_css", format!("{:?}", config.pandoc_epub_css)),
         (

@@ -7,6 +7,7 @@ pub(crate) enum PandocOutputKind {
     Html,
     Epub,
     Docx,
+    Pptx,
     Latex,
 }
 
@@ -23,9 +24,10 @@ impl PandocOutputKind {
             "html" | "html4" | "html5" => Ok(Self::Html),
             "epub" | "epub2" | "epub3" => Ok(Self::Epub),
             "docx" => Ok(Self::Docx),
+            "pptx" | "powerpoint" => Ok(Self::Pptx),
             "latex" | "tex" => Ok(Self::Latex),
             _ => Err(OmniDocError::UnsupportedDocumentType(format!(
-                "Unsupported build output format '{}'. Supported formats: pdf, html, epub, docx, latex",
+                "Unsupported build output format '{}'. Supported formats: pdf, html, epub, docx, pptx, latex",
                 requested
             ))),
         }
@@ -37,6 +39,7 @@ impl PandocOutputKind {
             Self::Html => "html",
             Self::Epub => "epub",
             Self::Docx => "docx",
+            Self::Pptx => "pptx",
             Self::Latex => "tex",
         }
     }
@@ -47,6 +50,7 @@ impl PandocOutputKind {
             Self::Html => "HTML",
             Self::Epub => "EPUB",
             Self::Docx => "DOCX",
+            Self::Pptx => "PPTX",
             Self::Latex => "LaTeX",
         }
     }
@@ -57,6 +61,7 @@ impl PandocOutputKind {
             Self::Html => Some("html"),
             Self::Epub => Some("epub3"),
             Self::Docx => Some("docx"),
+            Self::Pptx => Some("pptx"),
             Self::Latex => Some("latex"),
         }
     }
@@ -70,7 +75,7 @@ impl PandocOutputKind {
     }
 
     pub(crate) fn supports_standalone(self) -> bool {
-        !matches!(self, Self::Docx)
+        !matches!(self, Self::Docx | Self::Pptx)
     }
 
     pub(crate) fn config_key(self) -> &'static str {
@@ -79,6 +84,7 @@ impl PandocOutputKind {
             Self::Html => "html",
             Self::Epub => "epub",
             Self::Docx => "docx",
+            Self::Pptx => "pptx",
             Self::Latex => "latex",
         }
     }
@@ -148,7 +154,7 @@ impl PandocOutputKind {
 }
 
 pub(crate) fn is_supported_format_key(key: &str) -> bool {
-    matches!(key, "pdf" | "html" | "epub" | "docx" | "latex")
+    matches!(key, "pdf" | "html" | "epub" | "docx" | "pptx" | "latex")
 }
 
 fn is_html_math_option(option: &str) -> bool {
@@ -176,6 +182,10 @@ mod tests {
         assert_eq!(
             PandocOutputKind::from_requested(Some("tex")).expect("latex"),
             PandocOutputKind::Latex
+        );
+        assert_eq!(
+            PandocOutputKind::from_requested(Some("powerpoint")).expect("pptx"),
+            PandocOutputKind::Pptx
         );
     }
 
@@ -215,6 +225,7 @@ mod tests {
             1
         );
         assert!(is_supported_format_key("docx"));
+        assert!(is_supported_format_key("pptx"));
         assert!(!is_supported_format_key("html5"));
     }
 }

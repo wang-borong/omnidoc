@@ -47,6 +47,7 @@ pub struct MergedConfig {
     pub pandoc_format_options: BTreeMap<String, Vec<String>>,
     pub pandoc_css: Option<String>,
     pub pandoc_reference_doc: Option<String>,
+    pub pandoc_pptx_reference_doc: Option<String>,
     pub pandoc_epub_css: Option<String>,
     pub pandoc_from_format: Option<String>,
     pub pandoc_to_format: Option<String>,
@@ -268,6 +269,7 @@ impl ConfigManager {
 
         let pandoc_css = pandoc_config.and_then(|p| p.css.clone());
         let pandoc_reference_doc = pandoc_config.and_then(|p| p.reference_doc.clone());
+        let pandoc_pptx_reference_doc = pandoc_config.and_then(|p| p.pptx_reference_doc.clone());
         let pandoc_epub_css = pandoc_config.and_then(|p| p.epub_css.clone());
 
         let pandoc_from_format = pandoc_config.and_then(|p| p.from_format.clone());
@@ -389,6 +391,7 @@ impl ConfigManager {
             pandoc_format_options,
             pandoc_css,
             pandoc_reference_doc,
+            pandoc_pptx_reference_doc,
             pandoc_epub_css,
             pandoc_from_format,
             pandoc_to_format,

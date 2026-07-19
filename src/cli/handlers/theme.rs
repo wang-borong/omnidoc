@@ -49,6 +49,8 @@ pub(crate) struct ThemeResources {
     pub(crate) epub_template: Option<String>,
     #[serde(default)]
     pub(crate) latex_template: Option<String>,
+    #[serde(default)]
+    pub(crate) pptx_reference_doc: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -323,6 +325,7 @@ fn validate_manifest(
         && manifest.resources.html_template.is_none()
         && manifest.resources.epub_template.is_none()
         && manifest.resources.latex_template.is_none()
+        && manifest.resources.pptx_reference_doc.is_none()
     {
         report
             .errors
@@ -382,6 +385,10 @@ fn validate_manifest(
         (
             "latex_template",
             manifest.resources.latex_template.as_deref(),
+        ),
+        (
+            "pptx_reference_doc",
+            manifest.resources.pptx_reference_doc.as_deref(),
         ),
     ] {
         let Some(relative) = resource else {
@@ -637,6 +644,14 @@ fn print_reports(reports: &[ThemeReport], json: bool, detailed: bool) -> Result<
                     theme
                         .resources
                         .latex_template
+                        .as_deref()
+                        .unwrap_or("default")
+                );
+                println!(
+                    "  PPTX reference: {}",
+                    theme
+                        .resources
+                        .pptx_reference_doc
                         .as_deref()
                         .unwrap_or("default")
                 );
