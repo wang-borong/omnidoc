@@ -361,19 +361,19 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    ```bash
    omnidoc lib --install       # Install to the configured library path
    omnidoc lib --update        # Pull main, then verify the installed payload
-   omnidoc lib --install --revision v1.1.1
+   omnidoc lib --install --revision v1.2.0
    omnidoc lib --update --revision 428c8e6
    omnidoc lib --install --release # Download the archive bound to this OmniDoc release
    omnidoc lib --update --release  # Verify checksum and replace transactionally
    omnidoc libs --status       # Show version, revision and compatibility
-   omnidoc libs --status --revision v1.1.1
+   omnidoc libs --status --revision v1.2.0
    omnidoc libs --verify       # Verify required files and every SHA-256 entry
    omnidoc libs --verify --json
    ```
 
    Install and update fail if the downloaded manifest, compatibility contract,
    required resources, payload checksums, or requested revision do not verify.
-   Set `revision = "v1.1.1"` under `[lib]` in the global configuration to pin
+   Set `revision = "v1.2.0"` under `[lib]` in the global configuration to pin
    all subsequent install, update, status, and verify operations. Updates also
    refuse to overwrite a dirty library checkout. Install and update are
    transactional: OmniDoc clones into a sibling staging directory, validates
@@ -729,6 +729,33 @@ ranges, and plugins incompatible with the running OmniDoc version fail
       ```
 
       CLI flags always override the values stored in the JSON document.
+
+      The same JSON can be written directly in Markdown. OmniDoc's default
+      diagram filter renders fenced `bitfield` blocks as SVG for HTML, EPUB,
+      DOCX, and PPTX outputs, and as PDF for PDF/LaTeX outputs:
+
+      ````markdown
+      ```{.bitfield #fig-control-word caption="SASS control word" width="100%"}
+      {
+        "bits": 21,
+        "hspace": 840,
+        "vspace": 92,
+        "fontsize": 16,
+        "entries": [
+          { "name": "stall", "bits": 4, "attr": "(4)" },
+          { "name": "Y", "bits": 1 },
+          { "name": "write", "bits": 3, "attr": "barr" },
+          { "name": "read", "bits": 3, "attr": "barr" },
+          { "name": "wait mask", "bits": 6, "attr": "(6)" },
+          { "name": "reuse", "bits": 4, "attr": "(4)" }
+        ]
+      }
+      ```
+      ````
+
+      Entries are listed from least-significant to most-significant field. The
+      code block accepts the same document-level renderer options as JSON files,
+      plus Pandoc figure attributes such as `caption`, `width`, and an identifier.
 
     - **Generate diagrams from Draw.io files**
 

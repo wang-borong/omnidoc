@@ -102,6 +102,14 @@ impl PandocBuilder {
             .unwrap_or_else(|| pandoc::DEFAULT_PYTHON.to_string());
         options.push(format!("pythonPath:{}", python_path));
 
+        // Diagram filters may need to invoke OmniDoc's native renderers (for
+        // example fenced `bitfield` blocks). Pass the exact running binary so
+        // builds do not accidentally resolve an older installation from PATH.
+        if let Ok(omnidoc_path) = std::env::current_exe() {
+            options.push(pandoc::FLAG_METADATA.to_string());
+            options.push(format!("omnidocPath:{}", omnidoc_path.display()));
+        }
+
         options.push(pandoc::FLAG_FILTER.to_string());
         let crossref = self
             .executor
@@ -872,6 +880,9 @@ mod tests {
             .expect("html options");
 
         assert!(options.iter().any(|option| option == "--toc"));
+        assert!(options
+            .iter()
+            .any(|option| option.starts_with("omnidocPath:")));
     }
 
     #[test]

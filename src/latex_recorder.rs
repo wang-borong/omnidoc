@@ -50,6 +50,10 @@ pub fn prepare_wrapper(
 }
 
 pub fn run_wrapper_from_env() -> Option<i32> {
+    let invoked_as = std::env::args_os().next()?;
+    if !is_recorder_invocation(&invoked_as) {
+        return None;
+    }
     let real_engine = std::env::var_os(REAL_ENGINE_ENV)?;
     let depfile = std::env::var_os(DEPFILE_ENV)?;
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
@@ -75,6 +79,12 @@ pub fn run_wrapper_from_env() -> Option<i32> {
         }
     }
     Some(status.code().unwrap_or(1))
+}
+
+fn is_recorder_invocation(program: &OsStr) -> bool {
+    Path::new(program)
+        .file_name()
+        .is_some_and(supports_recorder_engine)
 }
 
 pub fn write_depfile_from_fls(
@@ -225,9 +235,20 @@ fn install_wrapper_executable(executable: &Path, wrapper: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{locate_fls, write_depfile_from_fls};
+    use super::{is_recorder_invocation, locate_fls, write_depfile_from_fls};
     use std::ffi::OsString;
     use std::fs;
+
+    #[test]
+    fn recorder_mode_requires_a_latex_engine_invocation_name() {
+        assert!(is_recorder_invocation(std::ffi::OsStr::new(
+            "/tmp/wrappers/xelatex"
+        )));
+        assert!(is_recorder_invocation(std::ffi::OsStr::new("lualatex")));
+        assert!(!is_recorder_invocation(std::ffi::OsStr::new(
+            "/usr/local/bin/omnidoc"
+        )));
+    }
 
     #[test]
     fn locates_pandoc_style_recorder_output() {

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.5.0
+
+- Added first-class PPTX presentation builds with release-bound engineering
+  reference slides.
+- Added fenced `bitfield` diagram blocks that render as SVG for HTML, EPUB,
+  DOCX, and PPTX, and as PDF for PDF/LaTeX output.
+- Passed the running OmniDoc executable to Pandoc filters so native diagram
+  renderers use the exact installed version.
+- Fixed project discovery for `.omnidoc.toml` projects and prevented LaTeX
+  recorder environment variables from misrouting nested OmniDoc invocations.
+
 ## 1.4.0
 
 - Added first-class `[pandoc] toc = true` support so HTML and EPUB tables of
