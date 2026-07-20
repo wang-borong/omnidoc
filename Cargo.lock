@@ -1375,7 +1375,7 @@ dependencies = [
 
 [[package]]
 name = "omnidoc"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "atomic-write-file",
  "blake3",

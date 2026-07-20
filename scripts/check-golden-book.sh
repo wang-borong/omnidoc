@@ -85,7 +85,7 @@ lock = tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 if lock.get("lock_version") != 4:
     raise SystemExit("expected lock schema v4")
 library = lock.get("library", {})
-if library.get("version") != "1.2.0":
+if library.get("version") != "1.2.1":
     raise SystemExit(f"unexpected omnidoc-libs version: {library.get('version')}")
 if not library.get("manifest_digest", "").startswith("blake3:"):
     raise SystemExit("missing omnidoc-libs manifest digest")

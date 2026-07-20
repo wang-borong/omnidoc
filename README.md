@@ -361,19 +361,19 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    ```bash
    omnidoc lib --install       # Install to the configured library path
    omnidoc lib --update        # Pull main, then verify the installed payload
-   omnidoc lib --install --revision v1.2.0
+   omnidoc lib --install --revision v1.2.1
    omnidoc lib --update --revision 428c8e6
    omnidoc lib --install --release # Download the archive bound to this OmniDoc release
    omnidoc lib --update --release  # Verify checksum and replace transactionally
    omnidoc libs --status       # Show version, revision and compatibility
-   omnidoc libs --status --revision v1.2.0
+   omnidoc libs --status --revision v1.2.1
    omnidoc libs --verify       # Verify required files and every SHA-256 entry
    omnidoc libs --verify --json
    ```
 
    Install and update fail if the downloaded manifest, compatibility contract,
    required resources, payload checksums, or requested revision do not verify.
-   Set `revision = "v1.2.0"` under `[lib]` in the global configuration to pin
+   Set `revision = "v1.2.1"` under `[lib]` in the global configuration to pin
    all subsequent install, update, status, and verify operations. Updates also
    refuse to overwrite a dirty library checkout. Install and update are
    transactional: OmniDoc clones into a sibling staging directory, validates

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.5.1
+
+- Bound release builds to omnidoc-libs 1.2.1, including refreshed fenced
+  diagram outputs when a stable figure identifier is reused.
+- Derived the release library revision from `release/omnidoc-libs.toml` in CI
+  instead of maintaining a second hard-coded version.
+
 ## 1.5.0
 
 - Added first-class PPTX presentation builds with release-bound engineering

@@ -23,7 +23,6 @@ env:
   CICD_INTERMEDIATES_DIR: _cicd-intermediates
   PANDOC_VERSION: '3.10'
   PANDOC_CROSSREF_VERSION: '0.3.24'
-  OMNIDOC_LIBS_RELEASE_REF: 'v1.1.1'
 
 jobs:
   all-jobs:
@@ -51,6 +50,7 @@ jobs:
       maintainer: ${{ steps.metadata.outputs.maintainer }}
       homepage: ${{ steps.metadata.outputs.homepage }}
       msrv: ${{ steps.metadata.outputs.msrv }}
+      library_revision: ${{ steps.metadata.outputs.library_revision }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -64,6 +64,7 @@ jobs:
           jq -r '"maintainer=" + .packages[0].authors[0]' <<< "$metadata" >> "$GITHUB_OUTPUT"
           jq -r '"homepage=" + .packages[0].homepage' <<< "$metadata" >> "$GITHUB_OUTPUT"
           jq -r '"msrv=" + .packages[0].rust_version' <<< "$metadata" >> "$GITHUB_OUTPUT"
+          python3 -c 'import tomllib; print("library_revision=" + tomllib.load(open("release/omnidoc-libs.toml", "rb"))["library"]["revision"])' >> "$GITHUB_OUTPUT"
 
   quality:
     name: Quality gates
@@ -105,13 +106,14 @@ jobs:
   golden-book:
     name: Golden Book (HTML and EPUB)
     runs-on: ubuntu-latest
+    needs: crate-metadata
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: wang-borong/omnidoc-libs
           path: omnidoc-libs
-          ref: ${{ startsWith(github.ref, 'refs/tags/v') && env.OMNIDOC_LIBS_RELEASE_REF || 'main' }}
+          ref: ${{ startsWith(github.ref, 'refs/tags/v') && needs.crate-metadata.outputs.library_revision || 'main' }}
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1
@@ -142,13 +144,14 @@ jobs:
     name: Golden Book (PDF)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    needs: crate-metadata
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: wang-borong/omnidoc-libs
           path: omnidoc-libs
-          ref: ${{ startsWith(github.ref, 'refs/tags/v') && env.OMNIDOC_LIBS_RELEASE_REF || 'main' }}
+          ref: ${{ startsWith(github.ref, 'refs/tags/v') && needs.crate-metadata.outputs.library_revision || 'main' }}
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1
@@ -189,6 +192,7 @@ jobs:
   portable-document-smoke:
     name: Document smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    needs: crate-metadata
     strategy:
       fail-fast: false
       matrix:
@@ -199,7 +203,7 @@ jobs:
         with:
           repository: wang-borong/omnidoc-libs
           path: omnidoc-libs
-          ref: ${{ startsWith(github.ref, 'refs/tags/v') && env.OMNIDOC_LIBS_RELEASE_REF || 'main' }}
+          ref: ${{ startsWith(github.ref, 'refs/tags/v') && needs.crate-metadata.outputs.library_revision || 'main' }}
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1
