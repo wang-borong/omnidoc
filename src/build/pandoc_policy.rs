@@ -96,7 +96,6 @@ impl PandocOutputKind {
             "diagram-generator.lua",
             "latex-headers.lua",
             "admonition.lua",
-            "ltblr.lua",
             "latex-patch.lua",
             "emoji.lua",
             "fonts-and-alignment.lua",
@@ -217,14 +216,6 @@ mod tests {
         assert!(!PandocOutputKind::Pdf
             .default_filters()
             .contains(&"display-math.lua"));
-        assert_eq!(
-            PandocOutputKind::Pdf
-                .default_filters()
-                .iter()
-                .filter(|filter| **filter == "ltblr.lua")
-                .count(),
-            1
-        );
         assert!(is_supported_format_key("docx"));
         assert!(is_supported_format_key("pptx"));
         assert!(!is_supported_format_key("html5"));

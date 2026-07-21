@@ -1116,43 +1116,62 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
         }
     }
 
-    let theme_css = theme.as_ref().and_then(|theme| match output_kind {
-        PandocOutputKind::Html => theme.resources.html_css.first(),
-        PandocOutputKind::Epub => theme.resources.epub_css.first(),
-        _ => None,
-    });
-    let css = match output_kind {
-        PandocOutputKind::Html => Some((
+    let (configured_css, theme_css, fallback_css, logical_prefix) = match output_kind {
+        PandocOutputKind::Html => (
+            config.pandoc_css.as_deref(),
+            theme
+                .as_ref()
+                .map(|theme| theme.resources.html_css.as_slice()),
+            Some(pandoc::LIB_PANDOC_CSS_DEFAULT),
             "html-css",
-            config
-                .pandoc_css
-                .as_deref()
-                .or(theme_css.map(String::as_str)),
-            pandoc::LIB_PANDOC_CSS_DEFAULT,
-        )),
-        PandocOutputKind::Epub => Some((
-            "epub-css",
+        ),
+        PandocOutputKind::Epub => (
             config
                 .pandoc_epub_css
                 .as_deref()
-                .or(config.pandoc_css.as_deref())
-                .or(theme_css.map(String::as_str)),
-            "pandoc/data/epub.css",
-        )),
-        _ => None,
+                .or(config.pandoc_css.as_deref()),
+            theme
+                .as_ref()
+                .map(|theme| theme.resources.epub_css.as_slice()),
+            Some("pandoc/data/epub.css"),
+            "epub-css",
+        ),
+        _ => (None, None, None, "css"),
     };
-    if let Some((logical_name, configured, fallback)) = css {
-        let path = configured
-            .and_then(|value| {
-                resolve_resource_path(project_path, &library_root, value, Some("pandoc/css"))
-            })
-            .or_else(|| existing_path(library_root.join(fallback)));
-        if let Some(path) = path {
+    if let Some(configured_css) = configured_css {
+        if let Some(path) = resolve_resource_path(
+            project_path,
+            &library_root,
+            configured_css,
+            Some("pandoc/css"),
+        ) {
             add_resolved_resource(
                 &mut resources,
                 project_path,
                 &library_root,
-                logical_name.to_string(),
+                logical_prefix.to_string(),
+                path,
+            );
+        }
+    } else if let Some(theme_css) = theme_css.filter(|resources| !resources.is_empty()) {
+        for (index, relative) in theme_css.iter().enumerate() {
+            if let Some(path) = existing_path(library_root.join(relative)) {
+                add_resolved_resource(
+                    &mut resources,
+                    project_path,
+                    &library_root,
+                    format!("{logical_prefix}-{}", index + 1),
+                    path,
+                );
+            }
+        }
+    } else if let Some(fallback_css) = fallback_css {
+        if let Some(path) = existing_path(library_root.join(fallback_css)) {
+            add_resolved_resource(
+                &mut resources,
+                project_path,
+                &library_root,
+                logical_prefix.to_string(),
                 path,
             );
         }
@@ -3481,7 +3500,6 @@ user@example.com
         fs::create_dir_all(&filter_dir).expect("filter dir");
         fs::write(filter_dir.join("include-files.lua"), "return {}\n").expect("html filter");
         fs::write(filter_dir.join("display-math.lua"), "return {}\n").expect("display math filter");
-        fs::write(filter_dir.join("ltblr.lua"), "return {}\n").expect("latex filter");
         let texmf = library.path().join("texmf/tex/latex");
         fs::create_dir_all(&texmf).expect("texmf dir");
         fs::write(texmf.join("theme.sty"), "% theme\n").expect("style");
@@ -3531,10 +3549,6 @@ user@example.com
             .resources
             .iter()
             .any(|resource| resource.logical_name == "omnidoc-libs-release"));
-        assert!(!graph
-            .resources
-            .iter()
-            .any(|resource| resource.logical_name == "lua-filter:ltblr.lua"));
         assert!(!graph
             .resources
             .iter()

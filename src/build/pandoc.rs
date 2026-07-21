@@ -345,21 +345,24 @@ impl PandocBuilder {
             PandocCommandProfile::StandaloneHtml { css: Some(css) } => {
                 Some(css.to_string_lossy().to_string())
             }
-            _ => self
-                .config
-                .pandoc_css
-                .clone()
-                .or_else(|| self.theme_css(output_kind)),
+            _ => self.config.pandoc_css.clone(),
         };
-        let css_path = resolve_css_path(
-            configured.as_deref(),
-            omnidoc_lib,
-            pandoc::LIB_PANDOC_CSS_DEFAULT,
-        );
-
-        if css_path.exists() {
-            options.push(pandoc::FLAG_CSS.to_string());
-            options.push(css_path.to_string_lossy().to_string());
+        if let Some(configured) = configured {
+            let css_path = resolve_css_path(
+                Some(&configured),
+                omnidoc_lib,
+                pandoc::LIB_PANDOC_CSS_DEFAULT,
+            );
+            push_existing_css(options, css_path);
+        } else if let Some(theme) = &self.theme {
+            for relative in &theme.resources.html_css {
+                push_existing_css(options, join_portable_relative(omnidoc_lib, relative));
+            }
+        } else {
+            push_existing_css(
+                options,
+                join_portable_relative(omnidoc_lib, pandoc::LIB_PANDOC_CSS_DEFAULT),
+            );
         }
     }
 
@@ -405,16 +408,21 @@ impl PandocBuilder {
                 .pandoc_epub_css
                 .as_deref()
                 .or(self.config.pandoc_css.as_deref())
-                .map(str::to_string)
-                .or_else(|| self.theme_css(output_kind));
-            let css_path = resolve_css_path(
-                configured_css.as_deref(),
-                omnidoc_lib,
-                "pandoc/data/epub.css",
-            );
-            if css_path.exists() {
-                options.push("--css".to_string());
-                options.push(css_path.to_string_lossy().to_string());
+                .map(str::to_string);
+            if let Some(configured_css) = configured_css {
+                push_existing_css(
+                    options,
+                    resolve_css_path(Some(&configured_css), omnidoc_lib, "pandoc/data/epub.css"),
+                );
+            } else if let Some(theme) = &self.theme {
+                for relative in &theme.resources.epub_css {
+                    push_existing_css(options, join_portable_relative(omnidoc_lib, relative));
+                }
+            } else {
+                push_existing_css(
+                    options,
+                    join_portable_relative(omnidoc_lib, "pandoc/data/epub.css"),
+                );
             }
         }
     }
@@ -534,15 +542,6 @@ impl PandocBuilder {
         })
     }
 
-    fn theme_css(&self, output_kind: PandocOutputKind) -> Option<String> {
-        let theme = self.theme.as_ref()?;
-        match output_kind {
-            PandocOutputKind::Html => theme.resources.html_css.first().cloned(),
-            PandocOutputKind::Epub => theme.resources.epub_css.first().cloned(),
-            _ => None,
-        }
-    }
-
     fn effective_lang(&self) -> Option<&str> {
         self.config.pandoc_lang.as_deref().or_else(|| {
             self.theme
@@ -614,6 +613,13 @@ fn resolve_css_path(configured: Option<&str>, omnidoc_lib: &str, fallback: &str)
         return bundle_path;
     }
     project_path
+}
+
+fn push_existing_css(options: &mut Vec<String>, css_path: PathBuf) {
+    if css_path.exists() {
+        options.push(pandoc::FLAG_CSS.to_string());
+        options.push(css_path.to_string_lossy().to_string());
+    }
 }
 
 fn join_portable_relative(root: &str, relative: &str) -> PathBuf {
@@ -994,10 +1000,12 @@ mod tests {
         fs::create_dir_all(library.join("pandoc/data/templates")).expect("templates dir");
         fs::create_dir_all(library.join("pandoc/data/reference-docs")).expect("reference docs dir");
         let css = library.join("pandoc/css/engineering-book.css");
+        let blocks_css = library.join("pandoc/css/semantic-blocks.css");
         let header = library.join("pandoc/headers/engineering-book.tex");
         let template = library.join("pandoc/data/templates/engineering-book.latex");
         let slides = library.join("pandoc/data/reference-docs/engineering-slides.pptx");
         fs::write(&css, "body { max-width: 56rem; }\n").expect("theme css");
+        fs::write(&blocks_css, ".admonition { break-inside: avoid; }\n").expect("theme blocks css");
         fs::write(&header, "\\usepackage{omni-engineering-book}\n").expect("theme header");
         fs::write(&template, "$body$\n").expect("theme template");
         fs::write(&slides, "pptx reference").expect("pptx reference");
@@ -1010,7 +1018,7 @@ compatible_omnidoc = ">=1.3.0,<2.0.0"
 compatibility = "readium"
 
 [resources]
-html_css = ["pandoc/css/engineering-book.css"]
+html_css = ["pandoc/css/engineering-book.css", "pandoc/css/semantic-blocks.css"]
 latex_headers = ["pandoc/headers/engineering-book.tex"]
 latex_template = "pandoc/data/templates/engineering-book.latex"
 pptx_reference_doc = "pandoc/data/reference-docs/engineering-slides.pptx"
@@ -1039,7 +1047,12 @@ documentclass = "scrbook"
         );
         assert_eq!(
             html_options,
-            vec!["--css".to_string(), css.to_string_lossy().to_string()]
+            vec![
+                "--css".to_string(),
+                css.to_string_lossy().to_string(),
+                "--css".to_string(),
+                blocks_css.to_string_lossy().to_string(),
+            ]
         );
 
         let mut latex_options = Vec::new();

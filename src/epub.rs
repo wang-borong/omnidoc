@@ -163,32 +163,22 @@ fn validate_readium(path: &Path) -> Result<EpubCompatibilityReport> {
         "MathML uses the EPUB-compatible MathML namespace",
     );
 
-    let annotation =
-        Regex::new(r#"(?s)<annotation\b[^>]*>(.*?)</annotation>"#).expect("annotation regex");
-    let mut leaked_annotations = Vec::new();
-    for text in &xhtml {
-        let visible = annotation.replace_all(text, "");
-        for capture in annotation.captures_iter(text) {
-            let source = capture
-                .get(1)
-                .map(|value| value.as_str().trim())
-                .unwrap_or("");
-            if source.len() >= 4 && visible.contains(source) {
-                leaked_annotations.push(source.chars().take(80).collect::<String>());
-            }
-        }
-    }
+    let has_annotations = xhtml.iter().any(|text| text.contains("<annotation"));
+    let hides_annotations =
+        Regex::new(r#"(?is)annotation(?:-xml)?[^\{]*\{[^\}]*display\s*:\s*none(?:\s*!important)?"#)
+            .expect("annotation visibility CSS regex");
+    let annotation_css_present = content
+        .iter()
+        .filter(|(name, _)| name.ends_with(".css"))
+        .any(|(_, css)| hides_annotations.is_match(css));
     push_check(
         &mut checks,
         "mathml-annotation-visibility",
-        leaked_annotations.is_empty(),
-        if leaked_annotations.is_empty() {
-            "MathML source annotations are not duplicated as visible text".to_string()
+        !has_annotations || annotation_css_present,
+        if !has_annotations || annotation_css_present {
+            "MathML source annotations are hidden by packaged reader CSS".to_string()
         } else {
-            format!(
-                "visible MathML annotations: {}",
-                leaked_annotations.join(", ")
-            )
+            "MathML annotations are present but no packaged CSS rule hides them".to_string()
         },
     );
 
@@ -362,11 +352,11 @@ mod tests {
             ("EPUB/nav.xhtml", "<html><body><nav/></body></html>"),
             (
                 "EPUB/styles/book.css",
-                ".omni-display-math { text-align: center; }",
+                ".omni-display-math { text-align: center; } math annotation, math annotation-xml { display: none !important; }",
             ),
             (
                 "EPUB/text/chapter.xhtml",
-                r#"<html><head><link href="../styles/book.css"/></head><body><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>x</mi><annotation encoding="application/x-tex">x^2</annotation></semantics></math></body></html>"#,
+                r#"<html><head><link href="../styles/book.css"/></head><body><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>T</mi><mo>=</mo><mn>8.9405</mn></mrow><annotation encoding="application/x-tex">T=8.9405</annotation></semantics></math></body></html>"#,
             ),
         ] {
             writer

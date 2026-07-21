@@ -832,8 +832,10 @@ ranges, and plugins incompatible with the running OmniDoc version fail
     omnidoc figure drawio/ --format pdf --output figure/
     ```
 
-    Markdown projects also support native `circuit` and `spiceplot` fenced
-    blocks. Keep their source in separate versioned files with `include-code`:
+    Markdown projects also support semantic containers, source inclusion, and
+    native diagram fenced blocks. The complete public syntax is documented in
+    the installed `BLOCKS.md`. Keep substantial circuit and SPICE sources in
+    separate versioned files with `include-code`:
 
     ````markdown
     ```{.circuit #fig-amplifier include-code="schematics/amplifier.py"
