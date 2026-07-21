@@ -478,33 +478,189 @@ pub fn lint_project(project_path: &Path) -> Vec<ProjectIssue> {
     let link_re =
         regex::Regex::new(r"(?P<bang>!?)\[[^\]]+\]\((?P<target>[^)]+)\)").expect("link regex");
     let include_re = regex::Regex::new(r#"include(?:-code)?="([^"]+)""#).expect("include regex");
+    let latex_resource_re = regex::Regex::new(
+        r#"\\(?P<command>includegraphics|input|include|bibliography|addbibresource)(?:\s*\[[^]]*\])?\s*\{(?P<target>[^}]+)\}"#,
+    )
+    .expect("LaTeX resource regex");
 
     for file in source_files(project_path) {
         let Ok(content) = fs::read_to_string(&file) else {
             continue;
         };
         let rel = display_relative(project_path, &file);
+        let extension = file
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let is_markdown = matches!(extension.as_str(), "md" | "markdown");
+        let is_latex = matches!(extension.as_str(), "tex" | "sty" | "cls");
+        let mut markdown_fence: Option<char> = None;
+        let mut latex_verbatim: Option<String> = None;
+
         for (line_index, line) in content.lines().enumerate() {
             let line_no = line_index + 1;
-            for capture in image_re.captures_iter(line) {
-                check_local_target(project_path, &file, &capture[1], &rel, line_no, &mut issues);
-            }
-            for capture in link_re.captures_iter(line) {
-                if capture.name("bang").map(|m| m.as_str()) == Some("!") {
+
+            if is_markdown {
+                let trimmed = line.trim_start();
+                if let Some(marker) = markdown_fence {
+                    if trimmed.starts_with(&marker.to_string().repeat(3)) {
+                        markdown_fence = None;
+                    }
                     continue;
                 }
-                let target = capture.name("target").map(|m| m.as_str()).unwrap_or("");
-                if is_local_path(target) {
-                    check_local_target(project_path, &file, target, &rel, line_no, &mut issues);
+                if trimmed.starts_with("```") {
+                    markdown_fence = Some('`');
+                    continue;
                 }
+                if trimmed.starts_with("~~~") {
+                    markdown_fence = Some('~');
+                    continue;
+                }
+                if line.starts_with("    ") || line.starts_with('\t') {
+                    continue;
+                }
+
+                for capture in image_re.captures_iter(line) {
+                    check_local_target(
+                        project_path,
+                        &file,
+                        &capture[1],
+                        &rel,
+                        line_no,
+                        &mut issues,
+                    );
+                }
+                for capture in link_re.captures_iter(line) {
+                    if capture.name("bang").map(|m| m.as_str()) == Some("!") {
+                        continue;
+                    }
+                    let target = capture.name("target").map(|m| m.as_str()).unwrap_or("");
+                    if is_local_path(target) {
+                        check_local_target(project_path, &file, target, &rel, line_no, &mut issues);
+                    }
+                }
+                for capture in include_re.captures_iter(line) {
+                    check_local_target(
+                        project_path,
+                        &file,
+                        &capture[1],
+                        &rel,
+                        line_no,
+                        &mut issues,
+                    );
+                }
+                continue;
             }
-            for capture in include_re.captures_iter(line) {
-                check_local_target(project_path, &file, &capture[1], &rel, line_no, &mut issues);
+
+            if is_latex {
+                if let Some(environment) = latex_verbatim.as_deref() {
+                    if line.contains(&format!(r"\end{{{environment}}}")) {
+                        latex_verbatim = None;
+                    }
+                    continue;
+                }
+                for environment in ["verbatim", "Verbatim", "lstlisting", "minted"] {
+                    if line.contains(&format!(r"\begin{{{environment}}}")) {
+                        latex_verbatim = Some(environment.to_string());
+                        break;
+                    }
+                }
+                if latex_verbatim.is_some() {
+                    continue;
+                }
+
+                let source = strip_latex_comment(line);
+                for capture in latex_resource_re.captures_iter(source) {
+                    let command = capture
+                        .name("command")
+                        .map(|value| value.as_str())
+                        .unwrap_or("");
+                    let target = capture
+                        .name("target")
+                        .map(|value| value.as_str())
+                        .unwrap_or("");
+                    for target in target
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                    {
+                        check_latex_target(
+                            project_path,
+                            &file,
+                            target,
+                            command,
+                            &rel,
+                            line_no,
+                            &mut issues,
+                        );
+                    }
+                }
             }
         }
     }
 
     issues
+}
+
+fn strip_latex_comment(line: &str) -> &str {
+    let mut escaped = false;
+    for (index, character) in line.char_indices() {
+        if character == '%' && !escaped {
+            return &line[..index];
+        }
+        if character == '\\' {
+            escaped = !escaped;
+        } else {
+            escaped = false;
+        }
+    }
+    line
+}
+
+fn check_latex_target(
+    project_path: &Path,
+    source_file: &Path,
+    target: &str,
+    command: &str,
+    rel: &str,
+    line: usize,
+    issues: &mut Vec<ProjectIssue>,
+) {
+    if target.contains(['\\', '#']) || !is_local_path(target) {
+        return;
+    }
+
+    let base = source_file.parent().unwrap_or(project_path);
+    let path = Path::new(target);
+    let mut candidates = vec![path.to_path_buf()];
+    if path.extension().is_none() {
+        let extensions: &[&str] = match command {
+            "includegraphics" => &["pdf", "png", "jpg", "jpeg", "svg", "eps"],
+            "bibliography" | "addbibresource" => &["bib"],
+            "input" | "include" => &["tex"],
+            _ => &[],
+        };
+        candidates.extend(
+            extensions
+                .iter()
+                .map(|extension| path.with_extension(extension)),
+        );
+    }
+
+    if candidates.iter().any(|candidate| {
+        base.join(candidate).exists()
+            || project_path.join(candidate).exists()
+            || project_path.join("tex").join(candidate).exists()
+    }) {
+        return;
+    }
+
+    issues.push(warning(
+        format!("Referenced local resource not found: {target}"),
+        Some(rel.to_string()),
+        Some(line),
+    ));
 }
 
 pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> DependencyGraph {
@@ -2798,6 +2954,18 @@ fn is_local_path(target: &str) -> bool {
         && !target.starts_with("https://")
         && !target.starts_with("mailto:")
         && !target.starts_with('#')
+        && !looks_like_email_address(target)
+}
+
+fn looks_like_email_address(target: &str) -> bool {
+    let target = target.trim_matches(['<', '>']);
+    let Some((local, domain)) = target.split_once('@') else {
+        return false;
+    };
+    !local.is_empty()
+        && !domain.is_empty()
+        && !target.contains(['/', '\\', ' '])
+        && domain.contains('.')
 }
 
 fn cache_path(project_path: &Path, output: &str) -> PathBuf {
@@ -3216,6 +3384,75 @@ mod tests {
             issues.is_empty(),
             "encoded local paths should resolve: {issues:#?}"
         );
+    }
+
+    #[test]
+    fn lint_uses_source_specific_resource_syntax_and_ignores_code_examples() {
+        let project = tempfile::tempdir().expect("project tempdir");
+        fs::create_dir_all(project.path().join("figures")).expect("figures dir");
+        fs::create_dir_all(project.path().join("tex")).expect("TeX source dir");
+        fs::write(project.path().join("figures/soc.svg"), "<svg/>\n").expect("figure");
+        fs::write(project.path().join("tex/chapter.tex"), "Chapter\n").expect("chapter");
+        fs::write(project.path().join("references.bib"), "@book{x}\n").expect("bibliography");
+        fs::write(
+            project.path().join("main.tex"),
+            r#"\input{chapter}
+\includegraphics[width=1cm]{figures/soc}
+\bibliography{references}
+\draw (4,0) -- (5,1);
+std::vector<int> values;
+user@example.com
+\begin{verbatim}
+![example](missing-in-code.png)
+\end{verbatim}
+% \includegraphics{missing-in-comment.png}
+"#,
+        )
+        .expect("LaTeX entry");
+        fs::write(
+            project.path().join("notes.md"),
+            "[Contact](user@example.com)\n\n```markdown\n![example](missing-in-fence.png)\n```\n\n    [code](missing-indented.txt)\n",
+        )
+        .expect("Markdown notes");
+
+        let issues = lint_project(project.path());
+
+        assert!(
+            issues.is_empty(),
+            "code and non-resource syntax should be ignored: {issues:#?}"
+        );
+    }
+
+    #[test]
+    fn lint_reports_missing_markdown_and_latex_resources() {
+        let project = tempfile::tempdir().expect("project tempdir");
+        fs::write(
+            project.path().join("main.md"),
+            "![Missing](images/missing.png)\n",
+        )
+        .expect("Markdown entry");
+        fs::write(
+            project.path().join("main.tex"),
+            "\\input{chapters/missing}\n\\includegraphics{figures/missing}\n",
+        )
+        .expect("LaTeX entry");
+
+        let issues = lint_project(project.path());
+        let messages = issues
+            .iter()
+            .map(|issue| issue.message.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(issues.len(), 3, "unexpected lint issues: {issues:#?}");
+        assert!(messages
+            .iter()
+            .any(|message| message.contains("images/missing.png")));
+        assert!(messages
+            .iter()
+            .any(|message| message.contains("chapters/missing")));
+        assert!(messages
+            .iter()
+            .any(|message| message.contains("figures/missing")));
     }
 
     #[test]
