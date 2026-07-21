@@ -1,4 +1,3 @@
-use console::style;
 use omnidoc::{cli, OmniDocError, Result};
 use std::any::Any;
 
@@ -9,7 +8,7 @@ fn main() {
         std::process::exit(code);
     }
     if let Err(e) = run_cli() {
-        eprintln!("{} Error: {}", style("✖").red().bold(), e);
+        omnidoc::terminal::print_error(&e);
         std::process::exit(1);
     }
 }

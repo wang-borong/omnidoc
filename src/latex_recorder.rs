@@ -1,4 +1,5 @@
 use crate::error::{OmniDocError, Result};
+use crate::terminal;
 use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -60,11 +61,11 @@ pub fn run_wrapper_from_env() -> Option<i32> {
     let status = match Command::new(&real_engine).args(&args).status() {
         Ok(status) => status,
         Err(error) => {
-            eprintln!(
-                "OmniDoc LaTeX recorder could not execute {}: {}",
+            terminal::print_error(&OmniDocError::CommandExecution(format!(
+                "LaTeX recorder could not execute {}\n{}",
                 Path::new(&real_engine).display(),
                 error
-            );
+            )));
             return Some(1);
         }
     };
@@ -74,7 +75,9 @@ pub fn run_wrapper_from_env() -> Option<i32> {
             if let Err(error) =
                 write_depfile_from_fls(&fls, Path::new(&depfile), &[output_directory])
             {
-                eprintln!("OmniDoc LaTeX recorder warning: {error}");
+                terminal::warning(format!(
+                    "LaTeX recorder could not write its dependency file\n{error}"
+                ));
             }
         }
     }

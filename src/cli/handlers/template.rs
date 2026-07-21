@@ -21,7 +21,7 @@ pub fn handle_template_validate() {
             }
             Err(e) => {
                 err_count += 1;
-                println!("{} {} — {}", style("✖").red().bold(), key, e);
+                println!("{} {} — {}", style("failed:").red().bold(), key, e);
             }
         }
     }

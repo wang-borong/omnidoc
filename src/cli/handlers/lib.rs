@@ -567,11 +567,11 @@ fn replace_library_transactionally(library_path: &Path, staging: &Path) -> Resul
         return Err(error);
     }
     if let Err(error) = fs::remove_dir_all(&backup) {
-        eprintln!(
-            "Warning: verified library installed but old backup could not be removed: {} ({})",
+        crate::terminal::warning(format!(
+            "Verified library installed, but its old backup could not be removed\n{} ({})",
             backup.display(),
             error
-        );
+        ));
     }
     Ok(())
 }

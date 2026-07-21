@@ -1,6 +1,7 @@
 use crate::cli::handlers::build::{build_cli_overrides, build_project_outputs, BuildRunOptions};
 use crate::cli::handlers::common::check_omnidoc_project;
 use crate::error::{OmniDocError, Result};
+use crate::terminal;
 use crate::utils::path;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
@@ -78,7 +79,7 @@ pub fn handle_watch(
                     last_event = Some(Instant::now());
                 }
             }
-            Ok(Err(err)) => eprintln!("watch error: {}", err),
+            Ok(Err(err)) => terminal::warning(format!("File watcher reported an error\n{err}")),
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 return Err(OmniDocError::Other(
@@ -115,7 +116,7 @@ fn run_watch_build(
 ) {
     match build_project_outputs(project_path, cli_overrides, all, run_options, verbose) {
         Ok(()) => println!("Build completed."),
-        Err(err) => eprintln!("Build failed:\n{}", err),
+        Err(err) => terminal::print_error(&err),
     }
 }
 

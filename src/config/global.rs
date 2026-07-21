@@ -1,9 +1,9 @@
 use crate::config::schema::ConfigSchema;
 use crate::constants::config as config_consts;
 use crate::error::{OmniDocError, Result};
+use crate::terminal;
 use crate::utils::directories::{config_local_dir, data_local_dir};
 use crate::utils::fs;
-use console::style;
 use std::env::var;
 use std::path::PathBuf;
 
@@ -36,12 +36,11 @@ impl GlobalConfig {
         // 如果配置文件不存在，创建默认配置
         if !fs::exists(&config_file) {
             Self::create_default(&config_file)?;
-            eprintln!(
-                "{} The '{}' configuration file was created in '{}'.\n    You can modify it to set your author name.",
-                style("ℹ").cyan().bold(),
+            terminal::info(format!(
+                "Created the '{}' configuration file in '{}'\nYou can modify it to set your author name.",
                 config_consts::OMNIDOC_CONFIG_FILE,
                 config_local_dir.display()
-            );
+            ));
         }
 
         let content = fs::read_to_string(&config_file)?;

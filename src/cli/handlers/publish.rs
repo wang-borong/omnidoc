@@ -101,11 +101,11 @@ impl PublishTransaction {
         self.committed = true;
         if had_existing {
             if let Err(error) = remove_path(&self.backup_dir) {
-                eprintln!(
-                    "Warning: release published but old backup could not be removed: {} ({})",
+                crate::terminal::warning(format!(
+                    "Release published, but its old backup could not be removed\n{} ({})",
                     self.backup_dir.display(),
                     error
-                );
+                ));
             }
         }
         Ok(self.final_dir.clone())

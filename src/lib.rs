@@ -14,6 +14,7 @@ pub mod fs_abstract;
 pub mod git;
 pub mod latex_recorder;
 pub mod project_tools;
+pub mod terminal;
 pub mod utils;
 pub mod webreq;
 

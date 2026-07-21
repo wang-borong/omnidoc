@@ -265,11 +265,11 @@ fn build_project_once(
                 .checks
                 .iter()
                 .filter(|check| !check.passed)
-                .map(|check| format!("{}: {}", check.name, check.detail))
+                .map(|check| format!("- {}: {}", check.name, check.detail))
                 .collect::<Vec<_>>()
-                .join("; ");
+                .join("\n");
             return Err(OmniDocError::Project(format!(
-                "EPUB compatibility validation failed for profile '{}': {}",
+                "EPUB compatibility validation failed for profile '{}'\n{}",
                 report.profile, failures
             )));
         }

@@ -1,5 +1,6 @@
 use crate::cli::handlers::common::create_converter_service;
 use crate::error::{OmniDocError, Result};
+use crate::terminal;
 use crate::utils::{error, path};
 use std::path::Path;
 
@@ -22,7 +23,7 @@ pub fn handle_md2html(
     for input_str in &inputs {
         let input_path = Path::new(input_str);
         if !input_path.exists() {
-            eprintln!("Warning: Input file not found: {}, skipping", input_str);
+            terminal::warning(format!("Input file not found; skipping\n{input_str}"));
             continue;
         }
 

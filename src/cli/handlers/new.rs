@@ -72,12 +72,7 @@ pub fn handle_new(
         .and_then(|n| n.to_str())
         .unwrap_or("document");
 
-    ProjectConfig::create_default(&project_path, entry, from, to, Some(target_name)).map_err(
-        |e| {
-            eprintln!("Warning: Failed to create project config: {}", e);
-            e
-        },
-    )?;
+    ProjectConfig::create_default(&project_path, entry, from, to, Some(target_name))?;
 
     println!(
         "✓ Created project configuration file: {}/.omnidoc.toml",

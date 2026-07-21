@@ -124,6 +124,25 @@ fn assert_failure(output: Output) -> String {
 }
 
 #[test]
+fn fatal_errors_use_the_structured_terminal_layout() {
+    let fixture = Fixture::new("error-layout");
+    fs::write(
+        fixture.project.join(".omnidoc.toml"),
+        "[project]\nentry = \"missing.md\"\nfrom = \"markdown\"\nto = \"html\"\n",
+    )
+    .expect("invalid project config");
+
+    let output = fixture.command(&["config-validate", &fixture.project_arg()]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(stderr.contains("error: configuration validation failed\n"));
+    assert!(stderr.contains("  context: configuration\n"));
+    assert!(!stderr.contains('✖'));
+    assert!(!stderr.contains("Configuration error:"));
+}
+
+#[test]
 fn quality_commands_work_on_minimal_project() {
     let fixture = Fixture::new("quality");
     let project = fixture.project_arg();
