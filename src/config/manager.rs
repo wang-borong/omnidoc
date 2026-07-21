@@ -322,6 +322,12 @@ impl ConfigManager {
                 if let Some(p) = &tools.python3 {
                     tool_paths.insert("python3".to_string(), Some(p.clone()));
                 }
+                if let Some(p) = &tools.kicad_cli {
+                    tool_paths.insert("kicad-cli".to_string(), Some(p.clone()));
+                }
+                if let Some(p) = &tools.ngspice {
+                    tool_paths.insert("ngspice".to_string(), Some(p.clone()));
+                }
                 if let Some(p) = &tools.latex_engine {
                     tool_paths.insert("latex_engine".to_string(), Some(p.clone()));
                 }

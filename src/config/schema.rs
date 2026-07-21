@@ -218,6 +218,10 @@ pub struct ToolsSection {
     pub inkscape: Option<String>,
     pub imagemagick: Option<String>,
     pub python3: Option<String>,
+    /// KiCad command-line schematic exporter
+    pub kicad_cli: Option<String>,
+    /// ngspice circuit simulator used by spiceplot blocks
+    pub ngspice: Option<String>,
     /// LaTeX 引擎（xelatex, pdflatex, lualatex）
     pub latex_engine: Option<String>,
     /// Tectonic executable path

@@ -26,6 +26,13 @@ pub struct BitfieldOptions {
     pub legend: Vec<(String, String)>,
 }
 
+#[derive(Clone, Default)]
+pub struct KicadOptions {
+    pub black_and_white: bool,
+    pub exclude_drawing_sheet: bool,
+    pub pages: Option<String>,
+}
+
 struct BitfieldRequest {
     sources: Vec<String>,
     options: BitfieldOptions,
@@ -138,6 +145,27 @@ pub fn handle_figure(
             force: subcommand_force,
             output,
         }) => handle_plantuml(sources, plantuml, format, force || subcommand_force, output),
+        Some(FigureSubcommand::Kicad {
+            sources,
+            kicad_cli,
+            format,
+            black_and_white,
+            exclude_drawing_sheet,
+            pages,
+            force: subcommand_force,
+            output,
+        }) => handle_kicad(
+            sources,
+            kicad_cli,
+            format,
+            force || subcommand_force,
+            output,
+            KicadOptions {
+                black_and_white,
+                exclude_drawing_sheet,
+                pages,
+            },
+        ),
         Some(FigureSubcommand::Convert {
             sources,
             inkscape,
@@ -263,6 +291,30 @@ fn handle_plantuml(
     execute_figure_generation(sources, output, format, force, &figure_service, None)?;
 
     println!("✓ PlantUML generation completed");
+    Ok(())
+}
+
+fn handle_kicad(
+    sources: Vec<String>,
+    kicad_cli: Option<String>,
+    format: String,
+    force: bool,
+    output: Option<String>,
+    options: KicadOptions,
+) -> Result<()> {
+    let figure_service = create_figure_service(vec![("kicad-cli", kicad_cli)])?;
+    let source_paths: Vec<PathBuf> = sources.iter().map(PathBuf::from).collect();
+    let project_path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let output_dir = output.as_ref().map(PathBuf::from);
+    figure_service.generate_kicad_figures(
+        &project_path,
+        &source_paths,
+        output_dir.as_deref(),
+        &format,
+        force,
+        &options,
+    )?;
+    println!("✓ KiCad schematic export completed");
     Ok(())
 }
 

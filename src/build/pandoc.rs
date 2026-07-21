@@ -102,6 +102,11 @@ impl PandocBuilder {
             .unwrap_or_else(|| pandoc::DEFAULT_PYTHON.to_string());
         options.push(format!("pythonPath:{}", python_path));
 
+        if let Some(Some(ngspice_path)) = self.config.tool_paths.get("ngspice") {
+            options.push(pandoc::FLAG_METADATA.to_string());
+            options.push(format!("ngspicePath:{}", ngspice_path));
+        }
+
         // Diagram filters may need to invoke OmniDoc's native renderers (for
         // example fenced `bitfield` blocks). Pass the exact running binary so
         // builds do not accidentally resolve an older installation from PATH.
@@ -236,14 +241,13 @@ impl PandocBuilder {
             return;
         }
         if let Some(theme) = &self.theme {
-            for relative in &theme.resources.latex_headers {
-                options.push("--include-in-header".to_string());
-                options.push(
-                    PathBuf::from(omnidoc_lib)
-                        .join(relative)
-                        .to_string_lossy()
-                        .to_string(),
-                );
+            for (index, relative) in theme.resources.latex_headers.iter().enumerate() {
+                options.push(pandoc::FLAG_METADATA.to_string());
+                options.push(format!(
+                    "omnidoc-theme-latex-header-{}={}",
+                    index + 1,
+                    PathBuf::from(omnidoc_lib).join(relative).display()
+                ));
             }
         }
     }
@@ -259,13 +263,13 @@ impl PandocBuilder {
         {
             return;
         }
-        options.push("--include-in-header".to_string());
-        options.push(
+        options.push(pandoc::FLAG_METADATA.to_string());
+        options.push(format!(
+            "omnidoc-default-latex-header={}",
             PathBuf::from(omnidoc_lib)
                 .join(pandoc::LIB_PANDOC_HEADER_EMOJI)
-                .to_string_lossy()
-                .to_string(),
-        );
+                .display()
+        ));
     }
 
     fn push_template(
@@ -830,11 +834,8 @@ mod tests {
         assert_eq!(
             pdf_options,
             vec![
-                "--include-in-header".to_string(),
-                std::path::PathBuf::from("/tmp/omnidoc")
-                    .join("pandoc/headers/emoji.tex")
-                    .to_string_lossy()
-                    .to_string(),
+                "--metadata".to_string(),
+                "omnidoc-default-latex-header=/tmp/omnidoc/pandoc/headers/emoji.tex".to_string(),
             ]
         );
 
@@ -1050,8 +1051,8 @@ documentclass = "scrbook"
         assert_eq!(
             latex_options,
             vec![
-                "--include-in-header".to_string(),
-                header.to_string_lossy().to_string()
+                "--metadata".to_string(),
+                format!("omnidoc-theme-latex-header-1={}", header.display())
             ]
         );
 

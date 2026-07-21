@@ -681,6 +681,41 @@ pub enum FigureSubcommand {
         output: Option<String>,
     },
 
+    /// export KiCad schematics as publication-ready figures
+    Kicad {
+        /// KiCad schematic files (*.kicad_sch)
+        #[arg(required = true, value_hint = ValueHint::FilePath)]
+        sources: Vec<String>,
+
+        /// kicad-cli executable path
+        #[arg(long = "kicad-cli")]
+        kicad_cli: Option<String>,
+
+        /// output format (svg or pdf)
+        #[arg(short = 'f', long, default_value = "svg")]
+        format: String,
+
+        /// export in black and white
+        #[arg(short = 'b', long)]
+        black_and_white: bool,
+
+        /// omit the KiCad drawing sheet and title block
+        #[arg(short = 'e', long)]
+        exclude_drawing_sheet: bool,
+
+        /// comma-separated schematic page numbers
+        #[arg(long)]
+        pages: Option<String>,
+
+        /// force regenerate even if output exists
+        #[arg(short = 'F', long)]
+        force: bool,
+
+        /// output directory
+        #[arg(short = 'o', long)]
+        output: Option<String>,
+    },
+
     /// convert images (SVG and other formats)
     Convert {
         /// source image files

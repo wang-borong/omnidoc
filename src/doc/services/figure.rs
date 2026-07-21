@@ -1,4 +1,5 @@
 use crate::build::executor::BuildExecutor;
+use crate::cli::handlers::figure::KicadOptions;
 use crate::config::MergedConfig;
 use crate::doc::services::bitfield::render_bitfield_from_json;
 use crate::error::{OmniDocError, Result};
@@ -6,7 +7,7 @@ use crate::utils::fs;
 use std::path::{Path, PathBuf};
 
 /// Figure generation service
-/// Handles generation of various figure types (bitfield, drawio, dot, plantuml, image conversion)
+/// Handles generation of various figure types (bitfield, drawio, dot, plantuml, KiCad, image conversion)
 pub struct FigureService {
     executor: BuildExecutor,
     config: MergedConfig,
@@ -84,6 +85,15 @@ impl FigureService {
                 FigureType::Plantuml => {
                     self.generate_plantuml(&source_path, &output_path, output_format, force)?;
                 }
+                FigureType::Kicad => {
+                    self.generate_kicad(
+                        &source_path,
+                        &output_path,
+                        output_format,
+                        force,
+                        &KicadOptions::default(),
+                    )?;
+                }
                 FigureType::Image => {
                     self.convert_image(&source_path, &output_path, output_format, force)?;
                 }
@@ -96,6 +106,95 @@ impl FigureService {
             }
         }
 
+        Ok(())
+    }
+
+    pub fn generate_kicad_figures(
+        &self,
+        project_path: &Path,
+        sources: &[PathBuf],
+        output_dir: Option<&Path>,
+        format: &str,
+        force: bool,
+        options: &KicadOptions,
+    ) -> Result<()> {
+        let output_path = output_dir
+            .map(Path::to_path_buf)
+            .or_else(|| {
+                self.config
+                    .figure_output
+                    .as_ref()
+                    .map(|s| project_path.join(s))
+            })
+            .unwrap_or_else(|| project_path.join("figures"));
+        fs::create_dir_all(&output_path)?;
+        for source in sources {
+            let source_path = if source.is_absolute() {
+                source.clone()
+            } else {
+                project_path.join(source)
+            };
+            if !fs::exists(&source_path) {
+                return Err(OmniDocError::Project(format!(
+                    "Source file not found: {}",
+                    source_path.display()
+                )));
+            }
+            self.generate_kicad(&source_path, &output_path, format, force, options)?;
+        }
+        Ok(())
+    }
+
+    fn generate_kicad(
+        &self,
+        source: &Path,
+        output_dir: &Path,
+        format: &str,
+        force: bool,
+        options: &KicadOptions,
+    ) -> Result<()> {
+        let format = format.to_ascii_lowercase();
+        if !matches!(format.as_str(), "svg" | "pdf") {
+            return Err(OmniDocError::Project(format!(
+                "KiCad schematic export supports svg and pdf, not '{}'",
+                format
+            )));
+        }
+        let stem = source
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| OmniDocError::Other("Invalid KiCad source file name".to_string()))?;
+        let output = output_dir.join(format!("{}.{}", stem, format));
+        if fs::exists(&output) && !force {
+            return Ok(());
+        }
+        let kicad_cli = self.executor.check_tool("kicad-cli")?;
+        let mut args = vec!["sch".to_string(), "export".to_string(), format.clone()];
+        args.push("--output".to_string());
+        args.push(if format == "svg" {
+            output_dir.to_string_lossy().to_string()
+        } else {
+            output.to_string_lossy().to_string()
+        });
+        if options.black_and_white {
+            args.push("--black-and-white".to_string());
+        }
+        if options.exclude_drawing_sheet {
+            args.push("--exclude-drawing-sheet".to_string());
+        }
+        if let Some(pages) = options.pages.as_deref() {
+            args.push("--pages".to_string());
+            args.push(pages.to_string());
+        }
+        args.push(source.to_string_lossy().to_string());
+        let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+        self.executor.execute(&kicad_cli, &refs, false)?;
+        if !fs::exists(&output) {
+            return Err(OmniDocError::Other(format!(
+                "KiCad export completed without producing {}",
+                output.display()
+            )));
+        }
         Ok(())
     }
 
@@ -422,6 +521,7 @@ enum FigureType {
     Drawio,
     Dot,
     Plantuml,
+    Kicad,
     Image,
     Unknown,
 }
@@ -469,9 +569,95 @@ fn detect_file_type(path: &Path) -> Result<FigureType> {
         }
         "dot" | "gv" => Ok(FigureType::Dot),
         "puml" | "plantuml" => Ok(FigureType::Plantuml),
+        "kicad_sch" => Ok(FigureType::Kicad),
         "svg" | "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tiff" | "tif" | "webp" => {
             Ok(FigureType::Image)
         }
         _ => Ok(FigureType::Unknown),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{detect_file_type, FigureService, FigureType};
+    use crate::cli::handlers::figure::KicadOptions;
+    use crate::config::MergedConfig;
+    use std::collections::HashMap;
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn detects_kicad_schematic_sources() {
+        assert!(matches!(
+            detect_file_type(PathBuf::from("amplifier.kicad_sch").as_path()).expect("type"),
+            FigureType::Kicad
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn invokes_kicad_cli_with_publication_options() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let project = tempfile::tempdir().expect("project");
+        let source = project.path().join("amplifier.kicad_sch");
+        fs::write(&source, "(kicad_sch (version 20250114))\n").expect("source");
+        let fake = project.path().join("fake-kicad-cli");
+        fs::write(
+            &fake,
+            r#"#!/bin/sh
+set -eu
+test "$1" = sch
+test "$2" = export
+format="$3"
+shift 3
+output=""
+source=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output) output="$2"; shift 2 ;;
+    --black-and-white|--exclude-drawing-sheet) shift ;;
+    --pages) shift 2 ;;
+    *) source="$1"; shift ;;
+  esac
+done
+stem=$(basename "$source" .kicad_sch)
+if [ "$format" = svg ]; then
+  mkdir -p "$output"
+  printf '<svg xmlns="http://www.w3.org/2000/svg"/>\n' > "$output/$stem.svg"
+else
+  printf 'pdf\n' > "$output"
+fi
+"#,
+        )
+        .expect("fake cli");
+        let mut permissions = fs::metadata(&fake).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&fake, permissions).expect("executable");
+
+        let service = FigureService::new(MergedConfig {
+            tool_paths: HashMap::from([(
+                "kicad-cli".to_string(),
+                Some(fake.to_string_lossy().to_string()),
+            )]),
+            ..Default::default()
+        })
+        .expect("service");
+        let output = project.path().join("figure");
+        service
+            .generate_kicad_figures(
+                project.path(),
+                &[PathBuf::from("amplifier.kicad_sch")],
+                Some(&output),
+                "svg",
+                true,
+                &KicadOptions {
+                    black_and_white: true,
+                    exclude_drawing_sheet: true,
+                    pages: Some("1".to_string()),
+                },
+            )
+            .expect("KiCad export");
+        assert!(output.join("amplifier.svg").is_file());
     }
 }

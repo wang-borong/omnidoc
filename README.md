@@ -787,6 +787,19 @@ ranges, and plugins incompatible with the running OmniDoc version fail
       - `--plantuml <PLANTUML>`: PlantUML executable path or jar file path
       - `--format <FORMAT>`: Output format (default: png)
 
+    - **Export KiCad schematics**
+
+      ```bash
+      omnidoc figure kicad <SOURCES>... [OPTIONS]
+      ```
+
+      Options:
+      - `--kicad-cli <KICAD_CLI>`: KiCad CLI executable path
+      - `--format <FORMAT>`: `svg` or `pdf` (default: svg)
+      - `--black-and-white`: Export print-friendly monochrome artwork
+      - `--exclude-drawing-sheet`: Omit the KiCad title block and sheet border
+      - `--pages <PAGES>`: Export selected comma-separated page numbers
+
     - **Convert images**
 
       Convert images between different formats (SVG, PDF, PNG, etc.):
@@ -811,9 +824,32 @@ ranges, and plugins incompatible with the running OmniDoc version fail
     # Convert SVG to PDF
     omnidoc figure convert figure.svg --format pdf
 
+    # Export a publication-ready KiCad schematic
+    omnidoc figure kicad schematics/amplifier.kicad_sch \
+      --format svg --exclude-drawing-sheet
+
     # Generate all figures in a directory
     omnidoc figure drawio/ --format pdf --output figure/
     ```
+
+    Markdown projects also support native `circuit` and `spiceplot` fenced
+    blocks. Keep their source in separate versioned files with `include-code`:
+
+    ````markdown
+    ```{.circuit #fig-amplifier include-code="schematics/amplifier.py"
+    caption="Common-emitter amplifier" width="80%"}
+    ```
+
+    ```{.spiceplot #fig-response include-code="sim/amplifier-ac.json"
+    caption="Small-signal frequency response" width="80%"}
+    ```
+    ````
+
+    Circuit sources receive a configured Schemdraw drawing as `d` and
+    `schemdraw.elements` as `elm`. Spiceplot JSON specifies `netlist`, an
+    ngspice `analysis` command, and a `traces` array. OmniDoc renders PDF for
+    PDF/LaTeX and SVG for HTML/EPUB, and records both source files and SPICE
+    netlists in its dependency graph and lock digest.
 
 ### Document Conversion Commands
 
