@@ -788,8 +788,10 @@ mod tests {
     use crate::build::pandoc::{PandocBuilder, PandocCommandProfile};
     use crate::build::pandoc_policy::PandocOutputKind;
     use crate::config::MergedConfig;
+    use crate::constants::pandoc;
     use std::collections::BTreeMap;
     use std::fs;
+    use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -842,15 +844,26 @@ mod tests {
     #[test]
     fn adds_managed_headers_for_active_latex_filters() {
         let builder = PandocBuilder::new(MergedConfig::default()).expect("pandoc builder");
+        let library = PathBuf::from("/tmp/omnidoc");
         let mut pdf_options = Vec::new();
-        builder.push_default_latex_headers(&mut pdf_options, PandocOutputKind::Pdf, "/tmp/omnidoc");
+        builder.push_default_latex_headers(
+            &mut pdf_options,
+            PandocOutputKind::Pdf,
+            library.to_str().expect("library path"),
+        );
         assert_eq!(
             pdf_options,
             vec![
                 "--include-in-header".to_string(),
-                "/tmp/omnidoc/pandoc/headers/emoji.tex".to_string(),
+                library
+                    .join(pandoc::LIB_PANDOC_HEADER_EMOJI)
+                    .to_string_lossy()
+                    .to_string(),
                 "--include-in-header".to_string(),
-                "/tmp/omnidoc/pandoc/headers/semantic-blocks.tex".to_string(),
+                library
+                    .join(pandoc::LIB_PANDOC_HEADER_SEMANTIC_BLOCKS)
+                    .to_string_lossy()
+                    .to_string(),
             ]
         );
 
@@ -1008,11 +1021,28 @@ mod tests {
         fs::create_dir_all(library.join("pandoc/headers")).expect("headers dir");
         fs::create_dir_all(library.join("pandoc/data/templates")).expect("templates dir");
         fs::create_dir_all(library.join("pandoc/data/reference-docs")).expect("reference docs dir");
-        let css = library.join("pandoc/css/engineering-book.css");
-        let blocks_css = library.join("pandoc/css/semantic-blocks.css");
-        let header = library.join("pandoc/headers/engineering-book.tex");
-        let template = library.join("pandoc/data/templates/engineering-book.latex");
-        let slides = library.join("pandoc/data/reference-docs/engineering-slides.pptx");
+        let css = library
+            .join("pandoc")
+            .join("css")
+            .join("engineering-book.css");
+        let blocks_css = library
+            .join("pandoc")
+            .join("css")
+            .join("semantic-blocks.css");
+        let header = library
+            .join("pandoc")
+            .join("headers")
+            .join("engineering-book.tex");
+        let template = library
+            .join("pandoc")
+            .join("data")
+            .join("templates")
+            .join("engineering-book.latex");
+        let slides = library
+            .join("pandoc")
+            .join("data")
+            .join("reference-docs")
+            .join("engineering-slides.pptx");
         fs::write(&css, "body { max-width: 56rem; }\n").expect("theme css");
         fs::write(&blocks_css, ".admonition { break-inside: avoid; }\n").expect("theme blocks css");
         fs::write(&header, "\\usepackage{omni-engineering-book}\n").expect("theme header");
