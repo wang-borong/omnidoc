@@ -10,7 +10,7 @@ The release publishes platform-specific binaries plus the verified
    bundle manifest/compatibility, and the embedded release contract:
 
    ```bash
-   python3 scripts/set-version.py 1.6.0
+   python3 scripts/set-version.py 1.6.1
    ```
 
 2. Regenerate and verify the payload checksums:
@@ -36,8 +36,8 @@ scripts/check-golden-pdf.sh
 Build the deterministic sidecar twice and compare it:
 
 ```bash
-OMNIDOC_RELEASE_TAG=v1.6.0 bundles/libs/scripts/package-release.sh /tmp/omnidoc-libs-a
-OMNIDOC_RELEASE_TAG=v1.6.0 bundles/libs/scripts/package-release.sh /tmp/omnidoc-libs-b
+OMNIDOC_RELEASE_TAG=v1.6.1 bundles/libs/scripts/package-release.sh /tmp/omnidoc-libs-a
+OMNIDOC_RELEASE_TAG=v1.6.1 bundles/libs/scripts/package-release.sh /tmp/omnidoc-libs-b
 cmp /tmp/omnidoc-libs-a/*.tar.gz /tmp/omnidoc-libs-b/*.tar.gz
 cmp /tmp/omnidoc-libs-a/*.sha256 /tmp/omnidoc-libs-b/*.sha256
 ```
@@ -61,10 +61,10 @@ profile or documented release note rather than an untracked CSS patch.
 
 ## 4. Publish
 
-1. Commit, create, and push the single product tag, for example `v1.6.0`.
+1. Commit, create, and push the single product tag, for example `v1.6.1`.
 2. Require quality, library bundle, Golden Book, Golden PDF, portable document
    smoke, package, and installed-release smoke jobs to pass.
 3. Confirm the GitHub release contains every binary package plus
-   `omnidoc-libs-v1.6.0.tar.gz` and its `.sha256` file.
+   `omnidoc-libs-v1.6.1.tar.gz` and its `.sha256` file.
 4. Download every archive and run its packaged-binary smoke test.
 5. Publish release notes describing lock/cache schema changes and bundle changes.

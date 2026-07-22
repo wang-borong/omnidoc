@@ -8,7 +8,7 @@ bundle. It is developed and released from the OmniDoc monorepo.
 
 The machine-readable compatibility and payload contract is stored in
 `manifest.toml`. The bundle version is always identical to the OmniDoc product
-version. Version 1.6.0 targets OmniDoc 1.6.0 and Pandoc 3.x.
+version. Version 1.6.1 targets OmniDoc 1.6.1 and Pandoc 3.x.
 
 ## Verify a checkout
 
@@ -45,7 +45,7 @@ Build the deterministic release archive locally with:
 
 ```bash
 bundles/libs/scripts/package-release.sh dist
-OMNIDOC_RELEASE_TAG=v1.6.0 bundles/libs/scripts/package-release.sh dist
+OMNIDOC_RELEASE_TAG=v1.6.1 bundles/libs/scripts/package-release.sh dist
 ```
 
 The command verifies all payload checksums, checks an optional tag against the

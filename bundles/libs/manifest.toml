@@ -1,6 +1,6 @@
 manifest_version = 1
-version = "1.6.0"
-compatible_omnidoc = "=1.6.0"
+version = "1.6.1"
+compatible_omnidoc = "=1.6.1"
 compatible_pandoc = ">=3.0,<4.0"
 checksum_algorithm = "sha256"
 checksum_file = "checksums.sha256"

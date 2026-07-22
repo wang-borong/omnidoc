@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.6.1
+
+- Normalized bundled manifest paths into native path components so theme CSS,
+  Lua filters, LaTeX headers, templates, and reference documents work reliably
+  in Windows builds and packaged releases.
+
+## 1.6.0
+
 - Moved the OmniDoc library payload into `bundles/libs`, so Rust, Lua, CSS,
   TeX, themes, tests, and release metadata now change atomically in one repo.
 - Unified the OmniDoc and library bundle version at 1.6.0 and publish both the
