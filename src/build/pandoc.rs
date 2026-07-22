@@ -212,13 +212,13 @@ impl PandocBuilder {
         let mut added = std::collections::BTreeSet::new();
         for filter in output_kind.filters(&self.config) {
             options.push("--lua-filter".to_string());
-            let path = format!("{}/{}/{}", omnidoc_lib, pandoc::LIB_PANDOC_FILTERS, filter);
-            added.insert(PathBuf::from(&path));
-            options.push(path);
+            let path = join_portable_relative(omnidoc_lib, pandoc::LIB_PANDOC_FILTERS).join(filter);
+            added.insert(path.clone());
+            options.push(path.to_string_lossy().to_string());
         }
         if let Some(theme) = &self.theme {
             for relative in &theme.resources.lua_filters {
-                let path = PathBuf::from(omnidoc_lib).join(relative);
+                let path = join_portable_relative(omnidoc_lib, relative);
                 if added.insert(path.clone()) {
                     options.push("--lua-filter".to_string());
                     options.push(path.to_string_lossy().to_string());
@@ -244,8 +244,7 @@ impl PandocBuilder {
             for relative in &theme.resources.latex_headers {
                 options.push(pandoc::FLAG_INCLUDE_IN_HEADER.to_string());
                 options.push(
-                    PathBuf::from(omnidoc_lib)
-                        .join(relative)
+                    join_portable_relative(omnidoc_lib, relative)
                         .to_string_lossy()
                         .to_string(),
                 );
@@ -270,8 +269,7 @@ impl PandocBuilder {
             if filters.contains(&filter) {
                 options.push(pandoc::FLAG_INCLUDE_IN_HEADER.to_string());
                 options.push(
-                    PathBuf::from(omnidoc_lib)
-                        .join(relative)
+                    join_portable_relative(omnidoc_lib, relative)
                         .to_string_lossy()
                         .to_string(),
                 );
@@ -294,8 +292,7 @@ impl PandocBuilder {
             PandocOutputKind::Docx | PandocOutputKind::Pptx => None,
         });
         let theme_template = theme_template.map(|relative| {
-            PathBuf::from(omnidoc_lib)
-                .join(relative)
+            join_portable_relative(omnidoc_lib, relative)
                 .to_string_lossy()
                 .to_string()
         });
@@ -397,8 +394,7 @@ impl PandocBuilder {
                     .as_ref()
                     .and_then(|theme| theme.resources.pptx_reference_doc.as_ref())
                     .map(|relative| {
-                        PathBuf::from(omnidoc_lib)
-                            .join(relative)
+                        join_portable_relative(omnidoc_lib, relative)
                             .to_string_lossy()
                             .to_string()
                     })
@@ -784,15 +780,31 @@ impl BuildPipeline for PandocBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_css_path;
+    use super::{join_portable_relative, resolve_css_path};
     use crate::build::pandoc::{PandocBuilder, PandocCommandProfile};
     use crate::build::pandoc_policy::PandocOutputKind;
     use crate::config::MergedConfig;
-    use crate::constants::pandoc;
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn portable_relative_paths_use_native_components() {
+        let root = PathBuf::from("bundle-root");
+        let expected = root
+            .join("pandoc")
+            .join("headers")
+            .join("engineering-book.tex");
+
+        assert_eq!(
+            join_portable_relative(
+                root.to_str().expect("bundle root"),
+                "pandoc/headers/engineering-book.tex",
+            ),
+            expected
+        );
+    }
 
     #[test]
     fn defaults_to_pdf_output() {
@@ -856,12 +868,16 @@ mod tests {
             vec![
                 "--include-in-header".to_string(),
                 library
-                    .join(pandoc::LIB_PANDOC_HEADER_EMOJI)
+                    .join("pandoc")
+                    .join("headers")
+                    .join("emoji.tex")
                     .to_string_lossy()
                     .to_string(),
                 "--include-in-header".to_string(),
                 library
-                    .join(pandoc::LIB_PANDOC_HEADER_SEMANTIC_BLOCKS)
+                    .join("pandoc")
+                    .join("headers")
+                    .join("semantic-blocks.tex")
                     .to_string_lossy()
                     .to_string(),
             ]
