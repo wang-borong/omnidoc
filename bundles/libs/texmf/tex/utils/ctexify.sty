@@ -1,0 +1,39 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{ctexify}[2023/08/30 v0.1 chinese documents translation package]
+
+\RequirePackage{kvoptions}
+\RequirePackage{etoolbox}
+\SetupKeyvalOptions{family=ctexify,prefix=ctexify@,setkeys=\kvsetkeys}
+
+\DeclareStringOption[]{class}
+
+\ProcessKeyvalOptions*\relax
+
+\RequirePackage[
+  UTF8,
+  scheme=chinese,
+  heading=true,
+  sub4section,
+]{ctex}
+
+\ctexset{
+  secnumdepth = 5,
+  linestretch = 10,
+}
+
+\ifdefstring{\ctexify@class}{tufte}{
+  %% Fix xelatex compilation error.
+  %% ! Argument of \MakeUppercase  has an extra }.
+  \ifx\ifxetex\ifluatex\else % if lua- or xelatex http://tex.stackexchange.com/a/140164/1913
+    \newcommand{\textls}[2][5]{%
+      \begingroup\addfontfeatures{LetterSpace=#1}#2\endgroup
+    }
+    \renewcommand{\allcapsspacing}[1]{\textls[15]{#1}}
+    \renewcommand{\smallcapsspacing}[1]{\textls[10]{#1}}
+    \renewcommand{\allcaps}[1]{\textls[15]{\MakeTextUppercase{#1}}}
+    \renewcommand{\smallcaps}[1]{\smallcapsspacing{\scshape\MakeTextLowercase{#1}}}
+    \renewcommand{\textsc}[1]{\smallcapsspacing{\textsmallcaps{#1}}}
+  \fi
+}{\relax}
+
+\endinput

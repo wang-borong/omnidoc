@@ -65,10 +65,6 @@ pub struct LibConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LibSection {
     pub path: Option<String>,
-    /// OmniDoc library repository URL (全局配置)
-    pub url: Option<String>,
-    /// Optional tag, branch, or commit used for reproducible library installs.
-    pub revision: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

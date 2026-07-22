@@ -1,0 +1,70 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{listings}[2024/12/27 v0.1 Common listings configuration]
+
+% Require necessary packages
+\RequirePackage{listings}
+\RequirePackage{xcolor}
+
+% Listing color definitions (copied from eisvogel pandoc template)
+\definecolor{listing-background}{HTML}{F7F7F7}
+\definecolor{listing-rule}{HTML}{B3B2B3}
+\definecolor{listing-numbers}{HTML}{B3B2B3}
+\definecolor{listing-text-color}{HTML}{000000}
+\definecolor{listing-keyword}{HTML}{435489}
+\definecolor{listing-keyword-2}{HTML}{1284CA} % additional keywords
+\definecolor{listing-keyword-3}{HTML}{9137CB} % additional keywords
+\definecolor{listing-identifier}{HTML}{435489}
+\definecolor{listing-string}{HTML}{00999A}
+\definecolor{listing-comment}{HTML}{8E8E8E}
+
+% Common listings configuration
+% This can be customized per document if needed
+\lstset{%
+  backgroundcolor  = \color{listing-background},
+  basicstyle=\small\ttfamily,
+  breakatwhitespace=false,
+  breaklines=true,
+  captionpos=t,
+  aboveskip        = 0.5em,
+  belowskip        = 0.6em,
+  abovecaptionskip = 0em,
+  belowcaptionskip = 0.5em,
+  commentstyle = \color{listing-comment},
+  escapeinside = {/*@}{@*/},
+  extendedchars=true,
+  frame=none,
+  keepspaces=true,
+  upquote=true,
+  keywordstyle = {\color{listing-keyword}\bfseries},
+  keywordstyle = {[2]\color{listing-keyword-2}\bfseries},
+  keywordstyle = {[3]\color{listing-keyword-3}\bfseries\itshape},
+  numbers=none,
+  numbersep=5pt,
+  numberstyle=\tiny\color{gray},
+  rulecolor=\color{black},
+  showspaces=false,
+  showstringspaces=false,
+  showtabs=false,
+  stepnumber=2,
+  identifierstyle = \color{listing-identifier},
+  stringstyle=\color{listing-string},
+  tabsize=2,
+  literate         =
+  {á}{{\'a}}1 {é}{{\'e}}1 {í}{{\'i}}1 {ó}{{\'o}}1 {ú}{{\'u}}1
+  {Á}{{\'A}}1 {É}{{\'E}}1 {Í}{{\'I}}1 {Ó}{{\'O}}1 {Ú}{{\'U}}1
+  {à}{{\`a}}1 {è}{{\`e}}1 {ì}{{\`i}}1 {ò}{{\`o}}1 {ù}{{\`u}}1
+  {À}{{\`A}}1 {È}{{\`E}}1 {Ì}{{\`I}}1 {Ò}{{\`O}}1 {Ù}{{\`U}}1
+  {ä}{{\"a}}1 {ë}{{\"e}}1 {ï}{{\"i}}1 {ö}{{\"o}}1 {ü}{{\"u}}1
+  {Ä}{{\"A}}1 {Ë}{{\"E}}1 {Ï}{{\"I}}1 {Ö}{{\"O}}1 {Ü}{{\"U}}1
+  {â}{{\^a}}1 {ê}{{\^e}}1 {î}{{\^i}}1 {ô}{{\^o}}1 {û}{{\^u}}1
+  {Â}{{\^A}}1 {Ê}{{\^E}}1 {Î}{{\^I}}1 {Ô}{{\^O}}1 {Û}{{\^U}}1
+  {œ}{{\oe}}1 {Œ}{{\OE}}1 {æ}{{\ae}}1 {Æ}{{\AE}}1 {ß}{{\ss}}1
+  {ç}{{\c c}}1 {Ç}{{\c C}}1 {ø}{{\o}}1 {å}{{\r a}}1 {Å}{{\r A}}1
+  {€}{{\EUR}}1 {£}{{\pounds}}1 {«}{{\guillemotleft}}1
+  {»}{{\guillemotright}}1 {ñ}{{\~n}}1 {Ñ}{{\~N}}1 {¿}{{?`}}1
+  {…}{{\ldots}}1 {≥}{{>=}}1 {≤}{{<=}}1 {„}{{\glqq}}1 {「}{{\grqq}}1
+  {」}{{''}}1
+}
+
+\endinput
+

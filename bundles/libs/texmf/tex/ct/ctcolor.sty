@@ -1,0 +1,54 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{ctcolor}[2024/08/22 v0.1 color style package]
+
+\RequirePackage{kvoptions}
+\RequirePackage{etoolbox}
+\SetupKeyvalOptions{family=ctcolor,prefix=ctcolor@,setkeys=\kvsetkeys}
+
+\DeclareStringOption[blue]{color}
+
+\ProcessKeyvalOptions*\relax
+
+% copied from elegantbook.cls
+\RequirePackage{xcolor}
+\ifdefstring{\ctcolor@color}{green}{
+  \definecolor{basis-color}{RGB}{0,120,2}%
+  \definecolor{main-color}{RGB}{0,120,2}%
+  \definecolor{second-color}{RGB}{230,90,7}%
+  \definecolor{third-color}{RGB}{0,160,152}%
+}{\relax}
+\ifdefstring{\ctcolor@color}{cyan}{
+  \definecolor{basis-color}{RGB}{31,186,190}%
+  \definecolor{main-color}{RGB}{59,180,5}%
+  \definecolor{second-color}{RGB}{175,153,8}%
+  \definecolor{third-color}{RGB}{244,105,102}%
+}{\relax}
+\ifdefstring{\ctcolor@color}{blue}{
+  \definecolor{basis-color}{RGB}{60,113,183}
+  \definecolor{main-color}{RGB}{0,166,82}%
+  \definecolor{second-color}{RGB}{255,134,24}%
+  \definecolor{third-color}{RGB}{0,174,247}%
+}{\relax}
+\ifdefstring{\ctcolor@color}{gray}{
+  \definecolor{basis-color}{RGB}{150,150,150}
+  \definecolor{main-color}{RGB}{150,150,150}%
+  \definecolor{second-color}{RGB}{150,150,150}%
+  \definecolor{third-color}{RGB}{150,150,150}%
+}{\relax}
+\ifdefstring{\ctcolor@color}{black}{
+  \definecolor{basis-color}{RGB}{0,0,0}
+  \definecolor{main-color}{RGB}{0,0,0}%
+  \definecolor{second-color}{RGB}{0,0,0}%
+  \definecolor{third-color}{RGB}{0,0,0}%
+}{\relax}
+% \definecolor{winered}{rgb}{0.5,0,0}
+\definecolor{bule}{RGB}{18,29,57}
+% copied from eisvogel
+\definecolor{caption-color}{HTML}{777777}
+\definecolor{default-linkcolor}{HTML}{A50000}
+\definecolor{default-filecolor}{HTML}{A50000}
+\definecolor{default-citecolor}{HTML}{4077C0}
+\definecolor{default-urlcolor}{HTML}{4077C0}
+\definecolor{default-tcbcolor}{HTML}{D5E8D4}
+
+\endinput

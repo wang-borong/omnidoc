@@ -1,0 +1,98 @@
+@charset "utf-8";
+
+/* Engineering-book typography and page layout. Reusable components live in
+   pandoc/css/modules and are loaded independently by the theme manifest. */
+
+html {
+  color: var(--omni-ink);
+  background: var(--omni-page);
+  font-family: "Noto Serif CJK SC", "Source Han Serif CN", serif;
+  line-height: 1.72;
+}
+
+body {
+  box-sizing: border-box;
+  margin: 5%;
+  text-align: justify;
+  widows: 2;
+  orphans: 2;
+}
+
+p { margin: 0.55em 0; text-indent: 2em; }
+li p, blockquote p, td p, th p, figure p, .admonition p { text-indent: 0; }
+
+h1, h2, h3, h4 {
+  font-family: "Noto Sans CJK SC", "Source Han Sans CN", sans-serif;
+  text-align: left;
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+h1 {
+  color: var(--omni-navy);
+  font-size: 2.2em;
+  margin: 2.5em 0 1.2em;
+  padding-bottom: 0.35em;
+  border-bottom: 0.16em solid var(--omni-teal);
+  break-before: page;
+  page-break-before: always;
+}
+
+h2 {
+  color: var(--omni-navy);
+  font-size: 1.72em;
+  margin: 2.2em 0 1em;
+  padding-left: 0.55em;
+  border-left: 0.28em solid var(--omni-gold);
+  break-before: page;
+  page-break-before: always;
+}
+
+h3 { color: var(--omni-blue); font-size: 1.35em; margin: 1.65em 0 0.7em; }
+h4 { color: var(--omni-teal); font-size: 1.08em; margin: 1.35em 0 0.55em; }
+
+a { color: var(--omni-blue); }
+a:visited { color: #5c4d8a; }
+strong { color: var(--omni-navy); }
+
+blockquote {
+  margin: 1.1em 0;
+  padding: 0.7em 1em;
+  background: var(--omni-pale);
+  border-left: 0.3em solid var(--omni-teal);
+  border-radius: 0.2em;
+}
+
+ul, ol {
+  display: block;
+  position: static;
+  float: none;
+  clear: both;
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+li {
+  display: list-item;
+  position: static;
+  float: none;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+ul + p, ol + p { clear: both; }
+nav#toc ol { padding-left: 1.2em; }
+nav#toc li { margin: 0.3em 0; }
+nav#toc a { text-decoration: none; }
+
+@media screen and (min-width: 60rem) {
+  body { max-width: 56rem; margin: 0 auto; padding: 3rem 2.75rem 5rem; }
+}
+
+@media (prefers-color-scheme: dark) {
+  html, body { color: #e6edf3; background: #111820; }
+  h1, h2, strong { color: #d5edf5; }
+  h3 { color: #70c4dd; }
+  h4 { color: #71d1c5; }
+  blockquote { background: #18242d; }
+}

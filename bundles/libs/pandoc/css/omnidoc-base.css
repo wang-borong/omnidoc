@@ -1,0 +1,35 @@
+/* OmniDoc portable output primitives shared by every HTML/EPUB theme. */
+
+.omni-display-math {
+  display: block;
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: 1.1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+  text-indent: 0;
+}
+
+.omni-display-math > p {
+  margin: 0;
+  padding: 0;
+  text-align: center;
+  text-indent: 0;
+}
+
+.omni-display-math math[display="block"],
+.omni-display-math .math.display {
+  display: inline-block;
+  width: auto;
+  max-width: none;
+  margin: 0 auto;
+  overflow: visible;
+  vertical-align: middle;
+}
+
+/* A display formula nested in ordinary prose is not a standalone block. */
+p > math[display="inline"],
+p > .math.inline {
+  display: inline-block;
+}

@@ -1,0 +1,46 @@
+---
+documentclass: elegantpaper
+papersize: a4
+classoption:
+  - cn
+indent: true
+listings: true
+numbersections:
+  - sectiondepth: 5
+biblatex: true
+biblatexoptions:
+  - backend=biber
+  - citestyle=numeric-comp
+  - bibstyle=numeric
+bibliography:
+  - biblio/cseebook.bib
+nocite-ids:
+  - \*
+biblio-title: 参考文献
+colorlinks: true
+graphics: true
+
+include-before:
+  - |
+    ```{=latex}
+    ```
+
+toc: true
+toc-title: \begin{center}目\quad 录\end{center}
+lof: true
+lot: true
+
+include-after:
+  - |
+    ```{=latex}
+    ```
+before-body:
+  - |
+    ```{=latex}
+    ```
+after-body:
+  - |
+    ```{=latex}
+    ```
+...
+

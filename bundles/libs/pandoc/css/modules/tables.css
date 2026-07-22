@@ -1,0 +1,26 @@
+@charset "utf-8";
+
+table {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  margin: 1.2em 0;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.88em;
+}
+
+th {
+  color: white;
+  background: var(--omni-blue);
+  font-family: "Noto Sans CJK SC", sans-serif;
+}
+
+th, td { padding: 0.45em 0.55em; border: 1px solid var(--omni-line); vertical-align: top; }
+tbody tr:nth-child(even) { background: var(--omni-pale); }
+
+@media (prefers-color-scheme: dark) {
+  tbody tr:nth-child(even) { background: #18242d; }
+  th, td { border-color: #3b5362; }
+}

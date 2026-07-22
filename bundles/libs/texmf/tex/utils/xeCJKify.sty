@@ -1,0 +1,20 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{xeCJKify}[2023/09/11 v0.3 the xeCJKify package]
+
+\RequirePackage{kvoptions}
+\RequirePackage{etoolbox}
+\SetupKeyvalOptions{family=xeCJKify,prefix=xeCJKify@,setkeys=\kvsetkeys}
+
+\DeclareStringOption[Noto Serif CJK SC]{CJKmainfont}
+\DeclareStringOption[Noto Sans CJK SC]{CJKsansfont}
+\DeclareStringOption[Noto Sans Mono CJK SC]{CJKmonofont}
+
+\ProcessKeyvalOptions*\relax
+
+\RequirePackage{xeCJK}
+
+\setCJKmainfont{\xeCJKify@CJKmainfont}
+\setCJKsansfont{\xeCJKify@CJKsansfont}
+\setCJKmonofont{\xeCJKify@CJKmonofont}
+
+\endinput

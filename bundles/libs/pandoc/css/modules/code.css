@@ -1,0 +1,29 @@
+@charset "utf-8";
+
+code {
+  padding: 0.08em 0.25em;
+  border-radius: 0.18em;
+  color: #7a3348;
+  background: #f7f3f4;
+  font-family: "Noto Sans Mono CJK SC", "Source Han Mono SC", monospace;
+  font-size: 0.88em;
+}
+
+pre {
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 0.9em 1em;
+  overflow-x: auto;
+  border: 1px solid var(--omni-line);
+  border-radius: 0.3em;
+  background: var(--omni-pale);
+  line-height: 1.45;
+}
+
+pre code { padding: 0; color: var(--omni-ink); background: transparent; }
+
+@media (prefers-color-scheme: dark) {
+  pre { background: #18242d; border-color: #3b5362; }
+  code { color: #f3b7c7; background: #271d22; }
+  pre code { color: #e6edf3; background: transparent; }
+}

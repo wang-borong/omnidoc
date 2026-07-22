@@ -1,0 +1,56 @@
+manifest_version = 1
+name = "engineering-book"
+version = "1.1.0"
+description = "Matching HTML, EPUB, PDF, and PPTX styles for engineering teaching material"
+compatible_omnidoc = ">=1.3.0,<2.0.0"
+compatibility = "readium"
+
+[resources]
+html_css = [
+  "pandoc/css/modules/engineering-tokens.css",
+  "pandoc/css/engineering-book.css",
+  "pandoc/css/modules/semantic-blocks.css",
+  "pandoc/css/modules/code.css",
+  "pandoc/css/modules/tables.css",
+  "pandoc/css/modules/math.css",
+  "pandoc/css/modules/figures.css",
+]
+epub_css = [
+  "pandoc/css/modules/engineering-tokens.css",
+  "pandoc/css/engineering-book.css",
+  "pandoc/css/modules/semantic-blocks.css",
+  "pandoc/css/modules/code.css",
+  "pandoc/css/modules/tables.css",
+  "pandoc/css/modules/math.css",
+  "pandoc/css/modules/figures.css",
+]
+latex_packages = ["texmf/tex/common/omni-engineering-book.sty"]
+latex_headers = ["pandoc/headers/engineering-book.tex"]
+lua_filters = [
+  "pandoc/data/filters/display-math.lua",
+  "pandoc/data/filters/admonition.lua",
+  "pandoc/data/filters/fonts-and-alignment.lua",
+]
+pptx_reference_doc = "pandoc/data/reference-docs/engineering-slides.pptx"
+
+[requirements]
+fonts = ["Noto Serif CJK SC", "Noto Sans CJK SC", "Noto Sans Mono CJK SC"]
+system_latex_packages = [
+  "array",
+  "booktabs",
+  "colortbl",
+  "enumitem",
+  "etoolbox",
+  "fancyhdr",
+  "fontspec",
+  "iftex",
+  "listings",
+  "tcolorbox",
+  "tikz",
+  "titlesec",
+  "xcolor",
+  "xeCJK",
+]
+
+[metadata.defaults]
+lang = "zh-CN"

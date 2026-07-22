@@ -3,9 +3,13 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fixture="$root/tests/fixtures/golden-book"
-libs="${OMNIDOC_LIBS:-$root/../omnidoc-libs}"
+libs="${OMNIDOC_LIBS:-$root/bundles/libs}"
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+if [[ -n "${OMNIDOC_KEEP_WORK:-}" ]]; then
+  echo "Golden PDF work directory: $work"
+else
+  trap 'rm -rf "$work"' EXIT
+fi
 
 required_tools=(pandoc pandoc-crossref xelatex pdfinfo pdffonts pdftotext pdftoppm jq rg fc-match python3)
 if [[ -z "${OMNIDOC_BIN:-}" ]]; then

@@ -11,7 +11,7 @@ export XDG_CONFIG_HOME="$work/config"
 export XDG_DATA_HOME="$work/data"
 mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
 
-"$bin" libs --install --release
+"$bin" libs --install
 "$bin" libs --verify --json > "$work/library.json"
 jq -e '
   .manifest_valid == true
@@ -19,6 +19,9 @@ jq -e '
     and .omnidoc_compatible == true
     and .pandoc_compatible == true
 ' "$work/library.json" >/dev/null
+
+"$bin" libs --update
+"$bin" libs --verify
 
 OMNIDOC_BIN="$bin" \
 OMNIDOC_LIBS="$XDG_DATA_HOME/omnidoc" \

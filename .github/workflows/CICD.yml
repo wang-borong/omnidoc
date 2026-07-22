@@ -32,6 +32,7 @@ jobs:
     needs:
       - crate-metadata
       - quality
+      - library-bundle
       - golden-book
       - portable-document-smoke
       - msrv
@@ -50,7 +51,6 @@ jobs:
       maintainer: ${{ steps.metadata.outputs.maintainer }}
       homepage: ${{ steps.metadata.outputs.homepage }}
       msrv: ${{ steps.metadata.outputs.msrv }}
-      library_revision: ${{ steps.metadata.outputs.library_revision }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -64,7 +64,6 @@ jobs:
           jq -r '"maintainer=" + .packages[0].authors[0]' <<< "$metadata" >> "$GITHUB_OUTPUT"
           jq -r '"homepage=" + .packages[0].homepage' <<< "$metadata" >> "$GITHUB_OUTPUT"
           jq -r '"msrv=" + .packages[0].rust_version' <<< "$metadata" >> "$GITHUB_OUTPUT"
-          python3 -c 'import tomllib; print("library_revision=" + tomllib.load(open("release/omnidoc-libs.toml", "rb"))["library"]["revision"])' >> "$GITHUB_OUTPUT"
 
   quality:
     name: Quality gates
@@ -103,17 +102,58 @@ jobs:
           cargo run --locked -- theme --help
           cargo run --locked -- plugin --help
 
+  library-bundle:
+    name: Library bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1
+        with:
+          version: ${{ env.PANDOC_VERSION }}
+      - name: Install bundle validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            fonts-noto-cjk librsvg2-bin lua5.4 poppler-utils ripgrep \
+            texlive-fonts-recommended texlive-lang-chinese \
+            texlive-latex-extra texlive-xetex xz-utils
+          curl --fail --location --retry 3 \
+            --output /tmp/pandoc-crossref.tar.xz \
+            "https://github.com/lierdakil/pandoc-crossref/releases/download/v${PANDOC_CROSSREF_VERSION}/pandoc-crossref-Linux-X64.tar.xz"
+          tar --extract --xz --file /tmp/pandoc-crossref.tar.xz \
+            --directory /tmp pandoc-crossref
+          sudo install -m 0755 /tmp/pandoc-crossref /usr/local/bin/pandoc-crossref
+      - name: Verify unified release contract
+        run: python3 scripts/check-library-contract.py
+      - name: Verify bundle manifest and Lua syntax
+        run: |
+          python3 bundles/libs/scripts/verify_manifest.py
+          find bundles/libs/pandoc/data/filters -name '*.lua' -print0 | xargs -0 -n1 luac -p
+      - name: Run bundle smoke test
+        run: bundles/libs/scripts/smoke-test.sh
+      - name: Build deterministic bundle twice
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            export OMNIDOC_RELEASE_TAG="$GITHUB_REF_NAME"
+          fi
+          bundles/libs/scripts/package-release.sh dist-a
+          bundles/libs/scripts/package-release.sh dist-b
+          cmp dist-a/*.tar.gz dist-b/*.tar.gz
+          cmp dist-a/*.sha256 dist-b/*.sha256
+      - name: Upload library bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: omnidoc-libs-release
+          path: dist-a/*
+          if-no-files-found: error
+
   golden-book:
     name: Golden Book (HTML and EPUB)
     runs-on: ubuntu-latest
     needs: crate-metadata
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: wang-borong/omnidoc-libs
-          path: omnidoc-libs
-          ref: ${{ startsWith(github.ref, 'refs/tags/v') && needs.crate-metadata.outputs.library_revision || 'main' }}
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1
@@ -134,10 +174,10 @@ jobs:
           pandoc-crossref --version
           epubcheck --version || true
       - name: Verify OmniDoc and library release contract
-        run: python3 scripts/check-library-contract.py omnidoc-libs
+        run: python3 scripts/check-library-contract.py
       - name: Build and verify Golden Book
         env:
-          OMNIDOC_LIBS: ${{ github.workspace }}/omnidoc-libs
+          OMNIDOC_LIBS: ${{ github.workspace }}/bundles/libs
         run: scripts/check-golden-book.sh
 
   golden-pdf:
@@ -147,11 +187,6 @@ jobs:
     needs: crate-metadata
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: wang-borong/omnidoc-libs
-          path: omnidoc-libs
-          ref: ${{ startsWith(github.ref, 'refs/tags/v') && needs.crate-metadata.outputs.library_revision || 'main' }}
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1
@@ -177,7 +212,7 @@ jobs:
           fc-match "Noto Serif CJK SC"
       - name: Build and verify Golden PDF
         env:
-          OMNIDOC_LIBS: ${{ github.workspace }}/omnidoc-libs
+          OMNIDOC_LIBS: ${{ github.workspace }}/bundles/libs
           OMNIDOC_PDF_VISUAL_DIR: ${{ github.workspace }}/${{ env.CICD_INTERMEDIATES_DIR }}/golden-pdf-visual
         run: scripts/check-golden-pdf.sh
       - name: Upload Golden PDF visual diagnostics
@@ -199,11 +234,6 @@ jobs:
         os: [macos-15-intel, windows-latest]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: wang-borong/omnidoc-libs
-          path: omnidoc-libs
-          ref: ${{ startsWith(github.ref, 'refs/tags/v') && needs.crate-metadata.outputs.library_revision || 'main' }}
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1
@@ -245,7 +275,7 @@ jobs:
             "$LOCALAPPDATA" \
             "$XDG_CONFIG_HOME" \
             "$XDG_DATA_HOME"
-          libs="$PWD/omnidoc-libs"
+          libs="$PWD/bundles/libs"
           "$bin" config --authors CI --lib "$libs" --force
           "$bin" doctor --strict --output html tests/fixtures/golden-book
           "$bin" build tests/fixtures/golden-book --to html --force
@@ -286,10 +316,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: wang-borong/omnidoc-libs
-          path: omnidoc-libs
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1
@@ -306,7 +332,7 @@ jobs:
           sudo install -m 0755 /tmp/pandoc-crossref /usr/local/bin/pandoc-crossref
       - name: Benchmark cold and cached builds
         env:
-          OMNIDOC_LIBS: ${{ github.workspace }}/omnidoc-libs
+          OMNIDOC_LIBS: ${{ github.workspace }}/bundles/libs
           OMNIDOC_BENCHMARK_DIR: ${{ github.workspace }}/${{ env.CICD_INTERMEDIATES_DIR }}/benchmark
         run: scripts/benchmark-large-book.sh
       - name: Upload benchmark report
@@ -440,6 +466,7 @@ jobs:
     needs:
       - package
       - golden-book
+      - library-bundle
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -463,11 +490,18 @@ jobs:
           mapfile -t archives < <(find artifacts -type f -name '*x86_64-unknown-linux-gnu.tar.gz' -print)
           test "${#archives[@]}" -eq 1
           archive="${archives[0]}"
+          mapfile -t library_archives < <(find artifacts -type f -name 'omnidoc-libs-v*.tar.gz' -print)
+          mapfile -t library_checksums < <(find artifacts -type f -name 'omnidoc-libs-v*.tar.gz.sha256' -print)
+          test "${#library_archives[@]}" -eq 1
+          test "${#library_checksums[@]}" -eq 1
           mkdir -p /tmp/omnidoc-release
           tar -xzf "$archive" -C /tmp/omnidoc-release
           bin="$(find /tmp/omnidoc-release -type f -name omnidoc -print -quit)"
           test -x "$bin"
-          OMNIDOC_BIN="$bin" scripts/check-release-install.sh
+          OMNIDOC_BIN="$bin" \
+          OMNIDOC_LIBS_ARCHIVE="${library_archives[0]}" \
+          OMNIDOC_LIBS_CHECKSUM="${library_checksums[0]}" \
+            scripts/check-release-install.sh
 
   release:
     name: Publish GitHub release

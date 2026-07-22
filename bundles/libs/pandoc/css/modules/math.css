@@ -1,0 +1,20 @@
+@charset "utf-8";
+
+.math.display, math[display="block"] {
+  display: block;
+  max-width: 100%;
+  margin: 1.1em auto;
+  overflow-x: auto;
+  text-align: center;
+}
+
+math annotation, math annotation-xml { display: none !important; }
+
+math[display="inline"], .math.inline {
+  display: inline-block;
+  position: static;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  vertical-align: -0.14em;
+}

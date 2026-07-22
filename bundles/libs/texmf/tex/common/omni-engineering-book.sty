@@ -1,0 +1,140 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{omni-engineering-book}[2026/07/15 v0.1 OmniDoc engineering textbook theme]
+
+\RequirePackage{iftex}
+\ifXeTeX
+  \RequirePackage{fontspec}
+  \RequirePackage{xeCJK}
+\else
+  \PackageError{omni-engineering-book}{XeLaTeX is required}{Use OmniDoc's default xelatex engine for this theme.}
+\fi
+\RequirePackage{titlesec}
+\RequirePackage{fancyhdr}
+\RequirePackage{enumitem}
+\RequirePackage[most]{tcolorbox}
+\RequirePackage{booktabs}
+\RequirePackage{array}
+\RequirePackage{colortbl}
+\RequirePackage{listings}
+\RequirePackage{tikz}
+\RequirePackage{etoolbox}
+\RequirePackage{omni-blocks}
+
+\providecommand{\OmniBookSubtitle}{}
+\providecommand{\OmniBookImprint}{}
+
+\definecolor{CircuitNavy}{HTML}{102A43}
+\definecolor{CircuitBlue}{HTML}{176B87}
+\definecolor{CircuitTeal}{HTML}{2A9D8F}
+\definecolor{CircuitGold}{HTML}{E9C46A}
+\definecolor{CircuitInk}{HTML}{243B53}
+\definecolor{CircuitPale}{HTML}{F2F7F8}
+\definecolor{CircuitLine}{HTML}{C9D8DD}
+\definecolor{CircuitCodeBackground}{HTML}{F4F7F9}
+\definecolor{CircuitCodeRule}{HTML}{D7E2E8}
+
+\setCJKmainfont{Noto Serif CJK SC}
+\setCJKsansfont{Noto Sans CJK SC}
+\setCJKmonofont{Noto Sans Mono CJK SC}
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0.3em}
+\setlist{nosep,leftmargin=2em,topsep=0.4em}
+\setlength{\emergencystretch}{3em}
+\setlength{\headheight}{20pt}
+
+% Long JSON, shell commands, URLs, and generated payloads must remain inside
+% the text block. `columns=fullflexible` avoids the exaggerated letter spacing
+% of listings' fixed-width column model, while `breaklines` permits wrapping
+% even when a quoted string contains no whitespace.
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{CircuitCodeBackground},
+  rulecolor=\color{CircuitCodeRule},
+  frame=single,
+  framesep=0.55em,
+  xleftmargin=0.35em,
+  xrightmargin=0.35em,
+  columns=fullflexible,
+  keepspaces=true,
+  breaklines=true,
+  breakatwhitespace=false,
+  breakindent=1.5em,
+  showspaces=false,
+  showstringspaces=false,
+  showtabs=false,
+  tabsize=2,
+  upquote=true
+}
+
+\titleformat{\part}[display]
+  {\centering\sffamily\bfseries\color{CircuitNavy}}
+  {}{0pt}{\fontsize{34}{42}\selectfont}
+\titlespacing*{\part}{0pt}{0pt}{3em}
+
+\titleformat{\chapter}[display]
+  {\sffamily\bfseries\color{CircuitNavy}}
+  {}{0pt}{\fontsize{25}{31}\selectfont}
+  [\vspace{0.6em}\color{CircuitTeal}\titlerule]
+\titlespacing*{\chapter}{0pt}{-1.5em}{2em}
+
+\titleformat{\section}
+  {\Large\sffamily\bfseries\color{CircuitBlue}}
+  {}{0pt}{}
+\titleformat{\subsection}
+  {\large\sffamily\bfseries\color{CircuitTeal}}
+  {}{0pt}{}
+\titleformat{\subsubsection}
+  {\normalsize\sffamily\bfseries\color{CircuitInk}}
+  {}{0pt}{}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[LE]{\small\sffamily\color{CircuitBlue}\leftmark}
+\fancyhead[RO]{\small\sffamily\color{CircuitBlue}\rightmark}
+\fancyfoot[C]{\sffamily\color{CircuitInk}\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{CircuitLine}\leaders\hrule height \headrulewidth\hfill}}
+\fancypagestyle{plain}{%
+  \fancyhf{}
+  \fancyfoot[C]{\sffamily\color{CircuitInk}\thepage}
+  \renewcommand{\headrulewidth}{0pt}}
+
+\renewenvironment{quote}
+  {\begin{tcolorbox}[enhanced,breakable,colback=CircuitPale,colframe=CircuitTeal,
+    boxrule=0pt,leftrule=3pt,arc=1mm,left=1em,right=1em,top=0.7em,bottom=0.7em]}
+  {\end{tcolorbox}}
+
+\AtBeginEnvironment{longtable}{\small\rowcolors{2}{CircuitPale}{white}}
+
+\makeatletter
+\renewcommand{\maketitle}{%
+  \begin{titlepage}
+  \pagecolor{CircuitNavy}\color{white}
+  \begin{tikzpicture}[remember picture,overlay]
+    \draw[CircuitTeal,line width=2.2pt]
+      ([xshift=-18mm,yshift=-25mm]current page.north east)
+      -- ++(-22mm,0) -- ++(0,-18mm) -- ++(-24mm,0);
+    \fill[CircuitGold] ([xshift=-64mm,yshift=-43mm]current page.north east) circle (3.5mm);
+    \draw[CircuitBlue,line width=1.4pt]
+      ([xshift=18mm,yshift=30mm]current page.south west)
+      -- ++(30mm,0) -- ++(0,14mm) -- ++(38mm,0);
+    \fill[CircuitTeal] ([xshift=86mm,yshift=44mm]current page.south west) circle (3mm);
+  \end{tikzpicture}
+  \vspace*{38mm}
+  {\sffamily\bfseries\fontsize{38}{48}\selectfont \@title\par}
+  \vspace{10mm}
+  {\color{CircuitGold}\rule{55mm}{2pt}\par}
+  \vspace{10mm}
+  \ifstrempty{\OmniBookSubtitle}{}{%
+    {\sffamily\fontsize{17}{25}\selectfont \OmniBookSubtitle\par}}
+  \vfill
+  {\sffamily\large \def\and{\par}\@author\par}
+  \vspace{3mm}
+  {\sffamily\normalsize
+    \ifstrempty{\OmniBookImprint}{\@date}{\OmniBookImprint}\par}
+  \end{titlepage}
+  \nopagecolor\color{CircuitInk}
+  \clearpage}
+\makeatother
+
+\endinput

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-libs="${OMNIDOC_LIBS:-$root/../omnidoc-libs}"
+libs="${OMNIDOC_LIBS:-$root/bundles/libs}"
 output="${OMNIDOC_BENCHMARK_DIR:-$root/_cicd-intermediates/benchmark}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT

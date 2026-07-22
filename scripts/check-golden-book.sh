@@ -3,7 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fixture="$root/tests/fixtures/golden-book"
-libs="${OMNIDOC_LIBS:-$root/../omnidoc-libs}"
+libs="${OMNIDOC_LIBS:-$root/bundles/libs}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -76,16 +76,17 @@ jq -e '
     and (.reader_matrix | length >= 3)
     and all(.checks[]; .passed == true)
 ' "$report" >/dev/null
-python3 - "$lock" <<'PY'
+python3 - "$lock" "$root/Cargo.toml" <<'PY'
 import pathlib
 import sys
 import tomllib
 
 lock = tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+package = tomllib.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
 if lock.get("lock_version") != 4:
     raise SystemExit("expected lock schema v4")
 library = lock.get("library", {})
-if library.get("version") != "1.2.1":
+if library.get("version") != package["package"]["version"]:
     raise SystemExit(f"unexpected omnidoc-libs version: {library.get('version')}")
 if not library.get("manifest_digest", "").startswith("blake3:"):
     raise SystemExit("missing omnidoc-libs manifest digest")

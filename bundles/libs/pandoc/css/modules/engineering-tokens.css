@@ -1,0 +1,13 @@
+@charset "utf-8";
+
+:root {
+  --omni-page: #ffffff;
+  --omni-navy: #102a43;
+  --omni-blue: #176b87;
+  --omni-teal: #2a9d8f;
+  --omni-gold: #d9a928;
+  --omni-ink: #243b53;
+  --omni-muted: #627d98;
+  --omni-pale: #f2f7f8;
+  --omni-line: #c9d8dd;
+}

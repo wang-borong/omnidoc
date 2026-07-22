@@ -2,11 +2,7 @@ pub mod commands;
 pub mod handlers;
 pub mod utils;
 
-use crate::config::global::GlobalConfig;
-use crate::constants::config as config_consts;
 use crate::error::{OmniDocError, Result};
-use crate::git::git_clone;
-use crate::utils::directories::data_local_dir;
 use clap::Parser;
 use clap::{Command, CommandFactory};
 use clap_complete::{generate, Generator};
@@ -26,8 +22,7 @@ pub fn cli() -> Result<()> {
 
     let orig_path = env::current_dir().map_err(OmniDocError::Io)?;
 
-    // Ensure omnidoc lib exists for commands that need it.
-    // Only perform a one-time install (clone) if missing; do not auto update.
+    // Ensure the release-bound library exists for commands that need it.
     match args.command {
         Commands::New { .. }
         | Commands::Init { .. }
@@ -39,19 +34,7 @@ pub fn cli() -> Result<()> {
         | Commands::Md2html { .. }
             if !omnidoc_lib_exists() =>
         {
-            let dld = data_local_dir()
-                .ok_or_else(|| OmniDocError::Other("Local data directory not found".to_string()))?;
-            let olib = dld.join("omnidoc");
-            // 从配置获取库 URL，如果没有配置则使用默认值
-            let lib_url = GlobalConfig::load()
-                .ok()
-                .and_then(|gc| {
-                    gc.get_config()
-                        .and_then(|c| c.lib.lib.as_ref())
-                        .and_then(|l| l.url.clone())
-                })
-                .unwrap_or_else(|| config_consts::DEFAULT_LIB_URL.to_string());
-            let _ = git_clone(&lib_url, &olib, true);
+            handle_lib(true, false, false, false, false)?;
         }
         _ => {}
     }
@@ -246,10 +229,8 @@ pub fn cli() -> Result<()> {
             status,
             verify,
             json,
-            revision,
-            release,
         } => {
-            handle_lib(install, update, status, verify, json, revision, release)?;
+            handle_lib(install, update, status, verify, json)?;
         }
         Commands::Theme { subcommand } => {
             handle_theme(subcommand)?;

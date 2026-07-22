@@ -1,0 +1,70 @@
+@charset "utf-8";
+
+.admonition {
+  --block-frame: var(--omni-blue);
+  --block-back: #f2f7fb;
+  position: relative;
+  box-sizing: border-box;
+  margin: 1.15em 0 1.35em;
+  padding: 1.05em 3.1em 0.9em 1.25em;
+  border: 1px solid var(--block-frame);
+  border-left: 0.32em solid var(--block-frame);
+  border-radius: 0.45em;
+  background: var(--block-back);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.admonition::before {
+  display: block;
+  margin: -0.1em 0 0.55em;
+  color: var(--block-frame);
+  font-family: "Noto Sans CJK SC", "Source Han Sans CN", sans-serif;
+  font-size: 0.94em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  content: attr(data-title);
+}
+
+.admonition::after {
+  position: absolute;
+  top: 1em;
+  right: 1.1em;
+  display: grid;
+  width: 1.55em;
+  height: 1.55em;
+  place-items: center;
+  border-radius: 50%;
+  color: white;
+  background: var(--block-frame);
+  font-family: "Noto Sans CJK SC", sans-serif;
+  font-size: 0.78em;
+  font-weight: 700;
+  content: attr(data-mark);
+}
+
+.admonition.note { --block-frame: #3979a8; --block-back: #f2f7fb; }
+.admonition.tip { --block-frame: #2a9d8f; --block-back: #f1faf8; }
+.admonition.important { --block-frame: #8b5fbf; --block-back: #f7f3fb; }
+.admonition.warning { --block-frame: #d9822b; --block-back: #fff8ed; }
+.admonition.error { --block-frame: #c44536; --block-back: #fff3f1; }
+.admonition.question { --block-frame: #176b87; --block-back: #f1f8fa; }
+.admonition.answer { --block-frame: #4c7a45; --block-back: #f3f8f1; }
+.admonition.example { --block-frame: #66788a; --block-back: #f5f7f9; }
+.admonition.exercise { --block-frame: #9a6b27; --block-back: #fbf7ef; }
+.admonition.solution { --block-frame: #477a70; --block-back: #f1f8f6; }
+
+.admonition > :first-child { margin-top: 0; }
+.admonition > :last-child { margin-bottom: 0; }
+.admonition p { text-indent: 0; }
+
+@media (prefers-color-scheme: dark) {
+  .admonition {
+    --block-back: #18242d;
+    color: #e6edf3;
+    border-color: #3b5362;
+    border-left-color: var(--block-frame);
+    background: #18242d;
+  }
+  .admonition::before { color: var(--block-frame); }
+}

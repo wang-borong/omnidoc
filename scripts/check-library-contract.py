@@ -8,6 +8,7 @@ import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "release" / "omnidoc-libs.toml"
+REPOSITORY = "https://github.com/wang-borong/omnidoc"
 
 
 def load(path: pathlib.Path) -> dict:
@@ -44,7 +45,9 @@ def matches(requirement: str, candidate: str) -> bool:
 
 
 def main() -> int:
-    library_root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ROOT.parent / "omnidoc-libs")
+    library_root = pathlib.Path(
+        sys.argv[1] if len(sys.argv) > 1 else ROOT / "bundles" / "libs"
+    )
     try:
         contract = load(CONTRACT)
         cargo = load(ROOT / "Cargo.toml")
@@ -69,9 +72,19 @@ def main() -> int:
             raise ValueError(
                 f"omnidoc-libs {manifest['version']} is incompatible with OmniDoc {omnidoc_version}"
             )
+        expected_compatibility = f"={omnidoc_version}"
+        if manifest["compatible_omnidoc"] != expected_compatibility:
+            raise ValueError(
+                "library compatibility must be "
+                f"{expected_compatibility}, got {manifest['compatible_omnidoc']}"
+            )
 
         library = contract["library"]
         library_version = library["version"]
+        if library_version != omnidoc_version:
+            raise ValueError(
+                f"library version {library_version} does not match OmniDoc version {omnidoc_version}"
+            )
         if library_version != manifest["version"]:
             raise ValueError(
                 f"contract library version {library_version} does not match manifest version {manifest['version']}"
@@ -86,6 +99,8 @@ def main() -> int:
             )
         if library["checksum_algorithm"] != manifest["checksum_algorithm"]:
             raise ValueError("release and library checksum algorithms differ")
+        if library["repository"] != REPOSITORY:
+            raise ValueError(f"library repository must be {REPOSITORY}")
 
         archive_name = f"omnidoc-libs-v{library_version}.tar.gz"
         release_base = f"{library['repository']}/releases/download/{expected_revision}"

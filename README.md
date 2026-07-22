@@ -359,35 +359,26 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    visible alias of `lib`):
 
    ```bash
-   omnidoc lib --install       # Install to the configured library path
-   omnidoc lib --update        # Pull main, then verify the installed payload
-   omnidoc lib --install --revision v1.2.1
-   omnidoc lib --update --revision 428c8e6
-   omnidoc lib --install --release # Download the archive bound to this OmniDoc release
-   omnidoc lib --update --release  # Verify checksum and replace transactionally
-   omnidoc libs --status       # Show version, revision and compatibility
-   omnidoc libs --status --revision v1.2.1
+   omnidoc lib --install       # Install the archive bound to this OmniDoc release
+   omnidoc lib --update        # Verify and replace from the same release channel
+   omnidoc libs --status       # Show version, release and compatibility
    omnidoc libs --verify       # Verify required files and every SHA-256 entry
    omnidoc libs --verify --json
    ```
 
    Install and update fail if the downloaded manifest, compatibility contract,
-   required resources, payload checksums, or requested revision do not verify.
-   Set `revision = "v1.2.1"` under `[lib]` in the global configuration to pin
-   all subsequent install, update, status, and verify operations. Updates also
-   refuse to overwrite a dirty library checkout. Install and update are
-   transactional: OmniDoc clones into a sibling staging directory, validates
-   the complete bundle, and only then replaces the active library.
-   With `--release`, OmniDoc instead reads its embedded `omnidoc-libs.toml`
-   contract, downloads the matching `.tar.gz` and external SHA-256 file,
-   rejects unsafe archive entries, verifies the internal manifest/checksums,
-   and promotes the extracted bundle using the same transactional replacement.
-   Later `omnidoc lib --update` calls remember an archive installation and use
-   the matching release source automatically unless a Git revision is requested.
+   required resources, or payload checksums do not verify. OmniDoc and the
+   library bundle always share one version and one GitHub release. Install and
+   update read the embedded `omnidoc-libs.toml` contract, download the matching
+   `.tar.gz` and external SHA-256 file, reject unsafe archive entries, verify the
+   internal manifest/checksums, and promote the extracted bundle transactionally.
+   A custom `[lib].path` can select a local bundle such as `bundles/libs` for
+   development; Git clone installation is no longer supported.
 
 11. **Inspect versioned theme bundles**
 
-   Theme bundles are declared by `themes/<name>.toml` inside omnidoc-libs and
+   Theme bundles are declared by `themes/<name>.toml` inside the installed
+   OmniDoc library bundle and
    can bind matching HTML CSS, EPUB CSS, LaTeX packages, PPTX reference decks,
    Lua filters, font
    requirements, metadata defaults, and an OmniDoc compatibility range:
@@ -515,7 +506,7 @@ omnidoc lock --check
 `lock --check` exits with an error when `omnidoc.lock` is missing or stale.
 Lock schema v4 uses BLAKE3 content digests and stores dependencies and resolved
 resources separately for every configured output target. It also records the
-selected omnidoc-libs revision/content digest and detected Pandoc,
+selected OmniDoc library release/content digest and detected Pandoc,
 pandoc-crossref, LaTeX engine, and PDF theme font identities. Font identities
 include the resolved family, style, font version, file name, and content digest.
 Toolchain identities now participate in cache keys, so replacing Pandoc,
@@ -545,15 +536,15 @@ omnidoc ci [PATH] [--output pdf] [--output html]
 Run the real Pandoc Golden Book gate locally before release-oriented changes:
 
 ```bash
-OMNIDOC_LIBS=../omnidoc-libs scripts/check-golden-book.sh
-OMNIDOC_LIBS=../omnidoc-libs scripts/check-golden-pdf.sh
+scripts/check-golden-book.sh
+scripts/check-golden-pdf.sh
 ```
 
 Scheduled and manually dispatched CI also records cold and cached timings for
 a generated 100-chapter/1,000-section benchmark. Run the same workload locally:
 
 ```bash
-OMNIDOC_LIBS=../omnidoc-libs scripts/benchmark-large-book.sh
+scripts/benchmark-large-book.sh
 ```
 
 The PDF gate also renders every page at a fixed DPI and checks the committed
@@ -564,7 +555,6 @@ artifact. After an intentional layout change, review the render and refresh
 the contract explicitly with:
 
 ```bash
-OMNIDOC_LIBS=../omnidoc-libs \
 OMNIDOC_PDF_VISUAL_MODE=capture \
 scripts/check-golden-pdf.sh
 ```
@@ -585,19 +575,20 @@ The heavier PDF gate runs weekly, for version tags, and when manually
 dispatched.
 macOS and Windows jobs additionally install Pandoc and pandoc-crossref and build
 a real HTML fixture. Every packaged archive is extracted and its contained
-binary and release contract are smoke-tested. Version-tag workflows download
-the release-bound omnidoc-libs archive through the embedded contract, verify
-its checksum, run `doctor --strict`, and build the Golden Book with the packaged
-OmniDoc binary before publishing the GitHub release.
+binary and release contract are smoke-tested. Version-tag workflows build the
+release-bound library archive from `bundles/libs`, install that local candidate
+through the same verified archive path used by end users, run `doctor --strict`,
+and build the Golden Book with the packaged OmniDoc binary before publishing
+the GitHub release.
 
 Official OmniDoc archives and Debian packages include
 `omnidoc-libs.toml`, a machine-readable release contract declaring the matching
-library version/tag, release archive URL, and external SHA-256 URL. CI compares
-that contract with OmniDoc's Cargo version and the checked-out
-`omnidoc-libs/manifest.toml` before packaging. Verify it locally with:
+library version/tag, release archive URL, and external SHA-256 URL. CI requires
+the Cargo package, embedded release contract, and `bundles/libs/manifest.toml`
+to use the same version before packaging. Verify it locally with:
 
 ```bash
-python3 scripts/check-library-contract.py ../omnidoc-libs
+python3 scripts/check-library-contract.py
 ```
 
 The ordered tag, release-archive, packaged-install, and EPUB reader acceptance

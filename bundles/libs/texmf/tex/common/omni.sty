@@ -1,0 +1,34 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{omni}[2024/09/27 v0.1 the omni style]
+
+\RequirePackage{geometry}
+% Default geometry, can be overrided
+\geometry{%
+  a4paper,
+  top=25.4mm, bottom=25.4mm,
+  left=20mm, right=20mm,
+  headheight=2.17cm,
+  headsep=4mm,
+  footskip=12mm
+}
+
+\RequirePackage{listings-config}
+% Override basicstyle for this specific template
+\lstset{basicstyle=\small\ttfamily}
+
+\RequirePackage[usenames,dvipsnames]{xcolor}
+\RequirePackage{omni-blocks}
+
+\RequirePackage{xparse}
+\RequirePackage{array}
+% underline
+\RequirePackage{soul}
+
+\NewDocumentCommand\GrammarMark{O{} m}{%
+  \IfBlankTF{#1}%
+  {\textit{#2}}%
+  {\def\arraystretch{0.8}{\setlength{\tabcolsep}{0pt}
+    \begin{tabular}[t]{@{}c@{}} \setlength\arrayrulewidth{0.8pt}{#2}\\\hline{\small #1}\\\end{tabular}}}%
+}
+
+\endinput

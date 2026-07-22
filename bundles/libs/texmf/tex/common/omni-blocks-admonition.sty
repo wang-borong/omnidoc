@@ -1,0 +1,36 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{omni-blocks-admonition}[2026/07/21 v0.1 OmniDoc admonition blocks]
+
+\RequirePackage{omni-blocks-core}
+
+\expandafter\def\csname OmniBlocknoteMark\endcsname{i}
+\expandafter\def\csname OmniBlocktipMark\endcsname{+}
+\expandafter\def\csname OmniBlockimportantMark\endcsname{*}
+\expandafter\def\csname OmniBlockwarningMark\endcsname{!}
+\expandafter\def\csname OmniBlockerrorMark\endcsname{!}
+\expandafter\def\csname OmniBlockquestionMark\endcsname{?}
+\expandafter\def\csname OmniBlockanswerMark\endcsname{A}
+\expandafter\def\csname OmniBlockexampleMark\endcsname{E}
+\expandafter\def\csname OmniBlockexerciseMark\endcsname{X}
+\expandafter\def\csname OmniBlocksolutionMark\endcsname{S}
+
+\NewTColorBox{OmniAdmonition}{m m}{
+  omni semantic block,
+  colback=OmniBlock#1Back,
+  colframe=OmniBlock#1Frame,
+  colbacktitle=OmniBlock#1Frame!12!white,
+  title={#2},
+  overlay unbroken and first={
+    \node[
+      circle,
+      fill=OmniBlock#1Frame,
+      text=white,
+      font=\sffamily\bfseries\scriptsize,
+      minimum size=4.4mm,
+      inner sep=0pt
+    ] at ([xshift=-4.5mm,yshift=-4.3mm]frame.north east)
+      {\csname OmniBlock#1Mark\endcsname};
+  },
+}
+
+\endinput

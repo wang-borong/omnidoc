@@ -1,14 +1,10 @@
 use crate::config::global::GlobalConfig;
-use crate::constants::config as config_consts;
-use crate::constants::git_refs;
 use crate::doc::templates::get_latexmkrc_template;
 use crate::error::{OmniDocError, Result};
-use crate::git::{git_checkout_revision, git_clone};
 use crate::utils::directories::{config_local_dir, data_local_dir};
 use crate::utils::fs;
 use console::style;
 use flate2::read::GzDecoder;
-use git2::{Repository, StatusOptions};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -73,9 +69,6 @@ struct LibraryStatus {
     version: Option<String>,
     revision: Option<String>,
     archive_digest: Option<String>,
-    requested_revision: Option<String>,
-    revision_matches: Option<bool>,
-    dirty: Option<bool>,
     compatible_omnidoc: Option<String>,
     omnidoc_compatible: Option<bool>,
     compatible_pandoc: Option<String>,
@@ -92,35 +85,15 @@ pub fn handle_lib(
     status: bool,
     verify: bool,
     json: bool,
-    revision: Option<String>,
-    release: bool,
 ) -> Result<()> {
     let global_config = GlobalConfig::load()?;
     let library_path = configured_library_path(&global_config)?;
-    let release_source =
-        release || (revision.is_none() && library_path.join(INSTALLED_RELEASE_FILE).is_file());
-    let requested_revision = if release_source {
-        None
-    } else {
-        revision.or_else(|| configured_library_revision(&global_config))
-    };
     let requested_install = install || (!update && !status && !verify);
 
     if requested_install {
-        if release_source {
-            install_release_library(&library_path, false)?;
-        } else {
-            let lib_url = configured_library_url(&global_config);
-            install_verified_library(
-                &lib_url,
-                &library_path,
-                requested_revision.as_deref(),
-                false,
-                json,
-            )?;
-        }
+        install_release_library(&library_path, false)?;
         ensure_latexmkrc()?;
-        let result = inspect_library(&library_path, requested_revision.as_deref());
+        let result = inspect_library(&library_path);
         print_library_status(&result, json)?;
         ensure_verified(&result)?;
         if !json {
@@ -135,22 +108,9 @@ pub fn handle_lib(
     }
 
     if update {
-        if release_source {
-            install_release_library(&library_path, true)?;
-        } else {
-            ensure_clean_repository(&library_path)?;
-            let lib_url = installed_library_url(&library_path)
-                .unwrap_or_else(|| configured_library_url(&global_config));
-            install_verified_library(
-                &lib_url,
-                &library_path,
-                requested_revision.as_deref(),
-                true,
-                json,
-            )?;
-        }
+        install_release_library(&library_path, true)?;
         ensure_latexmkrc()?;
-        let result = inspect_library(&library_path, requested_revision.as_deref());
+        let result = inspect_library(&library_path);
         print_library_status(&result, json)?;
         ensure_verified(&result)?;
         if !json {
@@ -164,7 +124,7 @@ pub fn handle_lib(
         return Ok(());
     }
 
-    let result = inspect_library(&library_path, requested_revision.as_deref());
+    let result = inspect_library(&library_path);
     print_library_status(&result, json)?;
     if verify {
         ensure_verified(&result)?;
@@ -174,9 +134,7 @@ pub fn handle_lib(
 
 fn install_release_library(library_path: &Path, replace_existing: bool) -> Result<()> {
     let contract = read_release_contract()?;
-    let archive = download_release_file(&contract.library.archive_url, MAX_RELEASE_ARCHIVE_BYTES)?;
-    let checksum =
-        download_release_file(&contract.library.checksum_url, MAX_RELEASE_CHECKSUM_BYTES)?;
+    let (archive, checksum) = read_release_files(&contract)?;
     verify_release_archive_checksum(&archive, &checksum, &contract.library.archive_url)?;
     let archive_digest = format!("sha256:{:x}", Sha256::digest(&archive));
 
@@ -203,7 +161,7 @@ fn install_release_library(library_path: &Path, replace_existing: bool) -> Resul
                 archive_digest: archive_digest.clone(),
             },
         )?;
-        let status = inspect_library(&staging, None);
+        let status = inspect_library(&staging);
         ensure_verified(&status)?;
         if status.version.as_deref() != Some(contract.library.version.as_str()) {
             return Err(OmniDocError::Other(format!(
@@ -265,6 +223,12 @@ fn read_release_contract() -> Result<LibraryReleaseContract> {
             env!("CARGO_PKG_VERSION")
         )));
     }
+    if contract.library.version != contract.omnidoc_version {
+        return Err(OmniDocError::Other(format!(
+            "library version {} does not match OmniDoc version {}",
+            contract.library.version, contract.omnidoc_version
+        )));
+    }
     if contract.library.checksum_algorithm != "sha256" {
         return Err(OmniDocError::Other(format!(
             "unsupported release checksum algorithm {}",
@@ -285,6 +249,45 @@ fn read_release_contract() -> Result<LibraryReleaseContract> {
         )));
     }
     Ok(contract)
+}
+
+fn read_release_files(contract: &LibraryReleaseContract) -> Result<(Vec<u8>, Vec<u8>)> {
+    let archive_path = std::env::var_os("OMNIDOC_LIBS_ARCHIVE");
+    let checksum_path = std::env::var_os("OMNIDOC_LIBS_CHECKSUM");
+    match (archive_path, checksum_path) {
+        (Some(archive_path), Some(checksum_path)) => {
+            let archive = std::fs::read(&archive_path).map_err(|error| {
+                OmniDocError::Other(format!(
+                    "cannot read library archive {}: {error}",
+                    PathBuf::from(&archive_path).display()
+                ))
+            })?;
+            if archive.len() as u64 > MAX_RELEASE_ARCHIVE_BYTES {
+                return Err(OmniDocError::Other(format!(
+                    "library archive exceeds size limit ({MAX_RELEASE_ARCHIVE_BYTES} bytes)"
+                )));
+            }
+            let checksum = std::fs::read(&checksum_path).map_err(|error| {
+                OmniDocError::Other(format!(
+                    "cannot read library checksum {}: {error}",
+                    PathBuf::from(&checksum_path).display()
+                ))
+            })?;
+            if checksum.len() as u64 > MAX_RELEASE_CHECKSUM_BYTES {
+                return Err(OmniDocError::Other(format!(
+                    "library checksum exceeds size limit ({MAX_RELEASE_CHECKSUM_BYTES} bytes)"
+                )));
+            }
+            Ok((archive, checksum))
+        }
+        (None, None) => Ok((
+            download_release_file(&contract.library.archive_url, MAX_RELEASE_ARCHIVE_BYTES)?,
+            download_release_file(&contract.library.checksum_url, MAX_RELEASE_CHECKSUM_BYTES)?,
+        )),
+        _ => Err(OmniDocError::Other(
+            "OMNIDOC_LIBS_ARCHIVE and OMNIDOC_LIBS_CHECKSUM must be set together".to_string(),
+        )),
+    }
 }
 
 fn download_release_file(url: &str, max_bytes: u64) -> Result<Vec<u8>> {
@@ -451,7 +454,7 @@ pub(crate) fn configured_library_path(global_config: &GlobalConfig) -> Result<Pa
 }
 
 pub(crate) fn library_diagnostic(path: &Path) -> (bool, String) {
-    let status = inspect_library(path, None);
+    let status = inspect_library(path);
     let ok = status.exists
         && status.manifest_valid
         && status.integrity_verified
@@ -472,82 +475,6 @@ pub(crate) fn library_diagnostic(path: &Path) -> (bool, String) {
         status.errors.join("; ")
     };
     (ok, detail)
-}
-
-fn configured_library_url(global_config: &GlobalConfig) -> String {
-    global_config
-        .get_config()
-        .and_then(|config| config.lib.lib.as_ref())
-        .and_then(|library| library.url.clone())
-        .unwrap_or_else(|| config_consts::DEFAULT_LIB_URL.to_string())
-}
-
-fn configured_library_revision(global_config: &GlobalConfig) -> Option<String> {
-    global_config
-        .get_config()
-        .and_then(|config| config.lib.lib.as_ref())
-        .and_then(|library| library.revision.clone())
-}
-
-fn installed_library_url(path: &Path) -> Option<String> {
-    let repository = Repository::open(path).ok()?;
-    let remote = repository.find_remote(git_refs::ORIGIN).ok()?;
-    remote.url().ok().map(str::to_string)
-}
-
-fn install_verified_library(
-    url: &str,
-    library_path: &Path,
-    requested_revision: Option<&str>,
-    replace_existing: bool,
-    json: bool,
-) -> Result<()> {
-    let parent = library_path.parent().ok_or_else(|| {
-        OmniDocError::Other(format!(
-            "library path has no parent directory: {}",
-            library_path.display()
-        ))
-    })?;
-    fs::create_dir_all(parent)?;
-    let staging = sibling_transaction_path(library_path, "staging");
-    let prepared = (|| -> Result<LibraryStatus> {
-        git_clone(url, &staging, true).map_err(OmniDocError::Git)?;
-        let checkout_revision =
-            requested_revision.or_else(|| replace_existing.then_some(git_refs::MAIN_BRANCH));
-        if let Some(revision) = checkout_revision {
-            git_checkout_revision(&staging, revision).map_err(OmniDocError::Git)?;
-        }
-        Ok(inspect_library(&staging, requested_revision))
-    })();
-    let staged_status = match prepared {
-        Ok(status) => status,
-        Err(error) => {
-            cleanup_transaction_path(&staging);
-            return Err(error);
-        }
-    };
-    if let Err(error) = ensure_verified(&staged_status) {
-        cleanup_transaction_path(&staging);
-        print_library_status(&staged_status, json)?;
-        return Err(error);
-    }
-
-    if !replace_existing {
-        if library_path.exists() {
-            cleanup_transaction_path(&staging);
-            return Err(OmniDocError::Other(format!(
-                "OmniDoc library already exists: {}",
-                library_path.display()
-            )));
-        }
-        if let Err(error) = fs::rename(&staging, library_path) {
-            cleanup_transaction_path(&staging);
-            return Err(error);
-        }
-        return Ok(());
-    }
-
-    replace_library_transactionally(library_path, &staging)
 }
 
 fn replace_library_transactionally(library_path: &Path, staging: &Path) -> Result<()> {
@@ -594,25 +521,6 @@ fn cleanup_transaction_path(path: &Path) {
     }
 }
 
-fn ensure_clean_repository(path: &Path) -> Result<()> {
-    let repository = Repository::open(path).map_err(OmniDocError::Git)?;
-    let mut options = StatusOptions::new();
-    options.include_untracked(true).recurse_untracked_dirs(true);
-    let dirty = repository
-        .statuses(Some(&mut options))
-        .map_err(OmniDocError::Git)?
-        .iter()
-        .next()
-        .is_some();
-    if dirty {
-        return Err(OmniDocError::Other(format!(
-            "refusing to update dirty OmniDoc library: {}",
-            path.display()
-        )));
-    }
-    Ok(())
-}
-
 fn ensure_latexmkrc() -> Result<()> {
     let mut latexmkrc = config_local_dir().ok_or_else(|| {
         OmniDocError::Other("Local configuration directory not found".to_string())
@@ -628,7 +536,7 @@ fn ensure_latexmkrc() -> Result<()> {
     Ok(())
 }
 
-fn inspect_library(path: &Path, requested_revision: Option<&str>) -> LibraryStatus {
+fn inspect_library(path: &Path) -> LibraryStatus {
     let mut status = LibraryStatus {
         path: path.display().to_string(),
         exists: path.is_dir(),
@@ -638,9 +546,6 @@ fn inspect_library(path: &Path, requested_revision: Option<&str>) -> LibraryStat
         version: None,
         revision: None,
         archive_digest: None,
-        requested_revision: requested_revision.map(str::to_string),
-        revision_matches: None,
-        dirty: None,
         compatible_omnidoc: None,
         omnidoc_compatible: None,
         compatible_pandoc: None,
@@ -656,72 +561,41 @@ fn inspect_library(path: &Path, requested_revision: Option<&str>) -> LibraryStat
         return status;
     }
 
-    if let Ok(repository) = Repository::open(path) {
-        status.source = Some("git".to_string());
-        status.revision = repository
-            .head()
-            .ok()
-            .and_then(|head| head.target())
-            .map(|oid| oid.to_string());
-        let mut options = StatusOptions::new();
-        options.include_untracked(true).recurse_untracked_dirs(true);
-        status.dirty = repository
-            .statuses(Some(&mut options))
-            .ok()
-            .map(|statuses| !statuses.is_empty());
-        if let (Some(requested), Some(actual)) = (requested_revision, status.revision.as_deref()) {
-            status.revision_matches = repository
-                .revparse_single(requested)
-                .ok()
-                .and_then(|object| object.peel_to_commit().ok())
-                .map(|commit| commit.id().to_string() == actual);
-            if status.revision_matches == Some(false) {
-                status.errors.push(format!(
-                    "installed revision {} does not match requested revision {}",
-                    actual, requested
-                ));
-            } else if status.revision_matches.is_none() {
-                status
-                    .errors
-                    .push(format!("cannot resolve requested revision {}", requested));
-            }
-        }
-    } else {
-        let release_path = path.join(INSTALLED_RELEASE_FILE);
-        if release_path.is_file() {
-            match std::fs::read_to_string(&release_path)
-                .map_err(|error| error.to_string())
-                .and_then(|content| {
-                    toml::from_str::<InstalledRelease>(&content).map_err(|error| error.to_string())
-                }) {
-                Ok(release) => {
-                    let expected_revision = format!("v{}", release.version);
-                    status.source = Some("release".to_string());
-                    status.revision = Some(release.revision.clone());
-                    status.archive_digest = Some(release.archive_digest.clone());
-                    if release.contract_version != 1 {
-                        status.errors.push(format!(
-                            "unsupported installed release metadata version {}",
-                            release.contract_version
-                        ));
-                    }
-                    if release.revision != expected_revision {
-                        status.errors.push(format!(
-                            "installed release revision {} does not match version {}",
-                            release.revision, release.version
-                        ));
-                    }
-                    if !valid_sha256_digest(&release.archive_digest) {
-                        status
-                            .errors
-                            .push("invalid installed release archive digest".to_string());
-                    }
+    status.source = Some("local".to_string());
+    let release_path = path.join(INSTALLED_RELEASE_FILE);
+    if release_path.is_file() {
+        match std::fs::read_to_string(&release_path)
+            .map_err(|error| error.to_string())
+            .and_then(|content| {
+                toml::from_str::<InstalledRelease>(&content).map_err(|error| error.to_string())
+            }) {
+            Ok(release) => {
+                let expected_revision = format!("v{}", release.version);
+                status.source = Some("release".to_string());
+                status.revision = Some(release.revision.clone());
+                status.archive_digest = Some(release.archive_digest.clone());
+                if release.contract_version != 1 {
+                    status.errors.push(format!(
+                        "unsupported installed release metadata version {}",
+                        release.contract_version
+                    ));
                 }
-                Err(error) => {
+                if release.revision != expected_revision {
+                    status.errors.push(format!(
+                        "installed release revision {} does not match version {}",
+                        release.revision, release.version
+                    ));
+                }
+                if !valid_sha256_digest(&release.archive_digest) {
                     status
                         .errors
-                        .push(format!("invalid {}: {}", release_path.display(), error))
+                        .push("invalid installed release archive digest".to_string());
                 }
+            }
+            Err(error) => {
+                status
+                    .errors
+                    .push(format!("invalid {}: {}", release_path.display(), error))
             }
         }
     }
@@ -1005,25 +879,9 @@ fn print_library_status(status: &LibraryStatus, json: bool) -> Result<()> {
         println!("archive: {}", digest);
     }
     println!(
-        "revision: {}{}",
-        status.revision.as_deref().unwrap_or("unknown"),
-        if status.dirty == Some(true) {
-            " (dirty)"
-        } else {
-            ""
-        }
+        "release: {}",
+        status.revision.as_deref().unwrap_or("local checkout")
     );
-    if let Some(requested) = status.requested_revision.as_deref() {
-        println!(
-            "requested revision: {} ({})",
-            requested,
-            match status.revision_matches {
-                Some(true) => "matched",
-                Some(false) => "mismatched",
-                None => "unresolved",
-            }
-        );
-    }
     println!(
         "manifest: {}",
         if status.manifest_valid {
@@ -1072,8 +930,6 @@ fn ensure_verified(status: &LibraryStatus) -> Result<()> {
         && status.errors.is_empty()
         && status.omnidoc_compatible != Some(false)
         && status.pandoc_compatible != Some(false)
-        && status.revision_matches != Some(false)
-        && !(status.requested_revision.is_some() && status.revision_matches.is_none())
     {
         return Ok(());
     }
@@ -1085,72 +941,17 @@ fn ensure_verified(status: &LibraryStatus) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_release_archive, git_refs, inspect_library, install_verified_library,
-        read_manifest, safe_relative_path, verify_release_archive_checksum, version_matches,
-        write_installed_release, InstalledRelease,
+        extract_release_archive, inspect_library, read_manifest, safe_relative_path,
+        verify_release_archive_checksum, version_matches, write_installed_release,
+        InstalledRelease,
     };
     use flate2::write::GzEncoder;
     use flate2::Compression;
-    use git2::{Repository, RepositoryInitOptions, Signature};
     use sha2::{Digest, Sha256};
     use std::fs;
     use std::io::Cursor;
-    use std::path::Path;
     use tar::{Builder, Header};
     use tempfile::TempDir;
-
-    fn commit_all(repository: &Repository, message: &str) -> git2::Oid {
-        let mut index = repository.index().expect("repository index");
-        index
-            .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
-            .expect("add files");
-        let tree_id = index.write_tree().expect("write tree");
-        let tree = repository.find_tree(tree_id).expect("find tree");
-        let signature =
-            Signature::now("OmniDoc Test", "omnidoc@example.invalid").expect("signature");
-        let parent = repository
-            .head()
-            .ok()
-            .and_then(|head| head.peel_to_commit().ok());
-        let parents = parent.iter().collect::<Vec<_>>();
-        repository
-            .commit(
-                Some("HEAD"),
-                &signature,
-                &signature,
-                message,
-                &tree,
-                &parents,
-            )
-            .expect("commit")
-    }
-
-    fn write_library_contract(root: &Path, payload: &[u8], checksum_payload: &[u8]) {
-        fs::create_dir_all(root.join("payload")).expect("payload directory");
-        fs::write(root.join(".gitattributes"), "* -text\n").expect("git attributes");
-        fs::write(root.join("payload/resource.txt"), payload).expect("payload");
-        fs::write(
-            root.join("manifest.toml"),
-            r#"manifest_version = 1
-version = "1.0.0"
-compatible_omnidoc = ">=1.3.0,<2.0.0"
-compatible_pandoc = ">=0.0.0"
-checksum_algorithm = "sha256"
-checksum_file = "checksums.sha256"
-payload_roots = ["payload"]
-required_resources = ["payload/resource.txt"]
-"#,
-        )
-        .expect("manifest");
-        fs::write(
-            root.join("checksums.sha256"),
-            format!(
-                "{:x}  payload/resource.txt\n",
-                Sha256::digest(checksum_payload)
-            ),
-        )
-        .expect("checksums");
-    }
 
     fn append_archive_file(builder: &mut Builder<GzEncoder<Vec<u8>>>, path: &str, bytes: &[u8]) {
         let mut header = Header::new_gnu();
@@ -1237,7 +1038,7 @@ required_resources = ["payload/resource.txt"]
             },
         )
         .expect("release metadata");
-        let status = inspect_library(&installed, None);
+        let status = inspect_library(&installed);
         assert!(status.integrity_verified, "{:?}", status.errors);
         assert_eq!(status.version.as_deref(), Some("1.0.0"));
         assert_eq!(status.source.as_deref(), Some("release"));
@@ -1283,92 +1084,5 @@ required_resources = []
 
         let error = read_manifest(root.path()).expect_err("invalid requirement must fail");
         assert!(error.contains("invalid OmniDoc compatibility requirement"));
-    }
-
-    #[test]
-    fn failed_transactional_update_preserves_installed_library() {
-        let root = TempDir::new().expect("temporary root");
-        let source = root.path().join("source");
-        let installed = root.path().join("installed");
-        fs::create_dir_all(&source).expect("source directory");
-        let mut init = RepositoryInitOptions::new();
-        init.initial_head(git_refs::MAIN_BRANCH);
-        let repository = Repository::init_opts(&source, &init).expect("source repository");
-        let original = b"verified payload\n";
-        write_library_contract(&source, original, original);
-        let original_revision = commit_all(&repository, "valid library");
-
-        install_verified_library(
-            source.to_str().expect("source URL"),
-            &installed,
-            None,
-            false,
-            true,
-        )
-        .expect("initial installation");
-        assert_eq!(
-            fs::read(installed.join("payload/resource.txt")).expect("installed payload"),
-            original
-        );
-
-        write_library_contract(&source, b"tampered payload\n", original);
-        commit_all(&repository, "invalid library");
-        let error = install_verified_library(
-            source.to_str().expect("source URL"),
-            &installed,
-            None,
-            true,
-            true,
-        )
-        .expect_err("invalid update must fail");
-        assert!(error.to_string().contains("verification failed"));
-        assert_eq!(
-            fs::read(installed.join("payload/resource.txt")).expect("preserved payload"),
-            original
-        );
-        assert_eq!(
-            Repository::open(&installed)
-                .expect("installed repository")
-                .head()
-                .expect("installed head")
-                .target(),
-            Some(original_revision)
-        );
-        assert!(!fs::read_dir(root.path())
-            .expect("transaction directory")
-            .flatten()
-            .any(|entry| entry.file_name().to_string_lossy().contains(".staging.")));
-
-        let updated = b"updated verified payload\n";
-        write_library_contract(&source, updated, updated);
-        let updated_revision = commit_all(&repository, "valid update");
-        install_verified_library(
-            source.to_str().expect("source URL"),
-            &installed,
-            None,
-            true,
-            true,
-        )
-        .expect("valid update");
-        assert_eq!(
-            fs::read(installed.join("payload/resource.txt")).expect("updated payload"),
-            updated
-        );
-        assert_eq!(
-            Repository::open(&installed)
-                .expect("updated repository")
-                .head()
-                .expect("updated head")
-                .target(),
-            Some(updated_revision)
-        );
-        assert!(!fs::read_dir(root.path())
-            .expect("transaction directory")
-            .flatten()
-            .any(|entry| {
-                let name = entry.file_name();
-                let name = name.to_string_lossy();
-                name.contains(".staging.") || name.contains(".backup.")
-            }));
     }
 }

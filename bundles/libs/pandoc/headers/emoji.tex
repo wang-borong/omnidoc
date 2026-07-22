@@ -1,0 +1,13 @@
+% Common emoji support for OmniDoc's LaTeX/PDF output.
+\usepackage{twemojis}
+\providecommand{\omnidocEmoji}[2]{%
+  \ifcsname twemoji #1\endcsname
+    \texttwemoji{#1}%
+  \else
+    \ifcsname twemoji #2\endcsname
+      \texttwemoji{#2}%
+    \else
+      \textnormal{\texttt{[emoji]}}%
+    \fi
+  \fi
+}

@@ -241,13 +241,14 @@ impl PandocBuilder {
             return;
         }
         if let Some(theme) = &self.theme {
-            for (index, relative) in theme.resources.latex_headers.iter().enumerate() {
-                options.push(pandoc::FLAG_METADATA.to_string());
-                options.push(format!(
-                    "omnidoc-theme-latex-header-{}={}",
-                    index + 1,
-                    PathBuf::from(omnidoc_lib).join(relative).display()
-                ));
+            for relative in &theme.resources.latex_headers {
+                options.push(pandoc::FLAG_INCLUDE_IN_HEADER.to_string());
+                options.push(
+                    PathBuf::from(omnidoc_lib)
+                        .join(relative)
+                        .to_string_lossy()
+                        .to_string(),
+                );
             }
         }
     }
@@ -258,18 +259,24 @@ impl PandocBuilder {
         output_kind: PandocOutputKind,
         omnidoc_lib: &str,
     ) {
-        if !output_kind.uses_latex_defaults()
-            || !output_kind.filters(&self.config).contains(&"emoji.lua")
-        {
+        if !output_kind.uses_latex_defaults() {
             return;
         }
-        options.push(pandoc::FLAG_METADATA.to_string());
-        options.push(format!(
-            "omnidoc-default-latex-header={}",
-            PathBuf::from(omnidoc_lib)
-                .join(pandoc::LIB_PANDOC_HEADER_EMOJI)
-                .display()
-        ));
+        let filters = output_kind.filters(&self.config);
+        for (filter, relative) in [
+            ("emoji.lua", pandoc::LIB_PANDOC_HEADER_EMOJI),
+            ("admonition.lua", pandoc::LIB_PANDOC_HEADER_SEMANTIC_BLOCKS),
+        ] {
+            if filters.contains(&filter) {
+                options.push(pandoc::FLAG_INCLUDE_IN_HEADER.to_string());
+                options.push(
+                    PathBuf::from(omnidoc_lib)
+                        .join(relative)
+                        .to_string_lossy()
+                        .to_string(),
+                );
+            }
+        }
     }
 
     fn push_template(
@@ -833,15 +840,17 @@ mod tests {
     }
 
     #[test]
-    fn adds_emoji_header_only_when_the_latex_emoji_filter_is_active() {
+    fn adds_managed_headers_for_active_latex_filters() {
         let builder = PandocBuilder::new(MergedConfig::default()).expect("pandoc builder");
         let mut pdf_options = Vec::new();
         builder.push_default_latex_headers(&mut pdf_options, PandocOutputKind::Pdf, "/tmp/omnidoc");
         assert_eq!(
             pdf_options,
             vec![
-                "--metadata".to_string(),
-                "omnidoc-default-latex-header=/tmp/omnidoc/pandoc/headers/emoji.tex".to_string(),
+                "--include-in-header".to_string(),
+                "/tmp/omnidoc/pandoc/headers/emoji.tex".to_string(),
+                "--include-in-header".to_string(),
+                "/tmp/omnidoc/pandoc/headers/semantic-blocks.tex".to_string(),
             ]
         );
 
@@ -1064,8 +1073,8 @@ documentclass = "scrbook"
         assert_eq!(
             latex_options,
             vec![
-                "--metadata".to_string(),
-                format!("omnidoc-theme-latex-header-1={}", header.display())
+                "--include-in-header".to_string(),
+                header.to_string_lossy().to_string()
             ]
         );
 

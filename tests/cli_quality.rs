@@ -1,4 +1,3 @@
-use git2::{Repository, Signature};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -324,46 +323,10 @@ required_resources = ["payload/resource.txt"]
     )
     .expect("global config");
 
-    let repository = Repository::init(&library).expect("library repository");
-    let mut index = repository.index().expect("library index");
-    index
-        .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
-        .expect("add library files");
-    let tree_id = index.write_tree().expect("library tree");
-    let tree = repository.find_tree(tree_id).expect("find library tree");
-    let signature =
-        Signature::now("OmniDoc Test", "omnidoc@example.invalid").expect("library signature");
-    let revision = repository
-        .commit(
-            Some("HEAD"),
-            &signature,
-            &signature,
-            "library fixture",
-            &tree,
-            &[],
-        )
-        .expect("library commit")
-        .to_string();
-    fs::write(
-        fixture.env_root.join("config/omnidoc.toml"),
-        format!(
-            "[lib]\npath = {:?}\nrevision = {:?}\n",
-            library.to_string_lossy(),
-            revision
-        ),
-    )
-    .expect("pinned global config");
-
     let verified = assert_success(fixture.command(&["libs", "--verify", "--json"]));
     assert!(verified.contains("\"version\": \"1.0.0\""));
     assert!(verified.contains("\"integrity_verified\": true"));
-    assert!(verified.contains("\"revision_matches\": true"));
-    assert!(verified.contains(&revision));
-
-    let mismatch =
-        assert_failure(fixture.command(&["libs", "--verify", "--json", "--revision", "deadbeef"]));
-    assert!(mismatch.contains("\"revision_matches\": null"));
-    assert!(mismatch.contains("cannot resolve requested revision deadbeef"));
+    assert!(verified.contains("\"source\": \"local\""));
 
     fs::write(library.join("payload/resource.txt"), b"tampered\n").expect("tamper");
     let failed = assert_failure(fixture.command(&["lib", "--verify", "--json"]));
@@ -560,7 +523,10 @@ fn publish_no_build_copies_existing_artifacts() {
     let manifest: serde_json::Value = serde_json::from_str(&manifest).expect("publish JSON");
     assert_eq!(manifest["manifest_version"], 2);
     assert_eq!(manifest["tag"], "release/1");
-    assert_eq!(manifest["library_contract"]["library"]["version"], "1.2.1");
+    assert_eq!(
+        manifest["library_contract"]["library"]["version"],
+        env!("CARGO_PKG_VERSION")
+    );
     let artifacts = manifest["artifacts"].as_array().expect("publish artifacts");
     assert!(artifacts.iter().any(|artifact| {
         artifact["destination"] == "smoke.html"

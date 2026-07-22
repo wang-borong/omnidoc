@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Moved the OmniDoc library payload into `bundles/libs`, so Rust, Lua, CSS,
+  TeX, themes, tests, and release metadata now change atomically in one repo.
+- Unified the OmniDoc and library bundle version at 1.6.0 and publish both the
+  platform binaries and `omnidoc-libs-v1.6.0` sidecar from one product tag.
+- Removed Git clone, branch, tag, and commit-based library installation; the
+  CLI now installs and updates only verified release-bound archives.
+- Preserved OmniDoc-managed LaTeX headers when projects add their own
+  `--include-in-header` options, including semantic block packages for PDF.
+
 ## 1.5.1
 
 - Bound release builds to omnidoc-libs 1.2.1, including refreshed fenced

@@ -1,0 +1,152 @@
+%% It's a internal package
+
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{utils}[2023/08/11 utils document package]
+
+% NewDocumentEnvironment NewDocumentCommand
+\RequirePackage{xparse}
+
+\RequirePackage{pgfkeys}
+\pgfkeys{
+ /ufig/.is family, /ufig,
+ caption/.estore in = \ufigCap,
+ label/.estore in = \ufigLab,
+ width/.initial = 1,
+ caption/.initial = {},
+ label/.initial = {},
+}
+% 插入图片命令
+% 使用方法：\Figure[options]{fig name}
+\newcommand{\Figure}[2][]{%
+  \pgfkeys{/ufig, caption = {}, label = {}} % clear last
+  \pgfkeys{/ufig, #1}%
+
+  \begin{figure}[H]
+    \centering % 图片居中
+    \includegraphics[width = \pgfkeysvalueof{/ufig/width}\textwidth]{#2} % 插入图片并设定宽度
+    \ifx\ufigCap\empty
+    \else
+    \caption{\ufigCap} % 设置标题
+    \fi
+    \ifx\ufigLab\empty
+    \else
+    \label{\ufigLab} % 设置标签，方便引用
+    \fi
+  \end{figure}
+}
+
+\RequirePackage{tabularray}
+% tabularray longtblr settings {
+\DefTblrTemplate{contfoot-text}{normal}{接下页}
+\SetTblrTemplate{contfoot-text}{normal}
+\DefTblrTemplate{conthead-text}{normal}{（接上页）}
+\SetTblrTemplate{conthead-text}{normal}
+\DefTblrTemplate{caption-tag}{normal}{\centering 表\hspace{0.25em}\thetable}
+\SetTblrTemplate{caption-tag}{normal}
+\DefTblrTemplate{caption-sep}{normal}{ }
+\SetTblrTemplate{caption-sep}{normal}
+\DefTblrTemplate{caption-text}{normal}{\InsertTblrText{caption}}
+\SetTblrTemplate{caption-text}{normal}
+% }
+% 插入表格
+% 使用方法：\begin{ltblr0}[options]{table col spec} <your table> \end{ltblr0}
+\NewDocumentEnvironment{ltblr0}{O{} m +b}{%
+  \begin{spacing}{1.0}
+    \begin{center}
+      \zihao{-5}
+      }{
+      \begin{longtblr}[
+          #1
+        ]{
+          row{1} = {gray8}, % gray8 is 0.75 gray from nicecolors
+          stretch=1.5,
+          #2,
+        }
+        #3
+      \end{longtblr}
+    \end{center}
+  \end{spacing}
+}
+
+\NewDocumentEnvironment{ltblr}{O{} m +b}{%
+  \begin{spacing}{1.0}
+    \begin{center}
+      \zihao{-5}
+      }{
+      \begin{longtblr}[
+          #1
+        ]{
+          stretch=1.5,
+          #2,
+        }
+        #3
+      \end{longtblr}
+    \end{center}
+  \end{spacing}
+}
+
+\NewDocumentEnvironment{stblr}{m m m +b}{%
+  \begin{table}[H]
+    \begin{center}
+      \caption{#1}
+      \label{tbl:#2}
+      \begin{tblr}{#3}
+        #4
+      \end{tblr}
+    \end{center}
+  \end{table}
+}
+
+\RequirePackage{listings}
+\lstnewenvironment{lstcode}[1][]{
+  \lstset{
+      #1
+  }
+}
+{}
+
+% Require ninecolors which is used by tabularray.
+\NewDocumentCommand{\textsepline}{O{5mm}O{gray8}m}{
+  \vskip #1
+  {\color{#2} \hrule height #3}
+  \vskip #1
+}
+
+% define language listings
+\lstdefinelanguage{Config}{
+  keywords={config, bool, string, select, help, prompt, choice, endchoice, if,
+    endif, default, source},
+  sensitive=true
+}
+
+\lstdefinestyle{Makefile}{
+  otherkeywords={.SUFFIXES},
+  morekeywords={SUFFIX, CPP_,},
+  moredelim=[is]{/*}{*/},
+  morecomment=[l]{\#},%
+  moredelim=[s]{\$(}{)}%
+}
+
+\lstdefinestyle{python}{
+  language=Python,
+  showstringspaces=false,
+}
+
+\lstdefinestyle{c}{
+  language=C,
+  showstringspaces=false,
+  tabsize=4,
+}
+
+\lstdefinestyle{bash}{
+  language=bash,
+  morekeywords={grep, ar, tar, mv, find, head, rm, dirname, basename, realpath,
+    mkdir, rsync, git},
+  showstringspaces=false,
+  breaklines=true,
+  breakatwhitespace=true,
+  % literate={\$}{{\textcolor{blue}{\$}}}1
+  % {*}{{\textcolor{red}{*}}}1,
+}
+
+\endinput

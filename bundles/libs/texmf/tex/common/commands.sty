@@ -1,0 +1,10 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{commands}[2024/12/27 v0.1 Common command definitions]
+
+\RequirePackage{hyperref}
+
+% Email command - creates a mailto link
+\newcommand\email[1]{\href{mailto:#1}{\nolinkurl{#1}}}
+
+\endinput
+

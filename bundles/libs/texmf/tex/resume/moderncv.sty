@@ -1,0 +1,45 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{moderncv}[2023-08-31 v0.1 moderncv style package]
+
+\RequirePackage{kvoptions}
+\RequirePackage{etoolbox}
+
+\SetupKeyvalOptions{family=cvsets,prefix=cvsets@,setkeys=\kvsetkeys}
+
+% set ctex font
+\DeclareStringOption[adobe]{fontset}
+
+\DeclareDefaultOption{\PassOptionsToClass{\CurrentOption}{ctex}}
+
+\ProcessKeyvalOptions*\relax
+
+\RequirePackage{xcolor}
+
+\RequirePackage[
+  UTF8,
+  scheme = plain,
+  fontset = \cvsets@fontset,
+  linespread=1.1,
+]{ctex}
+
+\ctexset{
+  linestretch = 5,
+}
+
+% adjust the page margins
+\RequirePackage[
+  left=1.5cm, right=1.5cm,
+  top=1cm,bottom=1.5cm,
+]{geometry}
+
+\RequirePackage{setspace}
+
+\setmainfont{Times New Roman}
+
+% Require ninecolors which is used by tabularray.
+\NewDocumentCommand{\CNname}{m}{
+  \firstname{#1}
+  \familyname{}
+}
+
+\endinput

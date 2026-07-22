@@ -1,0 +1,36 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{cjk-fonts}[2024/12/27 v0.1 Common CJK font command definitions]
+
+% Define CJK font commands with fallback to Latin equivalents
+% This provides consistent font commands across templates
+
+% Chinese bold series (粗体)
+\ifcsname heiti\endcsname
+  \newcommand{\cbfseries}{\heiti}
+\else
+  \newcommand{\cbfseries}{\bfseries}
+\fi
+
+% Chinese italic shape (斜体/楷体)
+\ifcsname kaishu\endcsname
+  \newcommand{\citshape}{\kaishu}
+\else
+  \newcommand{\citshape}{\itshape}
+\fi
+
+% Chinese normal font (楷体)
+\ifcsname kaishu\endcsname
+  \newcommand{\cnormal}{\kaishu}
+\else
+  \newcommand{\cnormal}{\normalfont}
+\fi
+
+% Chinese fangsong (仿宋)
+\ifcsname fangsong\endcsname
+  \newcommand{\cfs}{\fangsong}
+\else
+  \newcommand{\cfs}{\normalfont}
+\fi
+
+\endinput
+

@@ -1063,6 +1063,22 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
     }
 
     if output_kind.uses_latex_defaults() {
+        for (filter, relative) in [
+            ("emoji.lua", pandoc::LIB_PANDOC_HEADER_EMOJI),
+            ("admonition.lua", pandoc::LIB_PANDOC_HEADER_SEMANTIC_BLOCKS),
+        ] {
+            if output_kind.filters(config).contains(&filter) {
+                if let Some(path) = existing_path(library_root.join(relative)) {
+                    add_resolved_resource(
+                        &mut resources,
+                        project_path,
+                        &library_root,
+                        format!("omnidoc-latex-header:{relative}"),
+                        path,
+                    );
+                }
+            }
+        }
         if let Some(theme) = &theme {
             for relative in &theme.resources.latex_headers {
                 if let Some(path) = existing_path(library_root.join(relative)) {

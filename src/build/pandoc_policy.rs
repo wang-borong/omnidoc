@@ -94,7 +94,6 @@ impl PandocOutputKind {
             "include-files.lua",
             "include-code-files.lua",
             "diagram-generator.lua",
-            "latex-headers.lua",
             "admonition.lua",
             "latex-patch.lua",
             "emoji.lua",

@@ -1,48 +1,51 @@
 # OmniDoc Release Checklist
 
-Release omnidoc-libs before the matching OmniDoc version. Do not create the
-OmniDoc tag while any release-contract URL returns 404.
+OmniDoc and `bundles/libs` use one version, one tag, and one GitHub release.
+The release publishes platform-specific binaries plus the verified
+`omnidoc-libs-v<version>.tar.gz` sidecar bundle.
 
-## 1. Release omnidoc-libs
+## 1. Prepare the release
 
-1. Confirm `manifest.toml` version and compatibility range.
-2. Run:
+1. Set the version once; the command updates `Cargo.toml`, `Cargo.lock`, the
+   bundle manifest/compatibility, and the embedded release contract:
 
    ```bash
-   python3 scripts/verify_manifest.py
-   OMNIDOC_RELEASE_TAG=v1.2.1 scripts/package-release.sh /tmp/omnidoc-libs-release
-   scripts/smoke-test.sh
+   python3 scripts/set-version.py 1.6.0
    ```
 
-3. Commit, create and push the `v1.2.1` tag.
-4. Wait for the omnidoc-libs release workflow.
-5. Download the archive and checksum from a clean environment and verify
-   `sha256sum --check`.
+2. Regenerate and verify the payload checksums:
 
-## 2. Verify the OmniDoc release candidate
+   ```bash
+   python3 bundles/libs/scripts/verify_manifest.py --write
+   python3 bundles/libs/scripts/verify_manifest.py
+   python3 scripts/check-library-contract.py
+   ```
 
-Run from the OmniDoc repository:
+## 2. Verify the release candidate
 
 ```bash
-python3 scripts/check-library-contract.py ../omnidoc-libs
 cargo fmt -- --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-targets --all-features
 RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --document-private-items --all-features
-OMNIDOC_LIBS=../omnidoc-libs scripts/check-golden-book.sh
-OMNIDOC_LIBS=../omnidoc-libs scripts/check-golden-pdf.sh
+bundles/libs/scripts/smoke-test.sh
+scripts/check-golden-book.sh
+scripts/check-golden-pdf.sh
 ```
 
-Confirm both URLs in `omnidoc-libs.toml` return success, then exercise the
-packaged release flow:
+Build the deterministic sidecar twice and compare it:
 
 ```bash
-curl --fail --location --head \
-  https://github.com/wang-borong/omnidoc-libs/releases/download/v1.2.1/omnidoc-libs-v1.2.1.tar.gz
-curl --fail --location --head \
-  https://github.com/wang-borong/omnidoc-libs/releases/download/v1.2.1/omnidoc-libs-v1.2.1.tar.gz.sha256
-OMNIDOC_BIN=/path/to/extracted/omnidoc scripts/check-release-install.sh
+OMNIDOC_RELEASE_TAG=v1.6.0 bundles/libs/scripts/package-release.sh /tmp/omnidoc-libs-a
+OMNIDOC_RELEASE_TAG=v1.6.0 bundles/libs/scripts/package-release.sh /tmp/omnidoc-libs-b
+cmp /tmp/omnidoc-libs-a/*.tar.gz /tmp/omnidoc-libs-b/*.tar.gz
+cmp /tmp/omnidoc-libs-a/*.sha256 /tmp/omnidoc-libs-b/*.sha256
 ```
+
+CI installs the locally built sidecar through `OMNIDOC_LIBS_ARCHIVE` and
+`OMNIDOC_LIBS_CHECKSUM` before the GitHub release exists, exercising the same
+checksum, extraction, manifest, compatibility, and transactional replacement
+path used for normal downloads.
 
 ## 3. Reader acceptance matrix
 
@@ -56,12 +59,12 @@ Open the Golden Book EPUB and record the application version and result for:
 Any reader-specific exception must be represented by a named compatibility
 profile or documented release note rather than an untracked CSS patch.
 
-## 4. Publish OmniDoc
+## 4. Publish
 
-1. Confirm `Cargo.toml`, `Cargo.lock`, and `release/omnidoc-libs.toml` agree.
-2. Commit, create and push the `v1.5.1` tag.
-3. Require quality, Golden Book, Golden PDF, portable document smoke, package,
-   and installed-release smoke jobs to pass.
+1. Commit, create, and push the single product tag, for example `v1.6.0`.
+2. Require quality, library bundle, Golden Book, Golden PDF, portable document
+   smoke, package, and installed-release smoke jobs to pass.
+3. Confirm the GitHub release contains every binary package plus
+   `omnidoc-libs-v1.6.0.tar.gz` and its `.sha256` file.
 4. Download every archive and run its packaged-binary smoke test.
-5. Publish release notes describing lock/cache schema changes and the required
-   omnidoc-libs version.
+5. Publish release notes describing lock/cache schema changes and bundle changes.

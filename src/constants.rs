@@ -71,7 +71,6 @@ pub mod config {
     pub const OMNIDOC_CONFIG_FILE: &str = "omnidoc.toml";
     pub const CONFIG_DIR: &str = ".config";
     pub const UNKNOWN_AUTHOR: &str = "unknown";
-    pub const DEFAULT_LIB_URL: &str = "https://github.com/wang-borong/omnidoc-libs";
 }
 
 pub mod pandoc {
@@ -95,6 +94,7 @@ pub mod pandoc {
     pub const FLAG_SYNTAX_HIGHLIGHTING: &str = "--syntax-highlighting";
     pub const FLAG_TEMPLATE: &str = "--template";
     pub const FLAG_CSS: &str = "--css";
+    pub const FLAG_INCLUDE_IN_HEADER: &str = "--include-in-header";
 
     // Defaults
     pub const DEFAULT_FROM_PDF: &str = "markdown+east_asian_line_breaks+footnotes";
@@ -110,6 +110,7 @@ pub mod pandoc {
     pub const LIB_PANDOC_FILTERS: &str = "pandoc/data/filters";
     pub const LIB_PANDOC_HEADERS: &str = "pandoc/headers";
     pub const LIB_PANDOC_HEADER_EMOJI: &str = "pandoc/headers/emoji.tex";
+    pub const LIB_PANDOC_HEADER_SEMANTIC_BLOCKS: &str = "pandoc/headers/semantic-blocks.tex";
     pub const LIB_PANDOC_CSL: &str = "pandoc/csl";
     pub const LIB_PANDOC_CROSSREF_YAML: &str = "pandoc/crossref.yaml"; // PDF fallback
     pub const LIB_PANDOC_CROSSREF_YAML_HTML: &str = "pandoc/data/crossref.yaml"; // HTML fallback

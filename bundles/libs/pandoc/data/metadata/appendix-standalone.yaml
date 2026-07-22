@@ -1,0 +1,94 @@
+---
+documentclass: ctexart
+papersize: a4
+classoption:
+  - sub4section
+  - linespread=1.5
+  - fontset=none
+#linestretch: 1.5
+geometry:
+  - left=3.17cm
+  - right=3.17cm
+  - top=2.54cm
+  - bottom=2.54cm
+mainfont: Arial
+# mainfontoptions:
+# sansfont:
+# sansfontoptions:
+monofont: Source Code Pro
+# monofontoptions:
+# mathfont:
+# mathfontoptions:
+CJKmainfont: SimSun
+CJKoptions:
+  - AutoFakeBold
+  - AutoFakeSlant
+CJKsansfont: Microsoft YaHei
+CJKmonofont: FangSong
+indent: true
+listings: true
+numbersections: 5
+#colorlinks: true
+graphics: true
+
+header-includes:
+  - |
+    ```{=latex}
+    \usepackage{pdfpages}
+    \ctexset{
+      linestretch = 5cm,
+      % 一级标题：宋体，四号
+      % \raggedright表示左对齐，\raggedleft表示右对齐
+      section = {
+        name = {,.},
+        format+ = \zihao{4} \bfseries \rmfamily \raggedright
+      },
+      % 二级标题：宋体，小四
+      subsection = {
+        name = {,.},
+        format += \zihao{-4} \bfseries \rmfamily \raggedright
+      },
+      % 三级标题：宋体，五号
+      % 四级标题：宋体，五号
+      % 五级标题：宋体，五号
+      subsubsection = {
+        name = {,.},
+        format += \zihao{5} \bfseries \rmfamily \raggedright
+      },
+      % paragraph用作标题，目前看来是正常的（需要传入sub4section给ctexart宏）
+      paragraph = {
+        name = {,.},
+        format += \zihao{5} \bfseries \rmfamily \raggedright
+      },
+      subparagraph = {
+        name = {,.},
+        format += \zihao{5} \bfseries \rmfamily \raggedright
+      }
+    }
+    ```
+
+include-before:
+  - |
+    ```{=latex}
+    ```
+
+toc: true
+toc-title: \begin{center}目\quad 录\end{center}
+lof: false
+lot: false
+
+include-after:
+  - |
+    ```{=latex}
+    ```
+before-body:
+  - |
+    ```{=latex}
+    ```
+after-body:
+  - |
+    ```{=latex}
+
+    ```
+...
+

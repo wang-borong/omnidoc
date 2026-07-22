@@ -1,0 +1,21 @@
+@charset "utf-8";
+
+figure {
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: 1.45em auto;
+  text-align: center;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+figure img, img { max-width: 100%; height: auto; }
+
+figcaption {
+  margin-top: 0.55em;
+  color: var(--omni-muted);
+  font-family: "Noto Sans CJK SC", "Source Han Sans CN", sans-serif;
+  font-size: 0.9em;
+  line-height: 1.5;
+  text-align: center;
+}

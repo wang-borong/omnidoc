@@ -23,7 +23,6 @@ pub struct ConfigManager {
 pub struct MergedConfig {
     pub author: Option<String>,
     pub lib_path: Option<String>,
-    pub lib_url: Option<String>,
     pub outdir: Option<String>,
     pub texmfhome: Option<String>,
     pub bibinputs: Option<String>,
@@ -113,16 +112,6 @@ impl ConfigManager {
         let lib_path = global_config
             .and_then(|c| c.lib.lib.as_ref())
             .and_then(|l| l.path.clone());
-
-        // 合并库 URL（项目配置可以覆盖全局配置）
-        let lib_url = project_config
-            .and_then(|c| c.lib.lib.as_ref())
-            .and_then(|l| l.url.clone())
-            .or_else(|| {
-                global_config
-                    .and_then(|c| c.lib.lib.as_ref())
-                    .and_then(|l| l.url.clone())
-            });
 
         // 合并环境变量
         let outdir = cli
@@ -373,7 +362,6 @@ impl ConfigManager {
         Ok(MergedConfig {
             author,
             lib_path,
-            lib_url,
             outdir,
             texmfhome,
             bibinputs,

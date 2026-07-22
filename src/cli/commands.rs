@@ -354,15 +354,15 @@ pub enum Commands {
     /// maintain the OmniDoc library
     #[command(visible_alias = "libs")]
     Lib {
-        /// install the OmniDoc library to XDG_DATA_DIR
+        /// install the release-bound OmniDoc library to XDG_DATA_DIR
         #[arg(short, long, conflicts_with_all = ["update", "status", "verify"])]
         install: bool,
 
-        /// update the OmniDoc library
+        /// update the OmniDoc library from the release bound to this version
         #[arg(short, long, conflicts_with_all = ["install", "status", "verify"])]
         update: bool,
 
-        /// show installed library version, revision, compatibility, and integrity
+        /// show installed library version, release, compatibility, and integrity
         #[arg(long, conflicts_with_all = ["install", "update", "verify"])]
         status: bool,
 
@@ -373,14 +373,6 @@ pub enum Commands {
         /// emit status or verification details as JSON
         #[arg(long)]
         json: bool,
-
-        /// install, update, or verify a specific library tag, branch, or commit
-        #[arg(long, value_name = "REVISION", conflicts_with = "release")]
-        revision: Option<String>,
-
-        /// install or update from the release archive bound to this OmniDoc version
-        #[arg(long, conflicts_with_all = ["status", "verify", "revision"])]
-        release: bool,
     },
 
     /// discover and validate versioned theme bundles

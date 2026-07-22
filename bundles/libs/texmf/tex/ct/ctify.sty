@@ -1,0 +1,498 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{ctify}[2023/09/11 v0.3 the ctify package]
+
+\RequirePackage{kvoptions}
+\RequirePackage{etoolbox}
+\SetupKeyvalOptions{family=ctify,prefix=ctify@,setkeys=\kvsetkeys}
+%\newcommand{\wkv}[1]{\kvsetkeys{ctify}{#1}}
+
+\DeclareStringOption[article]{type}
+
+\ProcessKeyvalOptions*\relax
+
+
+\RequirePackage{utils}
+\RequirePackage{pifont, manfnt, bbding}
+
+\RequirePackage[color=blue]{ctcolor}
+
+\RequirePackage{bookmark}
+\bookmarksetup{
+  numbered,
+  color=basis-color,
+}
+
+\ifdefstring{\ctify@type}{article}{
+  \RequirePackage[labelfont={color=caption-color}]{caption} 
+  \AtBeginDocument{
+    \renewcommand{\thetable}{\thesection{}-\arabic{table}}
+    \renewcommand{\thefigure}{\thesection{}-\arabic{figure}}
+    \renewcommand{\thelstlisting}{\thesection{}-\arabic{lstlisting}}
+    \counterwithin*{figure}{section}
+    \counterwithin*{table}{section}
+    \counterwithin*{lstlisting}{section}
+    }
+}{
+  % book or report
+  \RequirePackage[labelfont={bf,color=caption-color}]{caption} 
+  \AtBeginDocument{
+    \renewcommand{\thetable}{\thechapter{}-\arabic{table}}
+    \renewcommand{\thefigure}{\thechapter{}-\arabic{figure}}
+    \renewcommand{\thelstlisting}{\thechapter{}-\arabic{lstlisting}}
+    \counterwithin*{figure}{chapter}
+    \counterwithin*{table}{chapter}
+    \counterwithin*{lstlisting}{chapter}
+    }
+}
+\DeclareCaptionFont{9pt}{\zihao{-5}}
+\captionsetup
+{
+  font={9pt},
+  labelsep=space
+}
+\renewcommand{\lstlistingname}{代码}
+
+\ifdefstring{\ctify@type}{book}{
+  \ctexset {
+    part = {
+      format+ = \zihao{2} \color{basis-color}
+    },
+    chapter = {
+      format+ = \zihao{-2} \color{basis-color}
+    },
+  }
+}
+
+\ifdefstring{\ctify@type}{report}{
+  \ctexset {
+    chapter = {
+      format+ = \zihao{-2} \color{basis-color}
+    },
+  }
+}
+
+% ctex settings
+\ctexset{
+  section = {
+    name = {,.},
+    format+ = \zihao{3} \color{basis-color} \bfseries \rmfamily \raggedright
+  },
+  subsection = {
+    name = {,.},
+    format += \zihao{-3} \color{basis-color} \bfseries \rmfamily \raggedright
+  },
+  subsubsection = {
+    name = {,.},
+    format += \zihao{4} \color{basis-color} \bfseries \rmfamily \raggedright
+  },
+  paragraph = {
+    name = {,.},
+    format += \zihao{-4} \color{basis-color} \bfseries \rmfamily \raggedright
+  },
+  subparagraph = {
+    name = {,.},
+    format += \zihao{5} \color{basis-color} \bfseries \rmfamily \raggedright
+  }
+}
+
+\RequirePackage{enumerate}
+\RequirePackage[shortlabels,inline]{enumitem}
+\setlist{nolistsep}
+
+\newcommand*{\eitemi}{\tikz \draw [baseline, ball color=basis-color,draw=none] circle (2pt);}
+\newcommand*{\eitemii}{\tikz \draw [baseline, fill=basis-color,draw=none,circular drop shadow] circle (2pt);}
+\newcommand*{\eitemiii}{\tikz \draw [baseline, fill=basis-color,draw=none] circle (2pt);}
+\setlist[enumerate,1]{label=\color{basis-color}\arabic*.}
+\setlist[enumerate,2]{label=\color{basis-color}(\alph*).}
+\setlist[enumerate,3]{label=\color{basis-color}\Roman*.}
+\setlist[enumerate,4]{label=\color{basis-color}\Alph*.}
+\setlist[itemize,1]{label={\eitemi}}
+\setlist[itemize,2]{label={\eitemii}}
+\setlist[itemize,3]{label={\eitemiii}}
+
+\hypersetup{
+  breaklinks,
+  unicode,
+  linktoc=all,
+  bookmarksnumbered=true,
+  bookmarksopen=true,
+  colorlinks,
+  linkcolor=default-linkcolor,
+  citecolor=default-citecolor,
+  urlcolor=default-urlcolor,
+  filecolor=default-filecolor,
+  plainpages=false,
+  pdfstartview=FitH,
+  pdfborder={0 0 0},
+  linktocpage
+}
+
+\def\@maketitle{%
+  \pagestyle{plain}
+  \clearpage
+  \null
+  \vskip 2em%
+  \begin{center}%
+    \let \footnote \thanks
+    {\LARGE \color{basis-color} \@title \par}%
+    \vskip 1.5em%
+    {\large \color{basis-color}
+    \lineskip .5em%
+    \begin{tabular}[t]{c}%
+      \@author
+    \end{tabular}\par}%
+    \vskip 1em%
+    {\large \color{basis-color} \@date}%
+  \end{center}%
+  \par
+  \vskip 1.5em
+}
+
+% use \preto and \appto command, which comes from etoolbox,
+% to prepend and append extra commands to a macro.
+\preto\tableofcontents{
+  \hypersetup{linktoc=all, linkcolor=black}
+}
+\appto\tableofcontents{
+  \clearpage
+  \hypersetup{linkcolor=default-linkcolor}
+}
+
+\RequirePackage{pifont,manfnt,bbding}
+\RequirePackage[bottom]{footmisc}
+
+% derived from elegantbook
+\newcommand{\definitionname}{定义}
+\newcommand{\theoremname}{定理}
+\newcommand{\axiomname}{公理}
+\newcommand{\postulatename}{公设}
+\newcommand{\lemmaname}{引理}
+\newcommand{\propositionname}{命题}
+\newcommand{\corollaryname}{推论}
+\newcommand{\examplename}{例题} %
+\newcommand{\instancename}{示例} %
+\newcommand{\problemname}{问题} % 问题
+\newcommand{\exercisename}{练习} % 练习=习题
+\newcommand{\remarkname}{注}
+\newcommand{\assumptionname}{假设}
+\newcommand{\conclusionname}{结论}
+\newcommand{\solutionname}{解}
+\newcommand{\propertyname}{性质}
+\newcommand{\introductionname}{内容提要}
+\newcommand{\notename}{笔记}
+\RequirePackage[many]{tcolorbox}
+\tcbset{
+  new/usesamecnt/.style = {},
+  common/.style={
+    % fontupper=\kaishu,
+    lower separated=false,
+    % before upper={\setlength{\parindent}{\normalparindent}},
+    coltitle=white,
+    colback=gray!5,
+    boxrule=0.5pt,
+    fonttitle=\bfseries,
+    enhanced,
+    breakable,
+    top=8pt,
+    before skip=8pt,
+    attach boxed title to top left={
+      yshift=-0.11in,
+      xshift=0.15in},
+    boxed title style={
+      boxrule=0pt,
+      colframe=white,
+      arc=0pt,
+      outer arc=0pt},
+    separator sign={.},},
+  defstyle/.style={
+    common,
+    colframe=main-color,
+    colback=main-color!5,
+    colbacktitle=main-color,
+    overlay unbroken and last={
+      \node[anchor=south east, outer sep=0pt] at (\linewidth-width,0) {
+        \textcolor{main-color}{$\clubsuit$}};}},
+  mystyle/.style={
+    common,
+    coltitle=gray2,
+    colframe=default-tcbcolor,
+    colback=default-tcbcolor!5,
+    colbacktitle=default-tcbcolor,
+    },
+  thmstyle/.style={
+    common,
+    colframe=second-color,
+    colback=second-color!5,
+    colbacktitle=second-color,
+    overlay unbroken and last={
+      \node[anchor=south east, outer sep=0pt] at (\linewidth-width,0) {
+        \textcolor{second-color}{$\heartsuit$}};}},
+  prostyle/.style={
+    common,
+    colframe=third,
+    colback=third!5,
+    colbacktitle=third,
+    overlay unbroken and last={
+      \node[anchor=south east, outer sep=0pt] at (\linewidth-width,0) {
+        \textcolor{third-color}{$\spadesuit$}};}},
+  CTIFY@title/.code n args={2}
+    {
+
+      \tcbset
+        {
+          title=
+            {
+              \csname #1name\endcsname~%
+              \ifdef{\thetcbcounter}{\thetcbcounter}{}%
+              \ifblank{#2}{}{\ (#2)}
+            }
+        }
+    },
+  CTIFY@label/.code n args={2}
+    {
+      \ifblank{#2}
+        {}{\tcbset{label={#1:#2}}}
+    }
+  }
+
+% define an internal control sequence \CTIFY@newtheorem for fancy mode's newtheorem
+% #1 is the environment name, #2 is the prefix of label, #3 is the style
+% style: thmstyle, defstyle, prostyle
+% e.g. \CTIFY@newtheorem{theorem}{thm}{thmstyle}
+% will define two environments: numbered ``theorem'' and no-numbered ``theorem*''
+% WARNING FOR MULTILINGUAL: this cs will automatically find \theoremname's definition,
+% WARNING FOR MULTILINGUAL: it should be defined in language settings.
+\NewDocumentCommand \CTIFY@newtheorem { m m m O{} }{
+  \ifcsundef{#1name}{%
+    \ClassError{ctify}{%
+      \ #1name undefined, \MessageBreak
+      Please check in language setting
+    }{}
+  }{\relax}
+  \expandafter\ifblank\expandafter{#4}{
+    \tcbset{
+      new/usecnt/.style={}
+    }
+  }{
+    \tcbset{
+      new/usecnt/.style= {use counter from = #4}
+    }
+  }
+  \DeclareTColorBox[auto counter,usesamecnt,usecnt]{#1}{ g o t\label g }{
+      common,#3,
+      IfValueTF={##1}
+        {CTIFY@title={#1}{##1}}
+        {
+          IfValueTF={##2}
+          {CTIFY@title={#1}{##2}}
+          {CTIFY@title={#1}{}}
+        },
+      IfValueT={##4}
+        {
+          IfBooleanTF={##3}
+            {label={##4}}
+            {CTIFY@label={#2}{##4}}
+        }
+    }
+  \DeclareTColorBox{#1*}{ g o }{
+      common,#3,
+      IfValueTF={##1}
+        {CTIFY@title={#1}{##1}}
+        {
+          IfValueTF={##2}
+          {CTIFY@title={#1}{##2}}
+          {CTIFY@title={#1}{}}
+        },
+    }
+}
+% define several environment 
+% we define headers like \definitionname before
+\CTIFY@newtheorem{theorem}{thm}{thmstyle}
+\CTIFY@newtheorem{definition}{def}{defstyle}
+\CTIFY@newtheorem{postulate}{pos}{thmstyle}
+\CTIFY@newtheorem{axiom}{axi}{thmstyle}
+\CTIFY@newtheorem{corollary}{cor}{thmstyle}
+\CTIFY@newtheorem{lemma}{lem}{thmstyle}
+\CTIFY@newtheorem{proposition}{pro}{prostyle}
+
+
+\NewDocumentEnvironment{Tcbox}{O{} +b}{%
+  \begin{tcolorbox}[
+    mystyle,
+    title={Tcbox},
+    interior hidden,
+    #1,
+  ]
+}{%
+    #2
+  \end{tcolorbox}
+}
+
+\definecolor{probsolu-tcbcolor}{HTML}{F9F7ED}
+\NewDocumentEnvironment{probsolu}{O{} m +b}{%
+  \begin{tcolorbox}[
+    mystyle,
+    coltitle=gray2,
+    title={问题与解决 \theprob},
+    interior hidden,
+    colframe=probsolu-tcbcolor,
+    colbacktitle=probsolu-tcbcolor,
+    overlay unbroken and last={
+      \node[anchor=south east, outer sep=0pt] at (\linewidth-width,0) {
+        \includegraphics[width=5mm]{2753_color.png}};},
+    #1,% option 1 will overlay the before options
+  ]
+    \refstepcounter{prob}
+    { \textbf{\color{red5}问题：} #2 }
+}{%
+    \tcblower
+    { \textbf{\color{green5}解决：} \kaishu #3 }
+  \end{tcolorbox}
+}
+
+\definecolor{note-tcbcolor}{HTML}{FFF2F0}
+\NewDocumentEnvironment{remark}{O{} +b}{%
+  \begin{tcolorbox}[
+    mystyle,
+    coltitle=red2,
+    title={注意},
+    interior hidden,
+    colframe=note-tcbcolor,
+    colbacktitle=note-tcbcolor,
+    overlay unbroken and last={
+      \node[anchor=south east, outer sep=0pt] at (\linewidth-width,0) {
+        \includegraphics[width=5mm]{2757_color.png}};},
+    #1,
+  ]
+    #2
+}{
+  \end{tcolorbox}
+}
+
+\definecolor{expr-tcbcolor}{HTML}{FFFBF0}
+\NewDocumentEnvironment{expr}{O{} +b}{%
+  \begin{tcolorbox}[
+    mystyle,
+    coltitle=orange,
+    title={经验},
+    interior hidden,
+    colframe=expr-tcbcolor,
+    colbacktitle=expr-tcbcolor,
+    overlay unbroken and last={
+      \node[anchor=south east, outer sep=0pt] at (\linewidth-width,0) {
+        \includegraphics[width=5mm]{1F451_color.png}};},
+    #1,
+  ]
+    #2
+}{
+  \end{tcolorbox}
+}
+
+\NewDocumentEnvironment{Note}{O{} m +b}{%
+  \begin{tcolorbox}[
+    mystyle,
+    boxrule=1pt,
+    colframe=green7,
+    coltitle=green7,
+    colback=white,
+    title={ #2 },
+    colbacktitle=white,
+    breakable,
+    % interior hidden,
+    overlay unbroken and last={
+      \node[anchor=south east, outer sep=0pt] at (\linewidth-width,0) {
+        \scriptsize\color{green7}\textdbend};},
+    #1,
+  ]
+}{%
+  \kaishu #3
+  \end{tcolorbox}
+}
+
+\ifdefstring{\ctify@type}{article}{
+  \newcounter{exam}[section]
+  \setcounter{exam}{0}
+  \renewcommand{\theexam}{\thesection.\arabic{exam}}
+
+  \newcounter{exer}[section]
+  \setcounter{exer}{0}
+  \renewcommand{\theexer}{\thesection.\arabic{exer}}
+
+  \newcounter{prob}[section]
+  \setcounter{prob}{0}
+  \renewcommand{\theprob}{\thesection.\arabic{prob}}
+}{
+  \newcounter{exam}[chapter]
+  \setcounter{exam}{0}
+  \renewcommand{\theexam}{\thechapter.\arabic{exam}}
+
+  \newcounter{exer}[chapter]
+  \setcounter{exer}{0}
+  \renewcommand{\theexer}{\thechapter.\arabic{exer}}
+
+  \newcounter{prob}[chapter]
+  \setcounter{prob}{0}
+  \renewcommand{\theprob}{\thechapter.\arabic{prob}}
+}
+%% Example with counter
+\newenvironment{example}[1][]{
+  \refstepcounter{exam}
+  \par\noindent\textbf{\color{main-color}{\examplename} \theexam #1 }\rmfamily}{
+  \par\ignorespacesafterend}
+
+%% Exercise with counter
+\newenvironment{exercise}[1][]{
+  \refstepcounter{exer}
+  \par\noindent\makebox[-3pt][r]{
+    \scriptsize\color{red!90}\HandPencilLeft\quad}
+    \textbf{\color{main-color}{\exercisename} \theexer #1 }\rmfamily}{
+    \par\ignorespacesafterend}
+
+%% Problem with counter
+\newenvironment{note}{
+  \par\noindent\makebox[-3pt][r]{
+    \scriptsize\color{red!90}\textdbend\quad}
+    \textbf{\color{second-color}\notename} \kaishu}{\par}
+
+\newenvironment{assumption}{\par\noindent\textbf{\color{third-color}\assumptionname} \kaishu}{\par}
+\newenvironment{conclusion}{\par\noindent\textbf{\color{third-color}\conclusionname} \kaishu}{\par}
+\newenvironment{property}{\par\noindent\textbf{\color{third-color}\propertyname} \kaishu}{\par}
+\newenvironment{custom}[1]{\par\noindent\textbf{\color{third-color} #1} \kaishu}{\par}
+
+\ifdefstring{\ctify@type}{book}{
+  \renewcommand*{\cleardoublepage}{\clearpage\if@twoside \ifodd\c@page\else
+  \hbox{}%
+  \thispagestyle{empty}%
+  \newpage%
+  \if@twocolumn\hbox{}\newpage\fi\fi\fi}
+
+  \definecolor{bg-color-1}{RGB}{243,102,25} % Define the orange color used for highlighting throughout the book
+  \newcommand{\subtitle}[1]{\gdef\@subtitle{#1}}
+  \renewcommand{\maketitle}{%
+    \newpage
+    \begingroup
+    \thispagestyle{empty}
+    \begin{tikzpicture}[remember picture,overlay]
+      \coordinate [below=12cm] (midpoint) at (current page.north);
+      \node at (current page.north west)
+      {\begin{tikzpicture}[remember picture,overlay]
+        \node[anchor=north west,inner sep=0pt] at (0,0) {\includegraphics[width=\paperwidth]{bg-book-1}}; % Background image
+        \draw[anchor=north] (midpoint) node [fill=bg-color-1!30!white,fill opacity=0.6,text opacity=1,inner sep=1cm]{\Huge\centering\bfseries\sffamily\parbox[c][][t]{\paperwidth}{\centering \@title\\[15pt] % Book title
+        % {\Large \@subtitle}\\[20pt] % subtitle
+        {\huge \@author}}}; % Author name
+      \end{tikzpicture}};
+    \end{tikzpicture}
+    \vfill
+    \endgroup
+  }
+}{
+  % ...
+}
+
+% NOTE: Add one blank line for split paragraph
+\newcommand{\BlockDesc}[1]{%
+  \vspace{0.5em}{\noindent\color{basis-color}\textbf{#1}}\vspace{0.5em}%
+
+}
+
+\endinput

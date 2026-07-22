@@ -1,0 +1,47 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{ctbook}[2024/08/22 v0.4 my ct book style package]
+
+\RequirePackage{kvoptions}
+\SetupKeyvalOptions{
+  family=ctbook,
+  prefix=ctbook@,
+  setkeys=\kvsetkeys,
+}
+
+\DeclareStringOption[blue]{color}
+\DeclareStringOption[a4paper]{paper}
+
+\ProcessKeyvalOptions*\relax
+
+\RequirePackage[
+  type=book,
+]{ctify}
+
+\RequirePackage{geometry}
+\geometry{
+  paper=\ctbook@paper,
+}
+
+\RequirePackage[
+  color=\ctbook@color,
+]{ctcolor}
+
+\RequirePackage{fancyhdr}
+\fancyhf{}
+
+\fancyfoot[c]{\color{basis-color}\small\thepage}
+\if@twoside
+  \fancyhead[EL]{\color{basis-color}\leftmark}
+  \fancyhead[OR]{\color{basis-color}\rightmark}
+\else
+  \fancyhead[R]{\color{basis-color}\rightmark}
+\fi
+
+\renewcommand{\headrule}{\color{basis-color}\hrule}
+\pagestyle{fancy}
+\renewcommand{\headrulewidth}{1pt}
+\fancypagestyle{plain}{\renewcommand{\headrulewidth}{0pt}\fancyhf{}\renewcommand{\headrule}{}}
+\renewcommand{\sectionmark}[1]{\markright{\kaishu \CTEXthesection\, #1}{}}
+\renewcommand{\chaptermark}[1]{\markboth{\kaishu \CTEXthechapter\, #1}{}}
+
+\endinput
