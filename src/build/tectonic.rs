@@ -222,10 +222,11 @@ mod tests {
         };
 
         let options = build_options(&config, project.path()).arguments;
+        let canonical_bundle = bundle.canonicalize().expect("canonical bundle");
 
         assert!(options
             .iter()
-            .any(|option| option == &format!("--bundle={}", bundle.display())));
+            .any(|option| option == &format!("--bundle={}", canonical_bundle.display())));
         assert!(options.iter().any(|option| option == "--only-cached"));
         assert!(options
             .iter()

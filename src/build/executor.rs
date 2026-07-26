@@ -561,7 +561,20 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rejects_a_non_tectonic_program_with_a_tectonic_role() {
-        let err = verify_tectonic_program(std::path::Path::new("/bin/true"))
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("fake non-Tectonic root");
+        let program = root.path().join("not-tectonic");
+        fs::write(&program, "#!/bin/sh\nprintf 'unrelated program 1.0\\n'\n")
+            .expect("fake non-Tectonic executable");
+        let mut permissions = fs::metadata(&program)
+            .expect("program metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&program, permissions).expect("program permissions");
+
+        let err = verify_tectonic_program(&program)
             .expect_err("an unrelated executable must not be accepted");
 
         assert!(err.contains("did not identify itself as Tectonic"));

@@ -178,6 +178,12 @@ pub fn write_depfile_from_tectonic_rules(
             rules_path.display()
         ))
     })?;
+    let reported_working_directory = working_directory.to_path_buf();
+    let reported_output_directory = if output_directory.is_absolute() {
+        output_directory.to_path_buf()
+    } else {
+        reported_working_directory.join(output_directory)
+    };
     let working_directory = working_directory
         .canonicalize()
         .unwrap_or_else(|_| working_directory.to_path_buf());
@@ -202,6 +208,7 @@ pub fn write_depfile_from_tectonic_rules(
         let Some(canonical) = resolve_tectonic_dependency(
             &dependency,
             &working_directory,
+            &reported_output_directory,
             &output_directory,
             &search_paths,
         ) else {
@@ -249,13 +256,14 @@ fn parse_makefile_dependencies(content: &str) -> Vec<PathBuf> {
 fn parse_makefile_words(value: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut current = String::new();
-    let mut escaped = false;
-    for character in value.chars() {
-        if escaped {
-            current.push(character);
-            escaped = false;
-        } else if character == '\\' {
-            escaped = true;
+    let mut characters = value.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\\'
+            && characters
+                .peek()
+                .is_some_and(|next| next.is_whitespace() || *next == '#')
+        {
+            current.push(characters.next().expect("peeked Makefile escape"));
         } else if character.is_whitespace() {
             if !current.is_empty() {
                 words.push(current.replace("$$", "$"));
@@ -264,9 +272,6 @@ fn parse_makefile_words(value: &str) -> Vec<String> {
         } else {
             current.push(character);
         }
-    }
-    if escaped {
-        current.push('\\');
     }
     if !current.is_empty() {
         words.push(current.replace("$$", "$"));
@@ -277,6 +282,7 @@ fn parse_makefile_words(value: &str) -> Vec<String> {
 fn resolve_tectonic_dependency(
     dependency: &Path,
     working_directory: &Path,
+    reported_output_directory: &Path,
     output_directory: &Path,
     search_paths: &[PathBuf],
 ) -> Option<PathBuf> {
@@ -288,7 +294,8 @@ fn resolve_tectonic_dependency(
     }
 
     let search_relative = dependency
-        .strip_prefix(output_directory)
+        .strip_prefix(reported_output_directory)
+        .or_else(|_| dependency.strip_prefix(output_directory))
         .ok()
         .map(Path::to_path_buf)
         .or_else(|| (!dependency.is_absolute()).then(|| dependency.to_path_buf()));
@@ -445,7 +452,7 @@ fn install_wrapper_executable(executable: &Path, wrapper: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_recorder_invocation, locate_fls, write_depfile_from_fls,
+        is_recorder_invocation, locate_fls, parse_makefile_words, write_depfile_from_fls,
         write_depfile_from_tectonic_rules,
     };
     use std::ffi::OsString;
@@ -461,6 +468,22 @@ mod tests {
         assert!(!is_recorder_invocation(std::ffi::OsStr::new(
             "/usr/local/bin/omnidoc"
         )));
+    }
+
+    #[test]
+    fn makefile_word_parser_preserves_windows_path_separators() {
+        let words = parse_makefile_words(
+            r"C:\work\main.tex C:\work\chapters\intro.tex escaped\ path\#1.tex",
+        );
+
+        assert_eq!(
+            words,
+            [
+                r"C:\work\main.tex",
+                r"C:\work\chapters\intro.tex",
+                "escaped path#1.tex",
+            ]
+        );
     }
 
     #[test]
@@ -519,6 +542,45 @@ mod tests {
             &package
                 .canonicalize()
                 .expect("canonical package")
+                .display()
+                .to_string()
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolves_virtual_dependencies_through_a_noncanonical_directory_alias() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().expect("Tectonic dependency root");
+        let actual = root.path().join("actual");
+        let alias = root.path().join("alias");
+        let output = alias.join("build");
+        let chapter = actual.join("chapters/intro.tex");
+        fs::create_dir_all(actual.join("build")).expect("output directory");
+        fs::create_dir_all(chapter.parent().expect("chapter parent")).expect("chapter directory");
+        fs::write(&chapter, "chapter").expect("chapter");
+        symlink(&actual, &alias).expect("working-directory alias");
+        let rules = actual.join("tectonic.make");
+        fs::write(
+            &rules,
+            format!(
+                "{} : {}\n",
+                output.join("main.pdf").display(),
+                output.join("chapters/intro.tex").display()
+            ),
+        )
+        .expect("rules");
+        let depfile = actual.join("latex-inputs.d");
+
+        write_depfile_from_tectonic_rules(&rules, &depfile, &alias, &output, &[])
+            .expect("Tectonic depfile");
+
+        let content = fs::read_to_string(depfile).expect("depfile content");
+        assert!(content.contains(
+            &chapter
+                .canonicalize()
+                .expect("canonical chapter")
                 .display()
                 .to_string()
         ));
