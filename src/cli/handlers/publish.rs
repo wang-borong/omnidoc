@@ -135,7 +135,7 @@ pub fn handle_publish(
     all: bool,
     outputs: Vec<String>,
     pdf_engine: Option<String>,
-    latex_backend: String,
+    latex_backend: Option<String>,
     max_latex_passes: Option<usize>,
     dist_dir: String,
     tag: Option<String>,

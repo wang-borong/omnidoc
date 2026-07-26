@@ -17,11 +17,15 @@ pub struct RecorderInvocation {
 pub fn prepare_wrapper(
     project_path: &Path,
     real_engine: &Path,
+    wrapper_name: &str,
     depfile: &Path,
 ) -> Result<Option<RecorderInvocation>> {
-    let Some(engine_name) = real_engine.file_name() else {
-        return Ok(None);
+    let wrapper_file = if cfg!(windows) {
+        format!("{wrapper_name}.exe")
+    } else {
+        wrapper_name.to_string()
     };
+    let engine_name = OsStr::new(&wrapper_file);
     if !supports_recorder_engine(engine_name) {
         return Ok(None);
     }
@@ -31,6 +35,9 @@ pub fn prepare_wrapper(
     let wrapper = directory.join(engine_name);
     if wrapper.exists() || wrapper.is_symlink() {
         fs::remove_file(&wrapper)?;
+    }
+    if depfile.exists() {
+        fs::remove_file(depfile)?;
     }
     let executable = std::env::current_exe()?;
     install_wrapper_executable(&executable, &wrapper)?;
@@ -55,6 +62,11 @@ pub fn run_wrapper_from_env() -> Option<i32> {
     if !is_recorder_invocation(&invoked_as) {
         return None;
     }
+    let invoked_name = Path::new(&invoked_as)
+        .file_stem()
+        .and_then(OsStr::to_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     let real_engine = std::env::var_os(REAL_ENGINE_ENV)?;
     let depfile = std::env::var_os(DEPFILE_ENV)?;
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
@@ -71,14 +83,25 @@ pub fn run_wrapper_from_env() -> Option<i32> {
     };
 
     if status.success() {
-        if let Some((fls, output_directory)) = locate_fls(&args) {
-            if let Err(error) =
+        let recorded = if invoked_name == "tectonic" {
+            locate_tectonic_rules(&args).map(|context| {
+                write_depfile_from_tectonic_rules(
+                    &context.rules,
+                    Path::new(&depfile),
+                    &context.working_directory,
+                    &context.output_directory,
+                    &context.search_paths,
+                )
+            })
+        } else {
+            locate_fls(&args).map(|(fls, output_directory)| {
                 write_depfile_from_fls(&fls, Path::new(&depfile), &[output_directory])
-            {
-                terminal::warning(format!(
-                    "LaTeX recorder could not write its dependency file\n{error}"
-                ));
-            }
+            })
+        };
+        if let Some(Err(error)) = recorded {
+            terminal::warning(format!(
+                "LaTeX recorder could not write its dependency file\n{error}"
+            ));
         }
     }
     Some(status.code().unwrap_or(1))
@@ -138,11 +161,67 @@ pub fn write_depfile_from_fls(
         dependencies.insert(canonical);
     }
 
+    write_depfile(depfile, "latex-fls", &dependencies)?;
+    Ok(dependencies.len())
+}
+
+pub fn write_depfile_from_tectonic_rules(
+    rules_path: &Path,
+    depfile: &Path,
+    working_directory: &Path,
+    output_directory: &Path,
+    search_paths: &[PathBuf],
+) -> Result<usize> {
+    let content = fs::read_to_string(rules_path).map_err(|error| {
+        OmniDocError::Other(format!(
+            "cannot read Tectonic dependency rules {}: {error}",
+            rules_path.display()
+        ))
+    })?;
+    let working_directory = working_directory
+        .canonicalize()
+        .unwrap_or_else(|_| working_directory.to_path_buf());
+    let output_directory = if output_directory.is_absolute() {
+        output_directory.to_path_buf()
+    } else {
+        working_directory.join(output_directory)
+    };
+    let output_directory = output_directory.canonicalize().unwrap_or(output_directory);
+    let search_paths = search_paths
+        .iter()
+        .map(|path| {
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                working_directory.join(path)
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut dependencies = BTreeSet::new();
+    for dependency in parse_makefile_dependencies(&content) {
+        let Some(canonical) = resolve_tectonic_dependency(
+            &dependency,
+            &working_directory,
+            &output_directory,
+            &search_paths,
+        ) else {
+            continue;
+        };
+        if canonical.starts_with(&output_directory) || volatile_latex_output(&canonical) {
+            continue;
+        }
+        dependencies.insert(canonical);
+    }
+    write_depfile(depfile, "tectonic-makefile", &dependencies)?;
+    Ok(dependencies.len())
+}
+
+fn write_depfile(depfile: &Path, source: &str, dependencies: &BTreeSet<PathBuf>) -> Result<()> {
     if let Some(parent) = depfile.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut output = String::from("# omnidoc-depfile-v1\n# source=latex-fls\n");
-    for dependency in &dependencies {
+    let mut output = format!("# omnidoc-depfile-v1\n# source={source}\n");
+    for dependency in dependencies {
         output.push_str(&dependency.to_string_lossy());
         output.push('\n');
     }
@@ -152,7 +231,131 @@ pub fn write_depfile_from_fls(
         fs::remove_file(depfile)?;
     }
     fs::rename(&temporary, depfile)?;
-    Ok(dependencies.len())
+    Ok(())
+}
+
+fn parse_makefile_dependencies(content: &str) -> Vec<PathBuf> {
+    let joined = content.replace("\\\r\n", " ").replace("\\\n", " ");
+    let mut dependencies = Vec::new();
+    for line in joined.lines() {
+        let Some((_, values)) = line.split_once(" : ") else {
+            continue;
+        };
+        dependencies.extend(parse_makefile_words(values).into_iter().map(PathBuf::from));
+    }
+    dependencies
+}
+
+fn parse_makefile_words(value: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut escaped = false;
+    for character in value.chars() {
+        if escaped {
+            current.push(character);
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character.is_whitespace() {
+            if !current.is_empty() {
+                words.push(current.replace("$$", "$"));
+                current = String::new();
+            }
+        } else {
+            current.push(character);
+        }
+    }
+    if escaped {
+        current.push('\\');
+    }
+    if !current.is_empty() {
+        words.push(current.replace("$$", "$"));
+    }
+    words
+}
+
+fn resolve_tectonic_dependency(
+    dependency: &Path,
+    working_directory: &Path,
+    output_directory: &Path,
+    search_paths: &[PathBuf],
+) -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if dependency.is_absolute() {
+        candidates.push(dependency.to_path_buf());
+    } else {
+        candidates.push(working_directory.join(dependency));
+    }
+
+    let search_relative = dependency
+        .strip_prefix(output_directory)
+        .ok()
+        .map(Path::to_path_buf)
+        .or_else(|| (!dependency.is_absolute()).then(|| dependency.to_path_buf()));
+    if let Some(relative) = search_relative {
+        candidates.push(working_directory.join(&relative));
+        for search_path in search_paths {
+            candidates.push(search_path.join(&relative));
+        }
+    }
+    if let Some(file_name) = dependency.file_name() {
+        for search_path in search_paths {
+            candidates.push(search_path.join(file_name));
+        }
+    }
+
+    candidates.into_iter().find_map(|candidate| {
+        candidate
+            .is_file()
+            .then(|| candidate.canonicalize().unwrap_or(candidate))
+    })
+}
+
+struct TectonicRuleContext {
+    rules: PathBuf,
+    working_directory: PathBuf,
+    output_directory: PathBuf,
+    search_paths: Vec<PathBuf>,
+}
+
+fn locate_tectonic_rules(args: &[OsString]) -> Option<TectonicRuleContext> {
+    let working_directory = std::env::current_dir().ok()?;
+    let mut rules = None;
+    let mut output_directory = None;
+    let mut search_paths = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let argument = args[index].to_string_lossy();
+        if argument == "--makefile-rules" {
+            index += 1;
+            rules = args.get(index).map(PathBuf::from);
+        } else if let Some(value) = argument.strip_prefix("--makefile-rules=") {
+            rules = Some(PathBuf::from(value));
+        } else if matches!(argument.as_ref(), "--outdir" | "-o") {
+            index += 1;
+            output_directory = args.get(index).map(PathBuf::from);
+        } else if let Some(value) = argument.strip_prefix("--outdir=") {
+            output_directory = Some(PathBuf::from(value));
+        } else if let Some(value) = argument.strip_prefix("-Zsearch-path=") {
+            search_paths.push(PathBuf::from(value));
+        } else if argument == "-Z" {
+            if let Some(value) = args
+                .get(index + 1)
+                .and_then(|value| value.to_str())
+                .and_then(|value| value.strip_prefix("search-path="))
+            {
+                search_paths.push(PathBuf::from(value));
+                index += 1;
+            }
+        }
+        index += 1;
+    }
+    Some(TectonicRuleContext {
+        rules: rules?,
+        output_directory: output_directory.unwrap_or_else(|| PathBuf::from(".")),
+        working_directory,
+        search_paths,
+    })
 }
 
 fn locate_fls(args: &[OsString]) -> Option<(PathBuf, PathBuf)> {
@@ -201,7 +404,10 @@ fn supports_recorder_engine(engine_name: &OsStr) -> bool {
         .and_then(OsStr::to_str)
         .unwrap_or_default()
         .to_ascii_lowercase();
-    matches!(stem.as_str(), "xelatex" | "pdflatex" | "lualatex")
+    matches!(
+        stem.as_str(),
+        "xelatex" | "pdflatex" | "lualatex" | "tectonic"
+    )
 }
 
 fn volatile_latex_output(path: &Path) -> bool {
@@ -238,7 +444,10 @@ fn install_wrapper_executable(executable: &Path, wrapper: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_recorder_invocation, locate_fls, write_depfile_from_fls};
+    use super::{
+        is_recorder_invocation, locate_fls, write_depfile_from_fls,
+        write_depfile_from_tectonic_rules,
+    };
     use std::ffi::OsString;
     use std::fs;
 
@@ -248,9 +457,71 @@ mod tests {
             "/tmp/wrappers/xelatex"
         )));
         assert!(is_recorder_invocation(std::ffi::OsStr::new("lualatex")));
+        assert!(is_recorder_invocation(std::ffi::OsStr::new("tectonic")));
         assert!(!is_recorder_invocation(std::ffi::OsStr::new(
             "/usr/local/bin/omnidoc"
         )));
+    }
+
+    #[test]
+    fn resolves_tectonic_virtual_output_dependencies_against_search_paths() {
+        let root = tempfile::tempdir().expect("Tectonic dependency root");
+        let output = root.path().join("build");
+        let packages = root.path().join("texmf/tex/common");
+        fs::create_dir_all(&output).expect("output directory");
+        fs::create_dir_all(&packages).expect("package directory");
+        let entry = root.path().join("main.tex");
+        let chapter = root.path().join("chapters/intro.tex");
+        let package = packages.join("probe.sty");
+        fs::write(&entry, "entry").expect("entry");
+        fs::create_dir_all(chapter.parent().expect("chapter parent")).expect("chapter directory");
+        fs::write(&chapter, "chapter").expect("chapter");
+        fs::write(&package, "package").expect("package");
+        let rules = root.path().join("tectonic.make");
+        fs::write(
+            &rules,
+            format!(
+                "{} : {} \\\n  {} \\\n  {}\n",
+                output.join("main.pdf").display(),
+                entry.display(),
+                output.join("chapters/intro.tex").display(),
+                output.join("probe.sty").display()
+            ),
+        )
+        .expect("rules");
+        let depfile = root.path().join("latex-inputs.d");
+
+        write_depfile_from_tectonic_rules(
+            &rules,
+            &depfile,
+            root.path(),
+            &output,
+            std::slice::from_ref(&packages),
+        )
+        .expect("Tectonic depfile");
+
+        let content = fs::read_to_string(depfile).expect("depfile content");
+        assert!(content.contains(
+            &entry
+                .canonicalize()
+                .expect("canonical entry")
+                .display()
+                .to_string()
+        ));
+        assert!(content.contains(
+            &chapter
+                .canonicalize()
+                .expect("canonical chapter")
+                .display()
+                .to_string()
+        ));
+        assert!(content.contains(
+            &package
+                .canonicalize()
+                .expect("canonical package")
+                .display()
+                .to_string()
+        ));
     }
 
     #[test]

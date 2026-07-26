@@ -1,0 +1,12 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{omnidoc-native-probe}[2026/07/25 OmniDoc native LaTeX probe]
+
+\RequirePackage{xcolor}
+
+\newcommand{\NativeProbe}[1]{%
+  \par\medskip
+  \noindent\colorbox{blue!10}{%
+    \parbox{0.92\linewidth}{\sffamily #1}%
+  }%
+  \par\medskip
+}

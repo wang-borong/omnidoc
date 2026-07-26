@@ -4,6 +4,7 @@ pub mod pandoc;
 pub(crate) mod pandoc_policy;
 pub mod pipeline;
 pub mod source_map;
+pub mod tectonic;
 
 pub use executor::BuildExecutor;
 pub use latex::LatexBuilder;

@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## 1.7.0 - 2026-07-26
+
+- Bundled the official Tectonic 0.16.9 engine in platform release archives and
+  made it the automatic first choice for managed Markdown PDF builds, with
+  XeLaTeX fallback and a XeLaTeX/latexmk-first policy for raw LaTeX projects.
+- Added Tectonic bundle, offline-cache, explicit shell-escape, recursive search
+  path, CJK/OmniDoc texmf compatibility, and Makefile dependency recording.
+- Made project-level `[tools]` settings override global tools and stopped the
+  CLI's implicit `latexmk` value from overriding `build.latex_backend`.
+- Preserved document front-matter title and author instead of replacing them
+  with the output target and the global template-author default.
+- Added the generic Simplified Chinese Pandoc translation map required by
+  `zh-CN`, eliminating missing structural-term translations in CJK outputs.
+- Unified project-type inference across build, doctor, cache, and lock flows;
+  fixed relative single-file conversions and tracked external local Tectonic
+  bundles by content.
+- Declared the bundled Linux engine's dynamic runtime dependencies in package
+  metadata and added packaged-binary linkage checks.
+- Added engine kind/origin and Tectonic bundle policy to doctor, reports,
+  locks, and cache fingerprints without requiring kpsewhich in Tectonic mode.
+- Removed a bundled `listings.sty` shadowing bug and made the engineering-book
+  table styling compatible with older Tectonic web bundles.
+- Added Tectonic Golden PDF gates for both Markdown and native LaTeX projects,
+  verified CJK/font/emoji/table rendering and dependency invalidation, and made
+  TeX Live optional in Arch and Debian package metadata.
+
 ## 1.6.1
 
 - Normalized bundled manifest paths into native path components so theme CSS,

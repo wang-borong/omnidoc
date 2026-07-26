@@ -40,6 +40,7 @@ for css in "${block_css[@]}"; do
 done
 
 pandoc "$root/tests/blocks-showcase.md" \
+  --data-dir="$root/pandoc/data" \
   --lua-filter="$root/pandoc/data/filters/admonition.lua" \
   "${block_css_args[@]}" \
   --standalone --embed-resources -t html5 -o "$work/blocks-showcase.html"
@@ -49,6 +50,7 @@ for kind in note tip important warning error question answer example exercise so
 done
 
 pandoc "$root/tests/blocks-showcase.md" \
+  --data-dir="$root/pandoc/data" \
   --lua-filter="$root/pandoc/data/filters/admonition.lua" \
   "${block_css_args[@]}" \
   --standalone -t epub3 -o "$work/blocks-showcase.epub"
@@ -187,6 +189,51 @@ pandoc "$work/header-smoke.md" \
   --standalone -t latex -o "$work/header-smoke.tex"
 rg -Fq '\newcommand{\ProjectHeaderMarker}{project}' "$work/header-smoke.tex"
 rg -Fq '\newcommand{\OmniManagedHeaderMarker}{managed}' "$work/header-smoke.tex"
+
+# Theme/global values are defaults, not command-line overrides of publication
+# metadata. The same filter also selects Chinese cross-reference labels only
+# after the final document language is known.
+cat >"$work/metadata-template.txt" <<'EOF'
+$title$|$for(author)$$author$$sep$, $endfor$|$lang$|$crossrefYaml$
+EOF
+cat >"$work/metadata-source.md" <<'EOF'
+---
+title: Source Title
+author: Source Author
+lang: en
+---
+
+Metadata precedence smoke.
+EOF
+pandoc "$work/metadata-source.md" \
+  --metadata omnidoc-default-title=Default-Title \
+  --metadata omnidoc-default-author=unknown \
+  --metadata omnidoc-default-lang=zh-CN \
+  --metadata omnidoc-zh-crossref-yaml="$root/pandoc/crossref.yaml" \
+  --lua-filter="$root/pandoc/data/filters/metadata-defaults.lua" \
+  --standalone --template="$work/metadata-template.txt" \
+  -t plain -o "$work/metadata-source.txt"
+rg -Fxq 'Source Title|Source Author|en|' "$work/metadata-source.txt" || {
+  echo "source metadata precedence output was unexpected:" >&2
+  cat "$work/metadata-source.txt" >&2
+  exit 1
+}
+
+printf 'Metadata defaults smoke.\n' >"$work/metadata-default.md"
+pandoc "$work/metadata-default.md" \
+  --metadata omnidoc-default-title=Default-Title \
+  --metadata omnidoc-default-author=unknown \
+  --metadata omnidoc-default-lang=zh-CN \
+  --metadata omnidoc-zh-crossref-yaml="$root/pandoc/crossref.yaml" \
+  --lua-filter="$root/pandoc/data/filters/metadata-defaults.lua" \
+  --standalone --template="$work/metadata-template.txt" \
+  -t plain -o "$work/metadata-default.txt"
+rg -Fxq "Default-Title|unknown|zh-CN|$root/pandoc/crossref.yaml" \
+  "$work/metadata-default.txt" || {
+  echo "metadata default output was unexpected:" >&2
+  cat "$work/metadata-default.txt" >&2
+  exit 1
+}
 
 "$root/scripts/check-pandoc-latex-template.sh"
 

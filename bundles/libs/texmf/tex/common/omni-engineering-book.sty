@@ -6,7 +6,7 @@
   \RequirePackage{fontspec}
   \RequirePackage{xeCJK}
 \else
-  \PackageError{omni-engineering-book}{XeLaTeX is required}{Use OmniDoc's default xelatex engine for this theme.}
+  \PackageError{omni-engineering-book}{A XeTeX-compatible engine is required}{Use XeLaTeX or Tectonic for this theme.}
 \fi
 \RequirePackage{titlesec}
 \RequirePackage{fancyhdr}
@@ -104,6 +104,10 @@
     boxrule=0pt,leftrule=3pt,arc=1mm,left=1em,right=1em,top=0.7em,bottom=0.7em]}
   {\end{tcolorbox}}
 
+% Older Tectonic web bundles can provide xcolor without its `table` option,
+% leaving \rowcolors undefined even though colortbl itself is available. Keep
+% the table readable and retain alternating rows whenever the command exists.
+\providecommand{\rowcolors}[4][]{}
 \AtBeginEnvironment{longtable}{\small\rowcolors{2}{CircuitPale}{white}}
 
 \makeatletter

@@ -26,7 +26,7 @@ pub fn handle_build(
     all: bool,
     outputs: Vec<String>,
     pdf_engine: Option<String>,
-    latex_backend: String,
+    latex_backend: Option<String>,
     max_latex_passes: Option<usize>,
     force: bool,
     report: bool,
@@ -205,6 +205,7 @@ fn build_project_once(
         }
         return Ok(project_tools::build_report(
             project_tools::BuildReportContext {
+                project_path,
                 output,
                 target,
                 skipped: true,
@@ -277,6 +278,7 @@ fn build_project_once(
     project_tools::write_cache_state(project_path, &output, &final_input_state)?;
     Ok(project_tools::build_report(
         project_tools::BuildReportContext {
+            project_path,
             output,
             target,
             skipped: false,
@@ -358,7 +360,7 @@ pub fn build_cli_overrides(
     to: Option<String>,
     outputs: Vec<String>,
     pdf_engine: Option<String>,
-    latex_backend: String,
+    latex_backend: Option<String>,
     max_latex_passes: Option<usize>,
     verbose: bool,
 ) -> CliOverrides {
@@ -366,7 +368,7 @@ pub fn build_cli_overrides(
         .with_verbose(verbose)
         .with_to(to)
         .with_outputs(outputs)
-        .with_latex_backend(Some(latex_backend))
+        .with_latex_backend(latex_backend)
         .with_max_latex_passes(max_latex_passes);
     if let Some(engine) = pdf_engine {
         cli_overrides = cli_overrides.with_tool_path("latex_engine".to_string(), Some(engine));

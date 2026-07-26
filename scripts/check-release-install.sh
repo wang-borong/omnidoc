@@ -23,8 +23,23 @@ jq -e '
 "$bin" libs --update
 "$bin" libs --verify
 
+# No engine override is configured here: this proves that an extracted release
+# discovers its sibling engines/tectonic binary automatically.
+"$bin" doctor --strict --output pdf "$root/tests/fixtures/golden-book"
+
 OMNIDOC_BIN="$bin" \
 OMNIDOC_LIBS="$XDG_DATA_HOME/omnidoc" \
   "$root/scripts/check-golden-book.sh"
 
-echo "Release install and Golden Book smoke test passed"
+OMNIDOC_BIN="$bin" \
+OMNIDOC_LIBS="$XDG_DATA_HOME/omnidoc" \
+OMNIDOC_PDF_ENGINE=tectonic \
+OMNIDOC_TECTONIC_BIN="$(dirname "$bin")/engines/tectonic" \
+  "$root/scripts/check-golden-pdf.sh"
+
+OMNIDOC_BIN="$bin" \
+OMNIDOC_LIBS="$XDG_DATA_HOME/omnidoc" \
+OMNIDOC_TECTONIC_BIN="$(dirname "$bin")/engines/tectonic" \
+  "$root/scripts/check-tectonic-latex.sh"
+
+echo "Release install and Markdown/native-LaTeX smoke tests passed"

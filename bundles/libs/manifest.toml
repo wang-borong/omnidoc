@@ -1,6 +1,6 @@
 manifest_version = 1
-version = "1.6.1"
-compatible_omnidoc = "=1.6.1"
+version = "1.7.0"
+compatible_omnidoc = "=1.7.0"
 compatible_pandoc = ">=3.0,<4.0"
 checksum_algorithm = "sha256"
 checksum_file = "checksums.sha256"
@@ -18,8 +18,10 @@ required_resources = [
   "pandoc/css/modules/figures.css",
   "pandoc/data/epub.css",
   "pandoc/data/reference-docs/engineering-slides.pptx",
+  "pandoc/data/translations/zh.yaml",
   "pandoc/data/filters/include-files.lua",
   "pandoc/data/filters/include-code-files.lua",
+  "pandoc/data/filters/metadata-defaults.lua",
   "pandoc/data/filters/latex-headers.lua",
   "pandoc/data/filters/display-math.lua",
   "pandoc/data/filters/admonition.lua",

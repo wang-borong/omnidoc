@@ -1,0 +1,39 @@
+\documentclass[11pt]{article}
+
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\usepackage{omnidoc-native-probe}
+
+\setmainfont{Noto Serif CJK SC}
+\setsansfont{Noto Sans CJK SC}
+\setCJKmainfont{Noto Serif CJK SC}
+\setCJKsansfont{Noto Sans CJK SC}
+
+\title{OmniDoc 原生 LaTeX / CJK 回归文档}
+\author{OmniDoc}
+\date{}
+
+\begin{document}
+\maketitle
+
+\input{chapters/intro}
+
+\section{Mathematics 数学公式}
+
+English and CJK text share one XeTeX-compatible OpenType pipeline:
+
+\[
+  \int_0^1 x^2\,\mathrm{d}x = \frac{1}{3}.
+\]
+
+\NativeProbe{原生 LaTeX 构建已加载项目内递归搜索路径中的宏包。}
+
+\section{Bibliography 参考文献}
+
+Tectonic's built-in BibTeX-compatible pass resolves this citation to
+Knuth's literate-programming book~\cite{knuth1984literate}.
+
+\bibliographystyle{plain}
+\bibliography{biblio/references}
+
+\end{document}

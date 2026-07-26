@@ -1,0 +1,40 @@
+# Third-party software shipped with OmniDoc
+
+Official OmniDoc binary archives include the Tectonic typesetting engine so
+Markdown PDF builds do not require a separate TeX Live installation.
+
+## Tectonic 0.16.9
+
+- Project: https://github.com/tectonic-typesetting/tectonic
+- Release: https://github.com/tectonic-typesetting/tectonic/releases/tag/tectonic%400.16.9
+- License: MIT
+- Copyright: the Tectonic Project developers
+
+Tectonic is distributed as an unmodified official release binary. Its source,
+license text, dependency notices, and build instructions are available from
+the project repository and the release above. OmniDoc's use of Tectonic does
+not imply endorsement by the Tectonic Project.
+
+Tectonic's license text:
+
+> Tectonic is licensed under the MIT License. Elements of the system from
+> which it is derived are licensed under an extremely wide variety of
+> open-source licenses.
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of this software and associated documentation files (the "Software"), to
+> deal in the Software without restriction, including without limitation the
+> rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+> sell copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in
+> all copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+> FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+> AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+> LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+> FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+> IN THE SOFTWARE.

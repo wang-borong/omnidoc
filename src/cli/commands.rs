@@ -65,8 +65,8 @@ pub enum Commands {
         pdf_engine: Option<String>,
 
         /// LaTeX project backend (latexmk or engine)
-        #[arg(long = "latex-backend", default_value = "latexmk")]
-        latex_backend: String,
+        #[arg(long = "latex-backend")]
+        latex_backend: Option<String>,
 
         /// maximum direct LaTeX engine passes for --latex-backend engine
         #[arg(long = "max-latex-passes")]
@@ -116,8 +116,8 @@ pub enum Commands {
         pdf_engine: Option<String>,
 
         /// LaTeX project backend (latexmk or engine)
-        #[arg(long = "latex-backend", default_value = "latexmk")]
-        latex_backend: String,
+        #[arg(long = "latex-backend")]
+        latex_backend: Option<String>,
 
         /// maximum direct LaTeX engine passes for --latex-backend engine
         #[arg(long = "max-latex-passes")]
@@ -171,8 +171,8 @@ pub enum Commands {
         pdf_engine: Option<String>,
 
         /// LaTeX project backend (latexmk or engine)
-        #[arg(long = "latex-backend", default_value = "latexmk")]
-        latex_backend: String,
+        #[arg(long = "latex-backend")]
+        latex_backend: Option<String>,
 
         /// maximum direct LaTeX engine passes for --latex-backend engine
         #[arg(long = "max-latex-passes")]
@@ -734,4 +734,26 @@ pub enum FigureSubcommand {
         #[arg(short = 'o', long)]
         output: Option<String>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Commands, OmniCli};
+    use clap::Parser;
+
+    #[test]
+    fn latex_backend_is_an_override_only_when_explicitly_provided() {
+        let defaults = OmniCli::try_parse_from(["omnidoc", "build"]).expect("default build CLI");
+        let Commands::Build { latex_backend, .. } = defaults.command else {
+            panic!("expected build command");
+        };
+        assert_eq!(latex_backend, None);
+
+        let explicit = OmniCli::try_parse_from(["omnidoc", "build", "--latex-backend", "engine"])
+            .expect("explicit backend");
+        let Commands::Build { latex_backend, .. } = explicit.command else {
+            panic!("expected build command");
+        };
+        assert_eq!(latex_backend.as_deref(), Some("engine"));
+    }
 }

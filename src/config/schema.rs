@@ -23,6 +23,8 @@ pub struct ConfigSchema {
     #[serde(flatten)]
     pub tools: Option<ToolsConfig>,
     #[serde(flatten)]
+    pub tectonic: Option<TectonicConfig>,
+    #[serde(flatten)]
     pub paths: Option<PathsConfig>,
     pub download: Option<Vec<DownloadConfig>>,
     pub template_dir: Option<String>,
@@ -228,6 +230,28 @@ pub struct ToolsSection {
     pub epubcheck: Option<String>,
     /// kroki 服务 URL 或本地可执行文件路径（用于 mermaid 生成）
     pub kroki: Option<String>,
+}
+
+/// Tectonic runtime policy. Tectonic remains network-enabled by default;
+/// `only_cached` makes offline behavior explicit instead of silently changing
+/// how the engine resolves its TeX bundle.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub struct TectonicConfig {
+    #[serde(rename = "tectonic")]
+    pub tectonic: Option<TectonicSection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TectonicSection {
+    /// Alternate web bundle URL or local bundle path.
+    pub bundle: Option<String>,
+    /// Refuse downloads and use only resources already present in Tectonic's cache.
+    pub only_cached: Option<bool>,
+    /// Enable Tectonic's unstable shell-escape implementation.
+    pub shell_escape: Option<bool>,
+    /// Additional recursive TeX/BibTeX search roots.
+    pub search_paths: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -63,6 +63,10 @@ pub struct MergedConfig {
     pub pandoc_standalone: bool,
     pub pandoc_embed_resources: bool,
     pub pandoc_lang: Option<String>,
+    pub tectonic_bundle: Option<String>,
+    pub tectonic_only_cached: bool,
+    pub tectonic_shell_escape: bool,
+    pub tectonic_search_paths: Vec<String>,
     pub tool_paths: HashMap<String, Option<String>>,
     pub template_dir: Option<String>,
     pub paths: PathConfig,
@@ -283,57 +287,32 @@ impl ConfigManager {
             .unwrap_or(true);
         let pandoc_lang = pandoc_config.and_then(|p| p.lang.clone());
 
+        let project_tectonic = project_config
+            .and_then(|config| config.tectonic.as_ref())
+            .and_then(|config| config.tectonic.as_ref());
+        let global_tectonic = global_config
+            .and_then(|config| config.tectonic.as_ref())
+            .and_then(|config| config.tectonic.as_ref());
+        let tectonic_bundle = project_tectonic
+            .and_then(|config| config.bundle.clone())
+            .or_else(|| global_tectonic.and_then(|config| config.bundle.clone()));
+        let tectonic_only_cached = project_tectonic
+            .and_then(|config| config.only_cached)
+            .or_else(|| global_tectonic.and_then(|config| config.only_cached))
+            .unwrap_or(false);
+        let tectonic_shell_escape = project_tectonic
+            .and_then(|config| config.shell_escape)
+            .or_else(|| global_tectonic.and_then(|config| config.shell_escape))
+            .unwrap_or(false);
+        let tectonic_search_paths = project_tectonic
+            .and_then(|config| config.search_paths.clone())
+            .or_else(|| global_tectonic.and_then(|config| config.search_paths.clone()))
+            .unwrap_or_default();
+
         // 合并工具路径
         let mut tool_paths = HashMap::new();
-        if let Some(global_tools) = global_config.and_then(|c| c.tools.as_ref()) {
-            if let Some(tools) = &global_tools.tools {
-                if let Some(p) = &tools.pandoc {
-                    tool_paths.insert("pandoc".to_string(), Some(p.clone()));
-                }
-                if let Some(p) = &tools.latexmk {
-                    tool_paths.insert("latexmk".to_string(), Some(p.clone()));
-                }
-                if let Some(p) = &tools.drawio {
-                    tool_paths.insert("drawio".to_string(), Some(p.clone()));
-                }
-                if let Some(p) = &tools.dot {
-                    tool_paths.insert("dot".to_string(), Some(p.clone()));
-                }
-                if let Some(p) = &tools.inkscape {
-                    tool_paths.insert("inkscape".to_string(), Some(p.clone()));
-                }
-                if let Some(p) = &tools.imagemagick {
-                    // imagemagick 的命令名可能是 "magick" 或 "convert"
-                    tool_paths.insert("imagemagick".to_string(), Some(p.clone()));
-                    // 同时支持 "magick" 作为别名
-                    tool_paths.insert("magick".to_string(), Some(p.clone()));
-                }
-                if let Some(p) = &tools.python3 {
-                    tool_paths.insert("python3".to_string(), Some(p.clone()));
-                }
-                if let Some(p) = &tools.kicad_cli {
-                    tool_paths.insert("kicad-cli".to_string(), Some(p.clone()));
-                }
-                if let Some(p) = &tools.ngspice {
-                    tool_paths.insert("ngspice".to_string(), Some(p.clone()));
-                }
-                if let Some(p) = &tools.latex_engine {
-                    tool_paths.insert("latex_engine".to_string(), Some(p.clone()));
-                }
-                if let Some(p) = &tools.tectonic {
-                    tool_paths.insert("tectonic".to_string(), Some(p.clone()));
-                }
-                if let Some(p) = &tools.pandoc_crossref {
-                    tool_paths.insert("pandoc-crossref".to_string(), Some(p.clone()));
-                }
-                if let Some(p) = &tools.epubcheck {
-                    tool_paths.insert("epubcheck".to_string(), Some(p.clone()));
-                }
-                if let Some(p) = &tools.kroki {
-                    tool_paths.insert("kroki".to_string(), Some(p.clone()));
-                }
-            }
-        }
+        merge_tool_paths(&mut tool_paths, global_config);
+        merge_tool_paths(&mut tool_paths, project_config);
         // CLI 覆盖工具路径
         for (tool, path) in &cli.tool_paths {
             tool_paths.insert(tool.clone(), path.clone());
@@ -402,6 +381,10 @@ impl ConfigManager {
             pandoc_standalone,
             pandoc_embed_resources,
             pandoc_lang,
+            tectonic_bundle,
+            tectonic_only_cached,
+            tectonic_shell_escape,
+            tectonic_search_paths,
             tool_paths,
             template_dir,
             paths,
@@ -509,5 +492,66 @@ impl ConfigManager {
     /// 获取路径配置
     pub fn paths(&self) -> &PathConfig {
         &self.merged.paths
+    }
+}
+
+fn merge_tool_paths(target: &mut HashMap<String, Option<String>>, config: Option<&ConfigSchema>) {
+    let Some(tools) = config
+        .and_then(|config| config.tools.as_ref())
+        .and_then(|config| config.tools.as_ref())
+    else {
+        return;
+    };
+    for (key, value) in [
+        ("pandoc", tools.pandoc.as_ref()),
+        ("latexmk", tools.latexmk.as_ref()),
+        ("drawio", tools.drawio.as_ref()),
+        ("dot", tools.dot.as_ref()),
+        ("inkscape", tools.inkscape.as_ref()),
+        ("python3", tools.python3.as_ref()),
+        ("kicad-cli", tools.kicad_cli.as_ref()),
+        ("ngspice", tools.ngspice.as_ref()),
+        ("latex_engine", tools.latex_engine.as_ref()),
+        ("tectonic", tools.tectonic.as_ref()),
+        ("pandoc-crossref", tools.pandoc_crossref.as_ref()),
+        ("epubcheck", tools.epubcheck.as_ref()),
+        ("kroki", tools.kroki.as_ref()),
+    ] {
+        if let Some(value) = value {
+            target.insert(key.to_string(), Some(value.clone()));
+        }
+    }
+    if let Some(value) = tools.imagemagick.as_ref() {
+        target.insert("imagemagick".to_string(), Some(value.clone()));
+        target.insert("magick".to_string(), Some(value.clone()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_tool_paths;
+    use crate::config::schema::ConfigSchema;
+    use std::collections::HashMap;
+
+    #[test]
+    fn project_tools_override_global_tools() {
+        let global: ConfigSchema =
+            toml::from_str("[tools]\npandoc = 'global-pandoc'\ntectonic = 'global-tectonic'\n")
+                .expect("global config");
+        let project: ConfigSchema =
+            toml::from_str("[tools]\ntectonic = 'project-tectonic'\n").expect("project config");
+        let mut paths = HashMap::new();
+
+        merge_tool_paths(&mut paths, Some(&global));
+        merge_tool_paths(&mut paths, Some(&project));
+
+        assert_eq!(
+            paths.get("pandoc").and_then(|value| value.as_deref()),
+            Some("global-pandoc")
+        );
+        assert_eq!(
+            paths.get("tectonic").and_then(|value| value.as_deref()),
+            Some("project-tectonic")
+        );
     }
 }

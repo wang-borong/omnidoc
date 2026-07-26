@@ -13,37 +13,26 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
   - [Pandoc](https://github.com/jgm/pandoc/releases)  
   - [pandoc-crossref](https://github.com/lierdakil/pandoc-crossref/releases)
 
-- **LaTeX**  
+- **PDF engine and CJK fonts**
 
-  You can install LaTeX following [this manual](https://www.tug.org/texlive/quickinstall.html) or through your Linux distribution's package manager.
+  Official OmniDoc binary archives include Tectonic 0.16.9. Markdown PDF
+  builds automatically prefer this bundled engine, so users do not need to
+  install TeX Live merely to build an OmniDoc-managed document. Tectonic
+  downloads TeX packages into its cache on first use. Linux archives use
+  Tectonic's official GNU release binary; the pinned 0.16.9 x86_64 asset
+  requires glibc 2.39 or newer. If the bundled executable cannot run on the
+  host, OmniDoc skips it and tries Tectonic from `PATH`, then XeLaTeX.
+  Linux package metadata also declares the engine's OpenSSL 3, Graphite2,
+  Brotli, Zstandard, libstdc++, and CA-certificate runtime requirements.
 
-  For example, on Arch Linux, you should install these packages:
+  CJK document fonts are system resources and are not embedded in the OmniDoc
+  package. Install Noto CJK fonts (for example `fonts-noto-cjk` on Debian or
+  `noto-fonts-cjk` on Arch Linux) when using the engineering-book theme.
 
-  ```
-  texlive-basic
-  texlive-bibtexextra
-  texlive-bin
-  texlive-fontsrecommended
-  texlive-langchinese
-  texlive-langcjk
-  texlive-latex
-  texlive-latexextra
-  texlive-latexrecommended
-  texlive-mathscience
-  texlive-pictures
-  texlive-plaingeneric
-  texlive-xetex
-  ```
-
-- **Tectonic (optional)**  
-
-  Tectonic can be used as a lighter PDF engine. It downloads missing TeX packages on demand and can be selected per build:
-
-  ```bash
-  omnidoc build --pdf-engine tectonic
-  ```
-
-  For raw LaTeX projects, the default `latexmk` backend is still recommended when you depend on custom `latexmkrc` rules, external bibliography tools, or shell-escape workflows.
+  TeX Live remains an optional compatibility dependency for raw LaTeX
+  projects that require `latexmkrc`, Biber, specialized TeX utilities, or a
+  shell-escape workflow that has not been validated with Tectonic. Install
+  XeLaTeX, latexmk, and the packages needed by that project in those cases.
 
 - **Draw.io**  
 
@@ -145,7 +134,9 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    - Use `--to html`, `--to epub`, `--to docx`, `--to pptx`, or `--to latex` for Markdown project builds
    - Use repeated `--output <FORMAT>` to build a specific set of outputs
    - Use `--all` to build `[build].outputs` or the default set: `pdf`, `html`, `docx`, `epub`
-   - Use `--pdf-engine tectonic` to compile PDFs with Tectonic instead of XeLaTeX
+   - Markdown PDF engine order is bundled Tectonic, Tectonic from `PATH`, then XeLaTeX
+   - Raw LaTeX projects prefer XeLaTeX + latexmk and fall back to Tectonic only when XeLaTeX is unavailable
+   - Use `--pdf-engine xelatex` or `--pdf-engine tectonic` to force a specific engine
    - Use `--latex-backend engine --max-latex-passes 5` for direct XeLaTeX/LuaLaTeX/PDFLaTeX builds that stop when `.aux/.toc`-style files stop changing
    - Keep the default `--latex-backend latexmk` when you need bibliography/glossary automation or custom `.latexmkrc` rules
    - Use `--force` to ignore the `.omnidoc-cache` input/config hash and rebuild
@@ -210,8 +201,16 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    target = "manual"
 
    [tools]
-   latex_engine = "tectonic"
+   # Omit latex_engine (or use "auto") for the managed engine policy.
+   latex_engine = "auto"
    # tectonic = "/custom/path/to/tectonic"
+
+   [tectonic]
+   # Optional URL or local Tectonic bundle for controlled/offline builds.
+   # bundle = "./vendor/tectonic-bundle.tar"
+   only_cached = false
+   shell_escape = false
+   search_paths = ["./tex", "./biblio"]
 
    [build]
    outputs = ["pdf", "html", "docx"]
@@ -241,6 +240,27 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    ```
 
    `template` is still accepted as a generic fallback for template-capable outputs. DOCX uses `reference_doc` instead of Pandoc `--template`.
+
+   `tectonic.only_cached = true` disables network downloads. Use it only after
+   prewarming Tectonic's cache or configuring a complete local `bundle`.
+   `tectonic.shell_escape` is off by default because Tectonic exposes it as an
+   unstable capability; enabling it is an explicit trust decision for the
+   current project. OmniDoc translates the bundled `texmf` tree, configured
+   search roots, `TEXINPUTS`, `BIBINPUTS`, and `TEXMFHOME` into Tectonic search
+   paths and records local files consumed by Tectonic in
+   `.omnidoc-cache/latex-inputs.d`.
+
+   Tectonic is XeTeX-compatible and has been validated here with Unicode,
+   English, CJK, OpenType fonts, xeCJK, TikZ, tcolorbox, tables, math, emoji,
+   automatic reruns, and BibTeX-style builds. It is not a complete behavioral
+   replacement for XeLaTeX + latexmk: it does not read `latexmkrc`, Biber still
+   needs an external orchestration path, and shell-escape compatibility is not
+   universal. For those projects, keep the raw LaTeX default and install TeX
+   Live.
+
+   The rationale, tested asset choices, compatibility boundary, and rollback
+   are recorded in
+   [ADR 0001](docs/decisions/0001-tectonic-engine-policy.md).
 
    A selected theme supplies default HTML/EPUB CSS and required Lua filters.
    Explicit `[pandoc]` resource settings retain higher priority. The selected
@@ -424,11 +444,13 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    `kpsewhich`. PDF lock/cache entries include the TeX distribution identity
    plus each resolved `.sty` version, file name, and BLAKE3 digest.
 
-   Theme metadata defaults are emitted as Pandoc `-M key=value` arguments for
-   projects without an authoritative `build.metadata_file`. Explicit
-   `pandoc.lang`, project author/title defaults, and user-supplied Pandoc
-   options take precedence. Metadata keys are validated as portable scalar
-   identifiers and values must remain single-line strings.
+   Theme metadata defaults are applied by a managed Lua filter only when the
+   document did not already define the same key. Front matter, an authoritative
+   `build.metadata_file`, explicit `pandoc.lang`, and user-supplied Pandoc
+   options therefore retain priority. The build target remains an artifact
+   filename and the global author remains a template-creation default; neither
+   replaces publication title/author metadata. Metadata keys are validated as
+   portable scalar identifiers and values must remain single-line strings.
 
    `html_template`, `epub_template`, and `latex_template` bind a template to a
    specific writer. Explicit project format templates and the generic

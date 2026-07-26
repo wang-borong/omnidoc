@@ -12,6 +12,8 @@ pub(crate) enum PandocOutputKind {
 }
 
 impl PandocOutputKind {
+    const METADATA_DEFAULTS_FILTER: &'static str = "metadata-defaults.lua";
+
     pub(crate) fn from_config(config: &MergedConfig) -> Result<Self> {
         let requested = config.to.as_deref().or(config.pandoc_to_format.as_deref());
         Self::from_requested(requested)
@@ -115,7 +117,7 @@ impl PandocOutputKind {
     }
 
     pub(crate) fn filters(self, config: &MergedConfig) -> Vec<&str> {
-        if config.pandoc_lua_filters.is_empty() {
+        let configured = if config.pandoc_lua_filters.is_empty() {
             self.default_filters().to_vec()
         } else {
             config
@@ -123,7 +125,14 @@ impl PandocOutputKind {
                 .iter()
                 .map(String::as_str)
                 .collect()
+        };
+        let mut filters = vec![Self::METADATA_DEFAULTS_FILTER];
+        for filter in configured {
+            if !filters.contains(&filter) {
+                filters.push(filter);
+            }
         }
+        filters
     }
 
     pub(crate) fn append_configured_options(
@@ -215,6 +224,10 @@ mod tests {
         assert!(!PandocOutputKind::Pdf
             .default_filters()
             .contains(&"display-math.lua"));
+        assert_eq!(
+            PandocOutputKind::Pdf.filters(&config).first().copied(),
+            Some("metadata-defaults.lua")
+        );
         assert!(is_supported_format_key("docx"));
         assert!(is_supported_format_key("pptx"));
         assert!(!is_supported_format_key("html5"));

@@ -147,9 +147,10 @@ pub(crate) fn load_theme_manifest(library: &Path, name: &str) -> Result<ThemeMan
 pub(crate) fn theme_diagnostic(
     library: &Path,
     name: &str,
-    check_environment: bool,
+    check_fonts: bool,
+    check_latex: bool,
 ) -> (bool, String) {
-    let report = match load_named_theme(library, name, check_environment, check_environment) {
+    let report = match load_named_theme(library, name, check_fonts, check_latex) {
         Ok(report) => report,
         Err(error) => return (false, error.to_string()),
     };

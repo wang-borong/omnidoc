@@ -1,3 +1,4 @@
+use crate::build::pipeline::detect_project_type;
 use crate::build::{BuildPipeline, LatexBuilder, PandocBuilder, ProjectType};
 use crate::config::MergedConfig;
 use crate::error::Result;
@@ -45,32 +46,7 @@ impl BuildService {
 
     /// 检测项目类型
     pub fn detect_project_type(&self, project_path: &Path) -> Result<ProjectType> {
-        // 优先检查配置中的 entry 和 from 字段
-        if let Some(entry) = &self.config.entry {
-            let entry_path = project_path.join(entry);
-            if entry_path.exists() {
-                return Ok(ProjectType::from_entry_file(&entry_path));
-            }
-        }
-
-        if let Some(from) = &self.config.from {
-            match from.to_lowercase().as_str() {
-                "markdown" | "md" => return Ok(ProjectType::Markdown),
-                "latex" | "tex" => return Ok(ProjectType::Latex),
-                _ => {}
-            }
-        }
-
-        // 尝试使用 PandocBuilder 检测
-        let pandoc_builder = PandocBuilder::new(self.config.clone())?;
-        let pandoc_type = BuildPipeline::detect_project_type(&pandoc_builder, project_path)?;
-        if pandoc_type != ProjectType::Unknown {
-            return Ok(pandoc_type);
-        }
-
-        // 尝试使用 LatexBuilder 检测
-        let latex_builder = LatexBuilder::new(self.config.clone())?;
-        BuildPipeline::detect_project_type(&latex_builder, project_path)
+        Ok(detect_project_type(&self.config, project_path))
     }
 
     /// 清理构建产物

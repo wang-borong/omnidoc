@@ -1,5 +1,6 @@
-use crate::build::executor::BuildExecutor;
+use crate::build::executor::{BuildExecutor, LatexEnginePreference, ResolvedLatexEngine};
 use crate::build::pipeline::{BuildPipeline, ProjectType};
+use crate::build::tectonic;
 use crate::config::MergedConfig;
 use crate::diagnostics::summarize_latex_log;
 use crate::doc::services::FigureService;
@@ -241,9 +242,21 @@ impl LatexBuilder {
         )
     }
 
-    fn ensure_bibliography_tools(&self, project_path: &Path) -> Result<()> {
+    fn ensure_bibliography_tools(
+        &self,
+        project_path: &Path,
+        engine: &ResolvedLatexEngine,
+        latex_backend: &str,
+    ) -> Result<()> {
         if !self.project_uses_biber(project_path) {
             return Ok(());
+        }
+
+        if engine.is_tectonic() || latex_backend == "engine" {
+            return Err(OmniDocError::Project(
+                "This project uses Biber. Select XeLaTeX with the latexmk backend; Tectonic and OmniDoc's direct engine backend do not orchestrate Biber."
+                    .to_string(),
+            ));
         }
 
         self.executor.check_tool("biber").map(|_| ()).map_err(|_| {
@@ -253,7 +266,32 @@ impl LatexBuilder {
         })
     }
 
+    fn ensure_tectonic_project_compatible(
+        &self,
+        project_path: &Path,
+        engine: &ResolvedLatexEngine,
+    ) -> Result<()> {
+        if !engine.is_tectonic() {
+            return Ok(());
+        }
+        if ["latexmkrc", ".latexmkrc"]
+            .iter()
+            .any(|name| project_path.join(name).is_file())
+        {
+            return Err(OmniDocError::Project(
+                "This project contains a latexmkrc file, which Tectonic does not read. Install XeLaTeX + latexmk or remove the latexmk-specific build rules."
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     fn project_uses_biber(&self, project_path: &Path) -> bool {
+        let bibtex_backend = Regex::new(r"\bbackend\s*=\s*bibtex\b").expect("BibTeX backend regex");
+        let biblatex_package = Regex::new(r"\\usepackage(?:\s*\[[^\]]*\])?\s*\{\s*biblatex\s*\}")
+            .expect("biblatex package regex");
+        let mut uses_biblatex = false;
+        let mut explicitly_uses_bibtex = false;
         for entry in WalkDir::new(project_path)
             .into_iter()
             .filter_entry(|entry| Self::should_scan_tex_path(entry.path(), project_path))
@@ -266,20 +304,17 @@ impl LatexBuilder {
             let Ok(content) = std::fs::read_to_string(entry.path()) else {
                 continue;
             };
-            let lower = content.to_ascii_lowercase();
-            if lower.contains("backend=bibtex") {
-                continue;
-            }
+            let lower = latex_source_without_comments(&content).to_ascii_lowercase();
+            explicitly_uses_bibtex |= bibtex_backend.is_match(&lower);
             if lower.contains("\\printbibliography")
                 || lower.contains("\\addbibresource")
-                || lower.contains("\\usepackage{biblatex}")
-                || lower.contains("]{biblatex}")
+                || biblatex_package.is_match(&lower)
             {
-                return true;
+                uses_biblatex = true;
             }
         }
 
-        false
+        uses_biblatex && !explicitly_uses_bibtex
     }
 
     /// 构建 latexmk 选项
@@ -313,14 +348,23 @@ impl LatexBuilder {
         options
     }
 
-    fn build_tectonic_options(&self, entry_file: &Path, outdir: &Path) -> Vec<String> {
-        vec![
+    fn build_tectonic_options(
+        &self,
+        project_path: &Path,
+        entry_file: &Path,
+        outdir: &Path,
+        rules: &Path,
+    ) -> tectonic::TectonicOptions {
+        let mut options = tectonic::build_options(&self.config, project_path);
+        options.arguments.extend([
             "--outdir".to_string(),
             outdir.to_string_lossy().to_string(),
             "--keep-logs".to_string(),
             "--keep-intermediates".to_string(),
+            tectonic::makefile_rules_argument(rules),
             entry_file.to_string_lossy().to_string(),
-        ]
+        ]);
+        options
     }
 
     fn build_engine_options(
@@ -339,14 +383,6 @@ impl LatexBuilder {
             format!("-jobname={}", target_name),
             entry_file.to_string_lossy().to_string(),
         ]
-    }
-
-    fn is_tectonic_engine(engine: &str) -> bool {
-        Path::new(engine)
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .map(|name| name.eq_ignore_ascii_case("tectonic"))
-            .unwrap_or_else(|| engine.eq_ignore_ascii_case("tectonic"))
     }
 
     fn find_latex_log_summary(
@@ -402,6 +438,8 @@ impl LatexBuilder {
 
     fn run_engine_until_stable(
         &self,
+        engine: &str,
+        project_path: &Path,
         entry_file: &Path,
         outdir: &Path,
         target_name: &str,
@@ -417,7 +455,8 @@ impl LatexBuilder {
                 println!("LaTeX engine pass {}/{}", pass, max_passes);
             }
 
-            self.executor.execute("latex_engine", &args[..], verbose)?;
+            self.executor
+                .execute_program_in_dir(engine, &args[..], verbose, Some(project_path))?;
             let current_hashes = self.collect_aux_hashes(outdir)?;
 
             if current_hashes.is_empty() {
@@ -610,10 +649,11 @@ impl BuildPipeline for LatexBuilder {
         if !drawio.is_empty() || !dot_mmd.is_empty() || !json.is_empty() {
             self.generate_figures(project_path, verbose)?;
         }
-        self.ensure_bibliography_tools(project_path)?;
 
-        let latex_engine = self.executor.check_tool("latex_engine")?;
-        let use_tectonic = Self::is_tectonic_engine(&latex_engine);
+        let latex_engine = self
+            .executor
+            .resolve_latex_engine(LatexEnginePreference::Latex)?;
+        let use_tectonic = latex_engine.is_tectonic();
         let latex_backend = if self.config.latex_backend.trim().is_empty() {
             "latexmk".to_string()
         } else {
@@ -625,25 +665,47 @@ impl BuildPipeline for LatexBuilder {
                 self.config.latex_backend
             )));
         }
+        self.ensure_tectonic_project_compatible(project_path, &latex_engine)?;
+        self.ensure_bibliography_tools(project_path, &latex_engine, &latex_backend)?;
 
-        // 切换到项目目录执行（latexmk 需要相对路径）
-        let original_dir = std::env::current_dir()?;
-        std::env::set_current_dir(project_path)?;
+        let cache_dir = project_path.join(".omnidoc-cache");
+        fs::create_dir_all(&cache_dir)?;
+        let depfile = cache_dir.join(LATEX_INPUT_DEPFILE);
+        if depfile.exists() {
+            fs::remove_file(&depfile)?;
+        }
+        let mut tectonic_recording = None;
 
         let result = if use_tectonic {
-            let options = self.build_tectonic_options(&entry_file, &outdir);
-            let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
-            self.executor.execute("latex_engine", &args[..], verbose)
+            let rules = cache_dir.join("tectonic-inputs.make");
+            if rules.exists() {
+                fs::remove_file(&rules)?;
+            }
+            let options = self.build_tectonic_options(project_path, &entry_file, &outdir, &rules);
+            let args: Vec<&str> = options.arguments.iter().map(String::as_str).collect();
+            let result = self.executor.execute_program_in_dir(
+                &latex_engine.executable,
+                &args,
+                verbose,
+                Some(project_path),
+            );
+            tectonic_recording = Some((rules, options.search_paths));
+            result
         } else if latex_backend == "engine" {
-            self.run_engine_until_stable(&entry_file, &outdir, &target_name, verbose)
+            self.run_engine_until_stable(
+                &latex_engine.executable,
+                project_path,
+                &entry_file,
+                &outdir,
+                &target_name,
+                verbose,
+            )
         } else {
             let options = self.build_latexmk_options(&entry_file, &target_name, verbose);
             let args: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
-            self.executor.execute("latexmk", &args[..], verbose)
+            self.executor
+                .execute_in_dir("latexmk", &args, verbose, Some(project_path))
         };
-
-        // 恢复原目录
-        std::env::set_current_dir(original_dir)?;
 
         // 如果构建失败，尝试清理
         if let Err(err) = result {
@@ -659,7 +721,9 @@ impl BuildPipeline for LatexBuilder {
                 let jobname_arg = format!("-jobname={}", target_name);
                 let clean_options = ["-c", &jobname_arg, entry_file.to_str().unwrap_or("")];
                 let clean_args: Vec<&str> = clean_options.to_vec();
-                let _ = self.executor.execute("latexmk", &clean_args[..], false);
+                let _ =
+                    self.executor
+                        .execute_in_dir("latexmk", &clean_args, false, Some(project_path));
             }
 
             let mut message = err.to_string();
@@ -672,28 +736,34 @@ impl BuildPipeline for LatexBuilder {
 
         if use_tectonic {
             self.copy_tectonic_output(&entry_file, &outdir, &target_name)?;
-        }
-
-        let cache_dir = project_path.join(".omnidoc-cache");
-        let depfile = cache_dir.join(LATEX_INPUT_DEPFILE);
-        let entry_stem = entry_file.file_stem().and_then(|name| name.to_str());
-        let recorder = [
-            outdir.join(format!("{target_name}.fls")),
-            project_path.join(format!("{target_name}.fls")),
-            entry_stem
-                .map(|stem| outdir.join(format!("{stem}.fls")))
-                .unwrap_or_default(),
-        ]
-        .into_iter()
-        .find(|path| path.is_file());
-        if let Some(recorder) = recorder {
-            latex_recorder::write_depfile_from_fls(
-                &recorder,
+            let (rules, search_paths) = tectonic_recording.ok_or_else(|| {
+                OmniDocError::Other("Tectonic dependency recording was not initialized".to_string())
+            })?;
+            latex_recorder::write_depfile_from_tectonic_rules(
+                &rules,
                 &depfile,
-                std::slice::from_ref(&outdir),
+                project_path,
+                &outdir,
+                &search_paths,
             )?;
-        } else if depfile.exists() {
-            fs::remove_file(&depfile)?;
+        } else {
+            let entry_stem = entry_file.file_stem().and_then(|name| name.to_str());
+            let recorder = [
+                outdir.join(format!("{target_name}.fls")),
+                project_path.join(format!("{target_name}.fls")),
+                entry_stem
+                    .map(|stem| outdir.join(format!("{stem}.fls")))
+                    .unwrap_or_default(),
+            ]
+            .into_iter()
+            .find(|path| path.is_file());
+            if let Some(recorder) = recorder {
+                latex_recorder::write_depfile_from_fls(
+                    &recorder,
+                    &depfile,
+                    std::slice::from_ref(&outdir),
+                )?;
+            }
         }
 
         // 检查输出文件
@@ -750,10 +820,33 @@ impl BuildPipeline for LatexBuilder {
     }
 }
 
+fn latex_source_without_comments(content: &str) -> String {
+    let mut source = String::with_capacity(content.len());
+    for line in content.lines() {
+        let mut backslashes = 0;
+        let mut comment = line.len();
+        for (index, byte) in line.bytes().enumerate() {
+            if byte == b'%' && backslashes % 2 == 0 {
+                comment = index;
+                break;
+            }
+            if byte == b'\\' {
+                backslashes += 1;
+            } else {
+                backslashes = 0;
+            }
+        }
+        source.push_str(&line[..comment]);
+        source.push('\n');
+    }
+    source
+}
+
 #[cfg(test)]
 mod tests {
-    use super::LatexBuilder;
+    use super::{latex_source_without_comments, LatexBuilder};
     use crate::config::MergedConfig;
+    use std::fs;
     use std::path::Path;
 
     #[test]
@@ -763,5 +856,49 @@ mod tests {
 
         assert!(options.iter().any(|option| option == "-g"));
         assert!(options.iter().any(|option| option == "-quiet"));
+    }
+
+    #[test]
+    fn biber_detection_ignores_latex_comments() {
+        let source = r#"
+% \usepackage{biblatex}
+\newcommand{\percent}{\%}
+\usepackage[backend=bibtex]{biblatex}
+"#;
+
+        let stripped = latex_source_without_comments(source);
+
+        assert!(!stripped.contains(r"\usepackage{biblatex}"));
+        assert!(stripped.contains(r"\newcommand{\percent}{\%}"));
+        assert!(stripped.contains("backend=bibtex"));
+    }
+
+    #[test]
+    fn project_biber_detection_ignores_commented_markers() {
+        let project = tempfile::tempdir().expect("LaTeX project");
+        fs::write(
+            project.path().join("main.tex"),
+            "% \\usepackage{biblatex}\n\\documentclass{article}\n",
+        )
+        .expect("comment-only project");
+        let builder = LatexBuilder::new(MergedConfig::default()).expect("builder");
+
+        assert!(!builder.project_uses_biber(project.path()));
+
+        fs::write(
+            project.path().join("main.tex"),
+            "\\documentclass{article}\n\\usepackage{biblatex}\n",
+        )
+        .expect("Biber project");
+        assert!(builder.project_uses_biber(project.path()));
+
+        fs::write(
+            project.path().join("main.tex"),
+            "\\documentclass{article}\n\\usepackage[backend = bibtex]{biblatex}\n",
+        )
+        .expect("BibTeX project preamble");
+        fs::write(project.path().join("chapter.tex"), "\\printbibliography\n")
+            .expect("BibTeX project chapter");
+        assert!(!builder.project_uses_biber(project.path()));
     }
 }

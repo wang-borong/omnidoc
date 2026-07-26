@@ -16,7 +16,7 @@ pub fn handle_watch(
     all: bool,
     outputs: Vec<String>,
     pdf_engine: Option<String>,
-    latex_backend: String,
+    latex_backend: Option<String>,
     max_latex_passes: Option<usize>,
     debounce_ms: u64,
     once: bool,

@@ -1,0 +1,12 @@
+[project]
+entry = "main.tex"
+from = "latex"
+to = "pdf"
+target = "golden-latex-cjk"
+
+[build]
+outdir = "build"
+latex_backend = "latexmk"
+
+[tools]
+latex_engine = "tectonic"

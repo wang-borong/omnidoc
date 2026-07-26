@@ -1,5 +1,8 @@
+use crate::build::executor::{BuildExecutor, LatexEnginePreference};
 use crate::build::pandoc::load_selected_theme;
 use crate::build::pandoc_policy::{is_supported_format_key, PandocOutputKind};
+use crate::build::pipeline::{detect_project_type, ProjectType};
+use crate::build::tectonic;
 use crate::cli::handlers::theme::{font_family_matches, valid_latex_package_name};
 use crate::config::MergedConfig;
 use crate::constants::pandoc;
@@ -114,6 +117,7 @@ pub struct BuildReportDocument {
 }
 
 pub struct BuildReportContext<'a> {
+    pub project_path: &'a Path,
     pub output: String,
     pub target: String,
     pub skipped: bool,
@@ -349,6 +353,35 @@ pub fn validate_config(project_path: &Path, config: &MergedConfig) -> Vec<Projec
             None,
             None,
         ));
+    }
+
+    if let Some(bundle) = config.tectonic_bundle.as_deref() {
+        if !bundle.contains("://") {
+            let expanded = tectonic::expand_home(bundle);
+            check_configured_path(
+                project_path,
+                &expanded,
+                "Configured tectonic.bundle not found",
+                true,
+                &mut issues,
+            );
+        }
+    }
+    for search_path in &config.tectonic_search_paths {
+        let normalized = search_path
+            .trim()
+            .trim_end_matches("//")
+            .trim_end_matches("\\\\");
+        if !normalized.is_empty() {
+            let expanded = tectonic::expand_home(normalized);
+            check_configured_path(
+                project_path,
+                &expanded,
+                "Configured tectonic.search_paths directory not found",
+                true,
+                &mut issues,
+            );
+        }
     }
 
     if let Some(entry) = &config.entry {
@@ -702,6 +735,36 @@ pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> Dependenc
 
     let output_kind = PandocOutputKind::from_config(config).unwrap_or(PandocOutputKind::Pdf);
     let library_root = omnidoc_library_root(config);
+    if let Some(bundle) = config
+        .tectonic_bundle
+        .as_deref()
+        .filter(|bundle| !bundle.contains("://"))
+    {
+        let resolved = tectonic::resolve_bundle(project_path, bundle);
+        if resolved.is_file() {
+            let canonical_project = project_path
+                .canonicalize()
+                .unwrap_or_else(|_| project_path.to_path_buf());
+            let canonical_bundle = resolved.canonicalize().unwrap_or(resolved);
+            if canonical_bundle.starts_with(&canonical_project) {
+                track_dependency(
+                    project_path,
+                    project_path,
+                    &canonical_bundle,
+                    &mut files,
+                    &mut pending,
+                );
+            } else {
+                add_resolved_resource(
+                    &mut depfile_resources,
+                    project_path,
+                    &library_root,
+                    "tectonic-bundle".to_string(),
+                    canonical_bundle,
+                );
+            }
+        }
+    }
     let mut effective_pandoc_options = config.pandoc_options.clone();
     if let Some(options) = config.pandoc_format_options.get(output_kind.config_key()) {
         effective_pandoc_options.extend(options.clone());
@@ -1642,6 +1705,19 @@ pub fn build_input_state(
             format!("{:?}", config.pandoc_embed_resources),
         ),
         ("pandoc_lang", format!("{:?}", config.pandoc_lang)),
+        ("tectonic_bundle", format!("{:?}", config.tectonic_bundle)),
+        (
+            "tectonic_only_cached",
+            format!("{:?}", config.tectonic_only_cached),
+        ),
+        (
+            "tectonic_shell_escape",
+            format!("{:?}", config.tectonic_shell_escape),
+        ),
+        (
+            "tectonic_search_paths",
+            format!("{:?}", config.tectonic_search_paths),
+        ),
         (
             "tool_paths",
             format!("{:?}", sorted_tool_paths(&config.tool_paths)),
@@ -1649,7 +1725,7 @@ pub fn build_input_state(
     ] {
         components.insert(format!("config:{label}"), digest_value(value.as_bytes()));
     }
-    for (name, version) in toolchain_versions(config, output) {
+    for (name, version) in toolchain_versions(project_path, config, output) {
         components.insert(
             format!("toolchain:{name}"),
             digest_value(version.as_bytes()),
@@ -1936,7 +2012,7 @@ pub fn write_lock_targets(project_path: &Path, inputs: &[LockTargetInput<'_>]) -
         lock_version: LOCK_VERSION,
         omnidoc_version: env!("CARGO_PKG_VERSION").to_string(),
         library: locked_library(first.config, &resources),
-        toolchain: combined_toolchain_versions(inputs),
+        toolchain: combined_toolchain_versions(project_path, inputs),
         targets,
     };
     let content =
@@ -2067,7 +2143,7 @@ pub fn check_lock_targets(
     let first_config = inputs.first().map(|input| input.config);
     let library_up_to_date =
         first_config.is_some_and(|config| lock.library == locked_library(config, &resources));
-    let toolchain_up_to_date = lock.toolchain == combined_toolchain_versions(inputs);
+    let toolchain_up_to_date = lock.toolchain == combined_toolchain_versions(project_path, inputs);
     let up_to_date = lock.lock_version == LOCK_VERSION
         && missing_targets.is_empty()
         && extra_targets.is_empty()
@@ -2181,17 +2257,16 @@ fn library_revision(path: &Path) -> Option<String> {
     })
 }
 
-fn toolchain_versions(config: &MergedConfig, output: &str) -> BTreeMap<String, String> {
-    let latex_engine = config
-        .tool_paths
-        .get("latex_engine")
-        .and_then(|value| value.clone())
-        .unwrap_or_else(|| "xelatex".to_string());
+fn toolchain_versions(
+    project_path: &Path,
+    config: &MergedConfig,
+    output: &str,
+) -> BTreeMap<String, String> {
     let mut versions = [
         ("pandoc", configured_tool(config, "pandoc", "pandoc")),
         (
             "pandoc_crossref",
-            configured_tool(config, "pandoc_crossref", "pandoc-crossref"),
+            configured_tool(config, "pandoc-crossref", "pandoc-crossref"),
         ),
     ]
     .into_iter()
@@ -2199,27 +2274,85 @@ fn toolchain_versions(config: &MergedConfig, output: &str) -> BTreeMap<String, S
     .collect::<BTreeMap<_, _>>();
     let output_kind = PandocOutputKind::from_requested(Some(output)).ok();
     if output_kind == Some(PandocOutputKind::Pdf) {
-        versions.insert("latex_engine".to_string(), command_version(&latex_engine));
-        versions.insert("tex_kpathsea".to_string(), command_version("kpsewhich"));
+        let executor = BuildExecutor::new(config.tool_paths.clone());
+        let preference = latex_engine_preference(project_path, config);
+        let engine = executor.resolve_latex_engine(preference).ok();
+        if let Some(engine) = engine.as_ref() {
+            versions.insert(
+                "latex_engine".to_string(),
+                command_version(&engine.executable),
+            );
+            versions.insert(
+                "latex_engine_kind".to_string(),
+                engine.kind_label().to_string(),
+            );
+            versions.insert(
+                "latex_engine_origin".to_string(),
+                engine.origin_label().to_string(),
+            );
+            if engine.is_tectonic() {
+                versions.insert(
+                    "tectonic_bundle".to_string(),
+                    tectonic_bundle_identity(project_path, config.tectonic_bundle.as_deref()),
+                );
+            } else {
+                versions.insert("tex_kpathsea".to_string(), command_version("kpsewhich"));
+            }
+        } else {
+            versions.insert("latex_engine".to_string(), "unavailable".to_string());
+        }
         if let Ok(Some(theme)) = load_selected_theme(config) {
             for font in theme.requirements.fonts {
                 versions.insert(format!("font:{font}"), font_identity(&font));
             }
-            for package in theme.requirements.system_latex_packages {
-                versions.insert(
-                    format!("latex-package:{package}"),
-                    latex_package_identity(&package),
-                );
+            if engine.as_ref().is_some_and(|engine| !engine.is_tectonic()) {
+                for package in theme.requirements.system_latex_packages {
+                    versions.insert(
+                        format!("latex-package:{package}"),
+                        latex_package_identity(&package),
+                    );
+                }
             }
         }
     }
     versions
 }
 
-fn combined_toolchain_versions(inputs: &[LockTargetInput<'_>]) -> BTreeMap<String, String> {
+fn tectonic_bundle_identity(project_path: &Path, bundle: Option<&str>) -> String {
+    let Some(bundle) = bundle.map(str::trim).filter(|bundle| !bundle.is_empty()) else {
+        return "default-web-bundle".to_string();
+    };
+    if bundle.contains("://") {
+        return format!("configured-url:{}", digest_value(bundle.as_bytes()));
+    }
+    let path = tectonic::resolve_bundle(project_path, bundle);
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("bundle");
+    let digest = path
+        .is_file()
+        .then(|| content_digest(&path).ok())
+        .flatten()
+        .unwrap_or_else(|| digest_value(bundle.as_bytes()));
+    format!("local:{name};digest={digest}")
+}
+
+fn latex_engine_preference(project_path: &Path, config: &MergedConfig) -> LatexEnginePreference {
+    if detect_project_type(config, project_path) == ProjectType::Latex {
+        LatexEnginePreference::Latex
+    } else {
+        LatexEnginePreference::Markdown
+    }
+}
+
+fn combined_toolchain_versions(
+    project_path: &Path,
+    inputs: &[LockTargetInput<'_>],
+) -> BTreeMap<String, String> {
     let mut versions = BTreeMap::new();
     for input in inputs {
-        versions.extend(toolchain_versions(input.config, input.output));
+        versions.extend(toolchain_versions(project_path, input.config, input.output));
     }
     versions
 }
@@ -2419,7 +2552,7 @@ pub fn print_issues(issues: &[ProjectIssue]) {
 }
 
 pub fn build_report(context: BuildReportContext<'_>) -> BuildReport {
-    let toolchain = toolchain_versions(context.config, &context.output);
+    let toolchain = toolchain_versions(context.project_path, context.config, &context.output);
     BuildReport {
         output: context.output,
         target: context.target,
@@ -3041,12 +3174,13 @@ mod tests {
     use super::{
         acquire_project_write_lock, build_input_digest, build_report, cache_hit,
         changed_cache_components, dependency_graph, filter_depfile_metadata_key,
-        filter_depfile_name, hook_argv, lint_project, manifest_hook_names,
+        filter_depfile_name, hook_argv, latex_engine_preference, lint_project, manifest_hook_names,
         pandoc_option_file_references, parse_lint_rule_output, supported_outputs, validate_config,
         validate_hook_command, write_cache, write_lock, write_lock_targets, HookCommand,
         LoadedPlugin, LockFile, LockTargetInput, PluginHooks, PluginInfo, PluginManifest,
         CACHE_DIR, INCLUDE_DEPFILE, LATEX_INPUT_DEPFILE,
     };
+    use crate::build::executor::LatexEnginePreference;
     use crate::config::MergedConfig;
     use std::collections::BTreeMap;
     use std::fs;
@@ -3092,6 +3226,43 @@ mod tests {
         assert!(issues
             .iter()
             .any(|issue| issue.message.contains("Unsupported")));
+    }
+
+    #[test]
+    fn inferred_main_tex_uses_the_native_latex_engine_policy() {
+        let project = tempfile::tempdir().expect("project");
+        fs::write(
+            project.path().join("main.tex"),
+            "\\documentclass{article}\n",
+        )
+        .expect("entry");
+
+        assert_eq!(
+            latex_engine_preference(project.path(), &MergedConfig::default()),
+            LatexEnginePreference::Latex
+        );
+    }
+
+    #[test]
+    fn external_relative_tectonic_bundle_is_a_tracked_resource() {
+        let root = tempfile::tempdir().expect("root");
+        let project = root.path().join("project");
+        fs::create_dir_all(&project).expect("project directory");
+        fs::write(project.join("main.md"), "# Book\n").expect("entry");
+        let bundle = root.path().join("bundle.tar");
+        fs::write(&bundle, "bundle-v1").expect("bundle");
+        let config = MergedConfig {
+            entry: Some("main.md".to_string()),
+            tectonic_bundle: Some("../bundle.tar".to_string()),
+            ..Default::default()
+        };
+
+        let graph = dependency_graph(&project, &config);
+
+        assert!(graph.resources.iter().any(|resource| {
+            resource.logical_name == "tectonic-bundle"
+                && Path::new(&resource.path) == bundle.canonicalize().expect("canonical bundle")
+        }));
     }
 
     #[test]
@@ -3618,6 +3789,7 @@ user@example.com
 
         let config = MergedConfig::default();
         let report = build_report(super::BuildReportContext {
+            project_path: project.path(),
             output: "html".to_string(),
             target: "book".to_string(),
             skipped: true,

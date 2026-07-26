@@ -1,4 +1,5 @@
-use crate::build::executor::BuildExecutor;
+use crate::build::executor::{BuildExecutor, LatexEnginePreference, ResolvedLatexEngine};
+use crate::build::pipeline::{detect_project_type, ProjectType};
 use crate::cli::handlers::build::{build_project_outputs, BuildRunOptions};
 use crate::cli::handlers::common::{create_config_manager, create_config_manager_default};
 use crate::cli::handlers::lib::library_diagnostic;
@@ -29,16 +30,7 @@ pub fn handle_doctor(
     let config = config_manager.get_merged().clone();
     let mut checks = Vec::new();
     let executor = BuildExecutor::new(config.tool_paths.clone());
-    let entry_is_latex = config
-        .from
-        .as_deref()
-        .is_some_and(|format| format.eq_ignore_ascii_case("latex"))
-        || config.entry.as_deref().is_some_and(|entry| {
-            Path::new(entry)
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("tex"))
-        });
+    let entry_is_latex = detect_project_type(&config, &project_path) == ProjectType::Latex;
     let outputs = if !requested_outputs.is_empty() {
         requested_outputs
     } else if config.outputs.is_empty() {
@@ -55,20 +47,26 @@ pub fn handle_doctor(
             "epub" | "epub2" | "epub3"
         )
     });
+    let engine_preference = if entry_is_latex {
+        LatexEnginePreference::Latex
+    } else {
+        LatexEnginePreference::Markdown
+    };
+    let mut resolved_pdf_engine = None;
     if !entry_is_latex {
         checks.push(doctor_tool(&executor, "pandoc", "pandoc"));
         checks.push(doctor_tool(&executor, "pandoc-crossref", "pandoc-crossref"));
     }
     if has_pdf {
-        checks.push(doctor_tool(&executor, "latex_engine", "latex-engine"));
-        let engine = executor.check_tool("latex_engine").ok();
-        let tectonic = engine.as_deref().is_some_and(|engine| {
-            Path::new(engine)
-                .file_stem()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.eq_ignore_ascii_case("tectonic"))
-        });
-        if entry_is_latex && config.latex_backend.eq_ignore_ascii_case("latexmk") && !tectonic {
+        let (check, engine) = doctor_latex_engine(&executor, engine_preference);
+        checks.push(check);
+        resolved_pdf_engine = engine;
+        if entry_is_latex
+            && config.latex_backend.eq_ignore_ascii_case("latexmk")
+            && resolved_pdf_engine
+                .as_ref()
+                .is_some_and(|engine| !engine.is_tectonic())
+        {
             checks.push(doctor_tool(&executor, "latexmk", "latexmk"));
         }
     }
@@ -84,7 +82,11 @@ pub fn handle_doctor(
             detail,
         });
         if let Some(theme) = config.theme_name.as_deref() {
-            let (ok, detail) = theme_diagnostic(Path::new(lib_path), theme, has_pdf);
+            let tectonic = resolved_pdf_engine
+                .as_ref()
+                .is_some_and(ResolvedLatexEngine::is_tectonic);
+            let (ok, detail) =
+                theme_diagnostic(Path::new(lib_path), theme, has_pdf, has_pdf && !tectonic);
             checks.push(DoctorCheck {
                 name: format!("theme:{theme}"),
                 ok,
@@ -147,6 +149,52 @@ pub fn handle_doctor(
     }
 
     Ok(())
+}
+
+fn doctor_latex_engine(
+    executor: &BuildExecutor,
+    preference: LatexEnginePreference,
+) -> (DoctorCheck, Option<ResolvedLatexEngine>) {
+    match executor.resolve_latex_engine(preference) {
+        Ok(engine) => {
+            let version = Command::new(&engine.executable)
+                .arg("--version")
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .and_then(|output| {
+                    String::from_utf8_lossy(&output.stdout)
+                        .lines()
+                        .next()
+                        .map(str::trim)
+                        .filter(|line| !line.is_empty())
+                        .map(str::to_string)
+                });
+            let detail = format!(
+                "{} [{}; {}; {}]",
+                engine.executable,
+                engine.kind_label(),
+                engine.origin_label(),
+                version.unwrap_or_else(|| "version unavailable".to_string())
+            );
+            (
+                DoctorCheck {
+                    name: "latex-engine".to_string(),
+                    ok: true,
+                    detail,
+                },
+                Some(engine),
+            )
+        }
+        Err(error) => (
+            DoctorCheck {
+                name: "latex-engine".to_string(),
+                ok: false,
+                detail: error.to_string(),
+            },
+            None,
+        ),
+    }
 }
 
 fn doctor_tool(executor: &BuildExecutor, key: &str, name: &str) -> DoctorCheck {

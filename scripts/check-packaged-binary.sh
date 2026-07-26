@@ -30,5 +30,25 @@ fi
 "$bin" libs --help >/dev/null
 test -s "$(dirname "$bin")/omnidoc-libs.toml"
 test -s "$(dirname "$bin")/CHANGELOG.md"
+test -s "$(dirname "$bin")/THIRD_PARTY_LICENSES.md"
+test -s "$(dirname "$bin")/docs/decisions/0001-tectonic-engine-policy.md"
+
+engine="$(dirname "$bin")/engines/tectonic"
+if [[ "$bin" == *.exe ]]; then
+  engine="${engine}.exe"
+fi
+test -x "$engine" || { echo "packaged Tectonic engine not found" >&2; exit 1; }
+test "$("$engine" --version)" = "Tectonic 0.16.9"
+
+if [[ "$(uname -s)" == "Linux" ]]; then
+  for executable in "$bin" "$engine"; do
+    dependencies="$(ldd "$executable" 2>&1 || true)"
+    if [[ "$dependencies" == *"not found"* ]]; then
+      echo "unresolved packaged runtime dependency for $executable" >&2
+      echo "$dependencies" >&2
+      exit 1
+    fi
+  done
+fi
 
 echo "Packaged binary smoke test passed: $archive"

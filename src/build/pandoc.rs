@@ -1,7 +1,8 @@
-use crate::build::executor::BuildExecutor;
+use crate::build::executor::{BuildExecutor, LatexEnginePreference};
 use crate::build::pandoc_policy::PandocOutputKind;
 use crate::build::pipeline::{BuildPipeline, ProjectType};
 use crate::build::source_map::locate_markdown_error;
+use crate::build::tectonic;
 use crate::cli::handlers::theme::{load_theme_manifest, ThemeManifest};
 use crate::config::MergedConfig;
 use crate::constants::pandoc;
@@ -66,6 +67,7 @@ impl PandocBuilder {
     /// 构建 Pandoc 选项
     pub(crate) fn build_command_options(
         &self,
+        project_path: &Path,
         entry_file: &Path,
         output_file: &Path,
         output_kind: PandocOutputKind,
@@ -125,8 +127,15 @@ impl PandocBuilder {
 
         if output_kind == PandocOutputKind::Pdf {
             options.push(pandoc::FLAG_PDF_ENGINE.to_string());
-            let latex_engine = self.executor.check_tool("latex_engine")?;
-            options.push(latex_engine);
+            let latex_engine = self
+                .executor
+                .resolve_latex_engine(LatexEnginePreference::Markdown)?;
+            options.push(latex_engine.executable.clone());
+            if latex_engine.is_tectonic() {
+                for argument in tectonic::build_options(&self.config, project_path).arguments {
+                    options.push(format!("--pdf-engine-opt={argument}"));
+                }
+            }
         }
 
         options.push(pandoc::FLAG_SYNTAX_HIGHLIGHTING.to_string());
@@ -454,7 +463,15 @@ impl PandocBuilder {
                 self.push_crossref_yaml(options, omnidoc_lib, pandoc::LIB_PANDOC_CROSSREF_YAML);
                 return;
             }
-            PandocCommandProfile::StandalonePdf { use_cn: false } => return,
+            PandocCommandProfile::StandalonePdf { use_cn: false } => {
+                options.push(pandoc::FLAG_META_SHORT.to_string());
+                options.push(format!(
+                    "omnidoc-zh-crossref-yaml={}/{}",
+                    omnidoc_lib,
+                    pandoc::LIB_PANDOC_CROSSREF_YAML
+                ));
+                return;
+            }
             PandocCommandProfile::StandaloneHtml { .. } => {
                 self.push_crossref_yaml(
                     options,
@@ -476,10 +493,16 @@ impl PandocBuilder {
             self.push_theme_metadata_defaults(options);
         }
 
-        if let Some(lang) = self.effective_lang() {
-            if lang != "en" {
-                self.push_crossref_yaml(options, omnidoc_lib, pandoc::LIB_PANDOC_CROSSREF_YAML);
-            }
+        if let Some(crossref_yaml) = self.config.pandoc_crossref_yaml.as_deref() {
+            options.push(pandoc::FLAG_META_SHORT.to_string());
+            options.push(format!("crossrefYaml={crossref_yaml}"));
+        } else {
+            options.push(pandoc::FLAG_META_SHORT.to_string());
+            options.push(format!(
+                "omnidoc-zh-crossref-yaml={}/{}",
+                omnidoc_lib,
+                pandoc::LIB_PANDOC_CROSSREF_YAML
+            ));
         }
 
         if let Some(lang) = self.config.pandoc_lang.as_deref() {
@@ -487,19 +510,10 @@ impl PandocBuilder {
             options.push(format!("lang={lang}"));
         }
 
-        // A project metadata file is authoritative for publication metadata.
-        // `target` is primarily an output filename and global author defaults
-        // must not overwrite a book's explicit title/author.
-        if !has_metadata_file {
-            if let Some(author) = &self.config.author {
-                options.push(pandoc::FLAG_META_SHORT.to_string());
-                options.push(format!("author={}", author));
-            }
-            if let Some(target) = &self.config.target {
-                options.push(pandoc::FLAG_META_SHORT.to_string());
-                options.push(format!("title={}", target));
-            }
-        }
+        // Publication title and author belong to the document metadata (or an
+        // explicit metadata file). The global author is a project-template
+        // default, while `target` is an artifact name; passing either with
+        // Pandoc's `-M` would override front matter in an existing document.
 
         if self.config.verbose {
             options.push("--verbose".to_string());
@@ -515,7 +529,7 @@ impl PandocBuilder {
                 continue;
             }
             options.push(pandoc::FLAG_META_SHORT.to_string());
-            options.push(format!("{key}={value}"));
+            options.push(format!("omnidoc-default-{key}={value}"));
         }
     }
 
@@ -542,15 +556,6 @@ impl PandocBuilder {
             } else {
                 ".local/share/omnidoc".to_string()
             }
-        })
-    }
-
-    fn effective_lang(&self) -> Option<&str> {
-        self.config.pandoc_lang.as_deref().or_else(|| {
-            self.theme
-                .as_ref()
-                .and_then(|theme| theme.metadata.defaults.get("lang"))
-                .map(String::as_str)
         })
     }
 }
@@ -677,6 +682,7 @@ impl BuildPipeline for PandocBuilder {
         let output_kind = PandocOutputKind::from_config(&self.config)?;
         let output_file = outdir.join(format!("{}.{}", target_name, output_kind.extension()));
         let mut options = self.build_command_options(
+            project_path,
             &entry_file,
             &output_file,
             output_kind,
@@ -708,9 +714,28 @@ impl BuildPipeline for PandocBuilder {
         let mut recorder_environment = Vec::new();
         if output_kind == PandocOutputKind::Pdf {
             let depfile = cache_dir.join(LATEX_INPUT_DEPFILE);
-            let real_engine = self.executor.check_tool("latex_engine")?;
-            match latex_recorder::prepare_wrapper(project_path, Path::new(&real_engine), &depfile)?
-            {
+            let real_engine = self
+                .executor
+                .resolve_latex_engine(LatexEnginePreference::Markdown)?;
+            if real_engine.is_tectonic() {
+                let rules = cache_dir.join("tectonic-inputs.make");
+                if rules.exists() {
+                    fs::remove_file(&rules)?;
+                }
+                options.push(format!(
+                    "--pdf-engine-opt={}",
+                    tectonic::makefile_rules_argument(&rules)
+                ));
+            }
+            let recorder = real_engine.recorder_program_name().map(|wrapper_name| {
+                latex_recorder::prepare_wrapper(
+                    project_path,
+                    Path::new(&real_engine.executable),
+                    wrapper_name,
+                    &depfile,
+                )
+            });
+            match recorder.transpose()?.flatten() {
                 Some(recorder) => {
                     if let Some(index) = options
                         .iter()
@@ -720,7 +745,9 @@ impl BuildPipeline for PandocBuilder {
                             *engine = recorder.wrapper.to_string_lossy().to_string();
                         }
                     }
-                    options.push("--pdf-engine-opt=-recorder".to_string());
+                    if !real_engine.is_tectonic() {
+                        options.push("--pdf-engine-opt=-recorder".to_string());
+                    }
                     recorder_environment = recorder.environment;
                 }
                 None => {
@@ -917,6 +944,7 @@ mod tests {
 
         let options = builder
             .build_command_options(
+                std::path::Path::new("."),
                 std::path::Path::new("input.md"),
                 std::path::Path::new("output.html"),
                 PandocOutputKind::Html,
@@ -1179,10 +1207,12 @@ documentclass = "scrbook"
         );
         assert!(metadata_options
             .windows(2)
-            .any(|pair| pair == ["-M".to_string(), "lang=zh-CN".to_string()]));
-        assert!(metadata_options
-            .windows(2)
-            .any(|pair| pair == ["-M".to_string(), "documentclass=scrbook".to_string()]));
+            .any(|pair| pair == ["-M".to_string(), "omnidoc-default-lang=zh-CN".to_string()]));
+        assert!(metadata_options.windows(2).any(|pair| pair
+            == [
+                "-M".to_string(),
+                "omnidoc-default-documentclass=scrbook".to_string()
+            ]));
 
         let explicit_lang = PandocBuilder::new(MergedConfig {
             lib_path: Some(library.to_string_lossy().to_string()),
@@ -1200,7 +1230,9 @@ documentclass = "scrbook"
         assert!(explicit_options
             .windows(2)
             .any(|pair| pair == ["-M".to_string(), "lang=en".to_string()]));
-        assert!(!explicit_options.iter().any(|option| option == "lang=zh-CN"));
+        assert!(!explicit_options
+            .iter()
+            .any(|option| option == "omnidoc-default-lang=zh-CN"));
 
         let metadata_file = PandocBuilder::new(MergedConfig {
             lib_path: Some(library.to_string_lossy().to_string()),
@@ -1217,7 +1249,7 @@ documentclass = "scrbook"
         );
         assert!(!file_options
             .iter()
-            .any(|option| option == "documentclass=scrbook"));
+            .any(|option| option == "omnidoc-default-documentclass=scrbook"));
 
         fs::remove_dir_all(library).expect("cleanup");
     }
@@ -1234,6 +1266,7 @@ documentclass = "scrbook"
 
         let options = builder
             .build_command_options(
+                std::path::Path::new("."),
                 std::path::Path::new("input.md"),
                 std::path::Path::new("output.tex"),
                 PandocOutputKind::Latex,
@@ -1269,6 +1302,30 @@ documentclass = "scrbook"
                 "--metadata-file".to_string(),
                 "book-metadata.yaml".to_string()
             ]));
+        assert!(!options
+            .iter()
+            .any(|option| option == "title=output-filename"));
+        assert!(!options
+            .iter()
+            .any(|option| option == "author=global default author"));
+    }
+
+    #[test]
+    fn project_target_and_global_author_do_not_override_source_metadata() {
+        let builder = PandocBuilder::new(MergedConfig {
+            target: Some("output-filename".to_string()),
+            author: Some("global default author".to_string()),
+            ..Default::default()
+        })
+        .expect("pandoc builder");
+        let mut options = Vec::new();
+
+        builder.push_metadata(
+            &mut options,
+            "/tmp/omnidoc-libs",
+            &PandocCommandProfile::Project,
+        );
+
         assert!(!options
             .iter()
             .any(|option| option == "title=output-filename"));
@@ -1315,6 +1372,7 @@ documentclass = "scrbook"
 
         let options = builder
             .build_command_options(
+                std::path::Path::new("."),
                 std::path::Path::new("input.md"),
                 std::path::Path::new("output.html"),
                 PandocOutputKind::Html,
@@ -1358,6 +1416,11 @@ documentclass = "scrbook"
             "/tmp/omnidoc-libs",
             &PandocCommandProfile::StandalonePdf { use_cn: false },
         );
-        assert!(english.is_empty());
+        assert!(english
+            .iter()
+            .any(|option| option.starts_with("omnidoc-zh-crossref-yaml=")));
+        assert!(!english
+            .iter()
+            .any(|option| option.starts_with("crossrefYaml=")));
     }
 }
