@@ -45,6 +45,9 @@
   automatic commits, added `init --no-commit`, made managed-file writes atomic,
   skipped no-op update commits, staged tracked moves/deletions correctly, and
   retained support for creating the first commit in an unborn repository.
+- Added `init --dry-run`, `--diff`, and stable JSON reports covering inferred
+  metadata, Git readiness, exact file/directory/source-move actions, and unified
+  managed-file diffs without modifying the existing directory.
 - Kept update project locking and collision-safe mixed Markdown/LaTeX source
   moves, aborting before writes when a destination already exists.
 - Prevented `watch` rebuild loops by ignoring configured output directories,

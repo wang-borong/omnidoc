@@ -173,6 +173,12 @@ fn help_prioritizes_workflows_and_keeps_legacy_commands_out_of_the_main_list() {
     assert!(new_help.contains("--json"));
     assert!(!new_help.contains("--title <TITLE> <PATH>"));
 
+    let init_help = assert_success(fixture.command(&["init", "--help"]));
+    assert!(init_help.contains("--dry-run"));
+    assert!(init_help.contains("--diff"));
+    assert!(init_help.contains("--no-commit"));
+    assert!(init_help.contains("--json"));
+
     let config_help = assert_success(fixture.command(&["config", "--help"]));
     assert!(config_help.contains("  init  "));
     assert!(config_help.contains("  show  "));
@@ -371,6 +377,16 @@ fn non_interactive_new_without_a_template_fails_before_creating_the_path() {
     assert!(stderr.contains("did you mean 'ctex-md'"));
     assert!(stderr.contains("omnidoc template list"));
     assert!(!invalid_target.exists());
+
+    let json_target = fixture.base().join("json-needs-choice");
+    let json = fixture.command_in(fixture.base(), &["new", "json-needs-choice", "--json"]);
+    let stdout = assert_failure(json);
+    let error: serde_json::Value =
+        serde_json::from_str(&stdout).expect("structured template-choice error");
+    assert!(error["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("--type <KEY>")));
+    assert!(!json_target.exists());
 }
 
 #[test]
@@ -398,6 +414,123 @@ fn init_accepts_an_existing_main_file_and_resolves_relative_paths_once() {
         fs::read_to_string(target.join("main.md")).expect("preserved entry"),
         "# Existing notes\n"
     );
+}
+
+#[test]
+fn init_preview_diff_and_json_application_are_safe_and_composable() {
+    let fixture = Fixture::new("init-preview");
+    let target = fixture.base().join("existing-guide");
+    fs::create_dir_all(&target).expect("existing directory");
+    fs::write(target.join("main.md"), "# Existing guide\n").expect("existing entry");
+    fs::write(target.join("notes.md"), "# Notes\n").expect("existing notes");
+    fs::write(target.join(".gitignore"), "custom-output/\n").expect("custom gitignore");
+
+    let no_choice = fixture.command_in(fixture.base(), &["init", "existing-guide", "--json"]);
+    let stdout = assert_failure(no_choice);
+    let error: serde_json::Value =
+        serde_json::from_str(&stdout).expect("structured init template-choice error");
+    assert!(error["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("--type <KEY>")));
+    assert!(!target.join(".omnidoc.toml").exists());
+
+    let preview = assert_success(fixture.command_in(
+        fixture.base(),
+        &[
+            "init",
+            "existing-guide",
+            "--type",
+            "ctex-md",
+            "--diff",
+            "--json",
+        ],
+    ));
+    let preview: serde_json::Value =
+        serde_json::from_str(&preview).expect("init preview JSON report");
+    assert_eq!(preview["schema_version"], 1);
+    assert_eq!(preview["dry_run"], true);
+    assert_eq!(preview["diff"], true);
+    assert_eq!(preview["applied"], false);
+    assert_eq!(preview["ready"], true);
+    assert_eq!(preview["repository"]["exists"], false);
+    let actions = preview["actions"].as_array().expect("init actions");
+    assert!(actions.iter().any(|action| {
+        action["operation"] == "create_file"
+            && action["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("/.omnidoc.toml"))
+    }));
+    assert!(actions.iter().any(|action| {
+        action["operation"] == "move_file"
+            && action["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("/notes.md"))
+    }));
+    assert!(actions.iter().any(|action| {
+        action["operation"] == "refresh_file"
+            && action["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("/.gitignore"))
+            && action["diff"]
+                .as_str()
+                .is_some_and(|diff| diff.contains("custom-output/"))
+    }));
+    assert!(!target.join(".omnidoc.toml").exists());
+    assert!(!target.join(".git").exists());
+    assert!(target.join("notes.md").is_file());
+    assert_eq!(
+        fs::read_to_string(target.join(".gitignore")).expect("unchanged gitignore"),
+        "custom-output/\n"
+    );
+
+    let applied = assert_success(fixture.command_in(
+        fixture.base(),
+        &[
+            "init",
+            "existing-guide",
+            "--type",
+            "ctex-md",
+            "--no-commit",
+            "--json",
+        ],
+    ));
+    let applied: serde_json::Value =
+        serde_json::from_str(&applied).expect("init application JSON report");
+    assert_eq!(applied["dry_run"], false);
+    assert_eq!(applied["applied"], true);
+    assert_eq!(applied["commit"], false);
+    assert_eq!(applied["will_commit"], false);
+    assert!(target.join(".omnidoc.toml").is_file());
+    assert!(target.join("md/notes.md").is_file());
+    assert!(!target.join("notes.md").exists());
+    assert_eq!(
+        fs::read_to_string(target.join("main.md")).expect("preserved main entry"),
+        "# Existing guide\n"
+    );
+    let repository = git2::Repository::open(&target).expect("initialized repository");
+    assert!(repository.head().is_err());
+}
+
+#[test]
+fn init_json_reports_path_resolution_errors() {
+    let fixture = Fixture::new("init-missing-json");
+    let missing = fixture.base().join("missing-directory");
+    let output = fixture.command(&[
+        "init",
+        &missing.display().to_string(),
+        "--type",
+        "ctex-md",
+        "--json",
+    ]);
+    let stdout = assert_failure(output);
+    let error: serde_json::Value =
+        serde_json::from_str(&stdout).expect("structured init path error JSON");
+
+    assert_eq!(error["schema_version"], 1);
+    assert_eq!(error["error"]["category"], "project");
+    assert!(error["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("does not exist")));
 }
 
 #[test]
@@ -429,6 +562,27 @@ fn init_refuses_to_commit_existing_changes_unless_no_commit_is_explicit() {
     drop(tree);
     drop(repository);
     fs::write(target.join("notes.md"), "# Uncommitted notes\n").expect("uncommitted file");
+
+    let preview = assert_success(fixture.command_in(
+        fixture.base(),
+        &[
+            "init",
+            "existing-repo",
+            "--type",
+            "ctex-md",
+            "--dry-run",
+            "--json",
+        ],
+    ));
+    let preview: serde_json::Value =
+        serde_json::from_str(&preview).expect("dirty init preview JSON");
+    assert_eq!(preview["ready"], false);
+    assert_eq!(preview["applied"], false);
+    assert_eq!(preview["repository"]["clean"], false);
+    assert!(preview["repository"]["changes"]
+        .as_array()
+        .is_some_and(|changes| changes.iter().any(|change| change["path"] == "notes.md")));
+    assert!(!target.join(".omnidoc.toml").exists());
 
     let output = fixture.command_in(
         fixture.base(),

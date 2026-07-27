@@ -363,6 +363,61 @@ impl<'a> Doc<'a> {
         Ok(actions)
     }
 
+    /// Describe initialization of an existing directory without modifying it.
+    pub fn plan_init(&self, commit: bool, include_diff: bool) -> Result<Vec<ProjectUpdateAction>> {
+        let template = resolve_project_template(&self.doctype)
+            .map_err(|error| OmniDocError::Project(format!("Invalid document type: {error}")))?;
+        let entry = self.path.join(&template.file_name);
+        let file_moves = self.planned_file_moves()?;
+        let mut directories = self.project_directories(&template);
+        if let Some(parent) = entry
+            .parent()
+            .filter(|parent| *parent != self.path.as_path())
+        {
+            directories.insert(parent.to_path_buf());
+        }
+        for (_, destination) in &file_moves {
+            if let Some(parent) = destination.parent() {
+                directories.insert(parent.to_path_buf());
+            }
+        }
+
+        let mut actions = vec![create_file_action(self.path.join(paths::PROJECT_CONFIG))];
+        if !entry.exists() {
+            actions.push(create_file_action(entry));
+        }
+        if !is_git_repo(&self.path) {
+            actions.push(update_action(
+                "initialize_git",
+                self.path.join(".git"),
+                None,
+            ));
+        }
+        actions.extend(
+            directories
+                .into_iter()
+                .filter(|directory| !directory.exists())
+                .map(|directory| update_action("create_directory", directory, None)),
+        );
+        actions.extend(
+            file_moves
+                .into_iter()
+                .map(|(source, destination)| update_action("move_file", source, Some(destination))),
+        );
+        for (path, content) in self.managed_template_files()? {
+            if let Some(change) = managed_file_change(&path, content)? {
+                let diff = include_diff
+                    .then(|| managed_file_diff(&self.path, &path, content))
+                    .transpose()?;
+                actions.push(managed_update_action(path, change, diff));
+            }
+        }
+        if commit {
+            actions.push(update_action("commit", self.path.clone(), None));
+        }
+        Ok(actions)
+    }
+
     fn resolve_project_path(&self, path: &Path) -> PathBuf {
         let resolved = if path.is_absolute() {
             path.to_path_buf()

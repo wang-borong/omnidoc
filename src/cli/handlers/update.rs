@@ -1,22 +1,13 @@
 use crate::build::pipeline::{detect_project_type, ProjectType};
 use crate::cli::handlers::common::{
     create_config_manager_default, dirty_auto_commit_error, format_git_change,
-    merged_config_to_envs, print_json_error, user_git_changes,
+    merged_config_to_envs, print_json_error, resolve_repository_status, GitRepositoryStatus,
 };
 use crate::doc::{Doc, ProjectUpdateAction};
 use crate::error::{OmniDocError, Result};
-use crate::git::{git_has_commits, is_git_repo, GitWorktreeChange};
 use crate::utils::path;
 use serde::Serialize;
 use std::path::Path;
-
-#[derive(Debug, Serialize)]
-struct UpdateRepositoryStatus {
-    exists: bool,
-    has_commits: bool,
-    clean: bool,
-    changes: Vec<GitWorktreeChange>,
-}
 
 #[derive(Debug, Serialize)]
 struct UpdateReport {
@@ -28,7 +19,7 @@ struct UpdateReport {
     will_commit: bool,
     ready: bool,
     applied: bool,
-    repository: UpdateRepositoryStatus,
+    repository: GitRepositoryStatus,
     actions: Vec<ProjectUpdateAction>,
 }
 
@@ -117,26 +108,6 @@ fn update_project(
         applied: !dry_run,
         repository,
         actions,
-    })
-}
-
-fn resolve_repository_status(project_path: &Path) -> Result<UpdateRepositoryStatus> {
-    if !is_git_repo(project_path) {
-        return Ok(UpdateRepositoryStatus {
-            exists: false,
-            has_commits: false,
-            clean: true,
-            changes: Vec::new(),
-        });
-    }
-
-    let has_commits = git_has_commits(project_path)?;
-    let changes = user_git_changes(project_path)?;
-    Ok(UpdateRepositoryStatus {
-        exists: true,
-        has_commits,
-        clean: changes.is_empty(),
-        changes,
     })
 }
 

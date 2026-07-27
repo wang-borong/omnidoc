@@ -71,7 +71,7 @@ pub enum Commands {
 
     /// initialize an existing directory as an OmniDoc project
     #[command(
-        after_help = "Examples:\n  omnidoc init\n  omnidoc init . --type ctex-md\n  omnidoc init existing-repo --defaults\n  omnidoc init existing-repo --type ctex-md --no-commit"
+        after_help = "Examples:\n  omnidoc init\n  omnidoc init . --type ctex-md\n  omnidoc init existing-repo --defaults\n  omnidoc init existing-repo --type ctex-md --dry-run\n  omnidoc init existing-repo --type ctex-md --diff\n  omnidoc init existing-repo --type ctex-md --no-commit"
     )]
     Init {
         /// set the author name
@@ -103,6 +103,18 @@ pub enum Commands {
         /// initialize files without creating a Git commit
         #[arg(long)]
         no_commit: bool,
+
+        /// preview the initialization plan without modifying the directory
+        #[arg(long)]
+        dry_run: bool,
+
+        /// show unified managed-file diffs and imply --dry-run
+        #[arg(long)]
+        diff: bool,
+
+        /// emit a stable JSON initialization report
+        #[arg(long)]
+        json: bool,
 
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
@@ -1379,6 +1391,9 @@ mod tests {
             "--type",
             "ctex-md",
             "--no-commit",
+            "--dry-run",
+            "--diff",
+            "--json",
         ])
         .expect("init no-commit command");
         assert!(matches!(
@@ -1386,6 +1401,9 @@ mod tests {
             Commands::Init {
                 path: Some(path),
                 no_commit: true,
+                dry_run: true,
+                diff: true,
+                json: true,
                 ..
             } if path == "docs"
         ));

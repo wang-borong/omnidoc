@@ -1,7 +1,9 @@
 use crate::cli::handlers::common::{
     create_config_manager_default, merged_config_to_envs, print_json_error,
 };
-use crate::cli::utils::{infer_title, resolve_creation_template};
+use crate::cli::utils::{
+    infer_title, require_explicit_creation_template, resolve_creation_template,
+};
 use crate::config::ProjectConfig;
 use crate::doc::templates::ProjectTemplateInfo;
 use crate::doc::{Doc, ProjectUpdateAction};
@@ -39,6 +41,12 @@ pub fn handle_new(
     no_commit: bool,
     json: bool,
 ) -> Result<()> {
+    if json {
+        if let Err(error) = require_explicit_creation_template(doctype.as_deref(), defaults) {
+            print_json_error(&error);
+            return Err(error);
+        }
+    }
     let report = match create_new_project(
         orig_path, path, title, author, doctype, format, defaults, dry_run, !no_commit,
     ) {

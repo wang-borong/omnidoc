@@ -36,28 +36,37 @@ fn command_needs_library(command: &Commands) -> bool {
 }
 
 fn prepare_working_directory(command: &mut Commands) -> Result<()> {
-    let path = match command {
-        Commands::Init { path, .. } => path,
+    let (path, json) = match command {
+        Commands::Init { path, json, .. } => (path, *json),
         _ => return Ok(()),
     };
 
     let Some(path) = path else {
         return Ok(());
     };
-    let canonical = Path::new(path).canonicalize().map_err(|_| {
-        OmniDocError::Project(format!(
-            "Path does not exist or is not accessible: {}",
-            path
-        ))
-    })?;
-    if !canonical.is_dir() {
-        return Err(OmniDocError::Project(format!(
-            "Path is not a directory: {}",
-            canonical.display()
-        )));
+    let result = (|| {
+        let canonical = Path::new(path).canonicalize().map_err(|_| {
+            OmniDocError::Project(format!(
+                "Path does not exist or is not accessible: {}",
+                path
+            ))
+        })?;
+        if !canonical.is_dir() {
+            return Err(OmniDocError::Project(format!(
+                "Path is not a directory: {}",
+                canonical.display()
+            )));
+        }
+        env::set_current_dir(&canonical).map_err(OmniDocError::Io)?;
+        *path = canonical.to_string_lossy().to_string();
+        Ok(())
+    })();
+    if let Err(error) = result {
+        if json {
+            print_json_error(&error);
+        }
+        return Err(error);
     }
-    env::set_current_dir(&canonical).map_err(OmniDocError::Io)?;
-    *path = canonical.to_string_lossy().to_string();
     Ok(())
 }
 
@@ -99,9 +108,14 @@ pub fn cli() -> Result<()> {
             format,
             defaults,
             no_commit,
+            dry_run,
+            diff,
+            json,
             ..
         } => {
-            handle_init(title, author, doctype, format, defaults, no_commit)?;
+            handle_init(
+                title, author, doctype, format, defaults, no_commit, dry_run, diff, json,
+            )?;
         }
         Commands::Build {
             path,

@@ -76,13 +76,14 @@ they can be run from the project root or nested directories such as
 project.
 
 Commands with `--json` write only JSON to stdout and use a non-zero exit code
-on failure. The `new`, `status`, `clean`, `update`, `config show`, and
+on failure. The `new`, `init`, `status`, `clean`, `update`, `config show`, and
 `config get` responses include a `schema_version` field set to `1`. Their
 command-specific success objects can be consumed directly, while failures return
 `{"schema_version":1,"error":{"category":"...","message":"..."}}` and write
 the human-readable diagnostic to stderr. Update reports additionally expose
 `ready`, structured repository changes, exact actions, and optional per-action
-unified diffs.
+unified diffs. Creation commands in JSON mode never open the interactive
+template selector; pass `--type <KEY>` or `--defaults` explicitly.
 
 ### Quick Start
 
@@ -163,6 +164,9 @@ unified diffs.
    omnidoc init [PATH] [--title "Document Title"] [--author "Author Name"]
    omnidoc init existing-repo --type ctex-md
    omnidoc init existing-repo --defaults
+   omnidoc init existing-repo --type ctex-md --dry-run
+   omnidoc init existing-repo --type ctex-md --diff
+   omnidoc init existing-repo --type ctex-md --dry-run --json
    omnidoc init existing-repo --type ctex-md --no-commit
    ```
 
@@ -177,6 +181,14 @@ unified diffs.
    untracked files, `init` refuses to include them in its automatic commit. Commit
    or stash that work first, or use `--no-commit` to initialize OmniDoc files
    while leaving all Git decisions to the user.
+
+   `--dry-run` reports the inferred metadata, repository readiness, files,
+   directories, source moves, managed-file refreshes, Git initialization, and
+   commit without changing the directory. `--diff` implies dry-run and includes
+   unified diffs for managed files such as `.gitignore` and `.latexmkrc`.
+   `--json` exposes the same plan through a stable report; a dirty repository
+   preview succeeds with `ready: false`, so scripts can explain the blocker
+   before requesting an actual write.
 
 3. **Build the repository**
 

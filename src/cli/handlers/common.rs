@@ -1,8 +1,9 @@
 use crate::config::{CliOverrides, ConfigManager, MergedConfig};
 use crate::doc::services::{BuildService, ConverterService, FigureService};
 use crate::error::{OmniDocError, Result};
-use crate::git::{git_worktree_changes, GitWorktreeChange};
+use crate::git::{git_has_commits, git_worktree_changes, is_git_repo, GitWorktreeChange};
 use crate::utils::error;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -101,6 +102,34 @@ pub fn user_git_changes(project_path: &Path) -> Result<Vec<GitWorktreeChange>> {
             && (change.path == ".omnidoc-cache" || change.path.starts_with(".omnidoc-cache/")))
     });
     Ok(changes)
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitRepositoryStatus {
+    pub exists: bool,
+    pub has_commits: bool,
+    pub clean: bool,
+    pub changes: Vec<GitWorktreeChange>,
+}
+
+pub fn resolve_repository_status(project_path: &Path) -> Result<GitRepositoryStatus> {
+    if !is_git_repo(project_path) {
+        return Ok(GitRepositoryStatus {
+            exists: false,
+            has_commits: false,
+            clean: true,
+            changes: Vec::new(),
+        });
+    }
+
+    let has_commits = git_has_commits(project_path)?;
+    let changes = user_git_changes(project_path)?;
+    Ok(GitRepositoryStatus {
+        exists: true,
+        has_commits,
+        clean: changes.is_empty(),
+        changes,
+    })
 }
 
 pub fn format_git_change(change: &GitWorktreeChange) -> String {

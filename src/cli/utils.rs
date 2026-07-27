@@ -172,6 +172,17 @@ pub fn resolve_creation_template(
     Ok(template)
 }
 
+/// Machine-readable creation commands must never open an interactive selector.
+pub fn require_explicit_creation_template(requested: Option<&str>, defaults: bool) -> Result<()> {
+    if requested.is_some() || defaults {
+        return Ok(());
+    }
+    Err(OmniDocError::Other(
+        "JSON mode requires a non-interactive template choice. Use `--type <KEY>` or `--defaults`; run `omnidoc template list --json` to inspect available templates."
+            .to_string(),
+    ))
+}
+
 pub fn infer_title(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
