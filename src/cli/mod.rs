@@ -6,7 +6,9 @@ use crate::error::{OmniDocError, Result};
 use clap::Parser;
 use clap::{Command, CommandFactory};
 use clap_complete::{generate, Generator};
-use commands::{CheckSubcommand, Commands, ConvertSubcommand, OmniCli, TemplateSubcommand};
+use commands::{
+    CheckSubcommand, Commands, ConfigSubcommand, ConvertSubcommand, OmniCli, TemplateSubcommand,
+};
 use handlers::*;
 use std::env;
 use std::path::Path;
@@ -243,10 +245,16 @@ pub fn cli() -> Result<()> {
         } => {
             handle_clean(path, distclean, dry_run, json)?;
         }
-        Commands::Update { path } => {
-            handle_update(path)?;
+        Commands::Update {
+            path,
+            dry_run,
+            no_commit,
+            json,
+        } => {
+            handle_update(path, dry_run, no_commit, json)?;
         }
         Commands::Config {
+            subcommand,
             authors,
             lib,
             outdir,
@@ -254,9 +262,37 @@ pub fn cli() -> Result<()> {
             bibinputs,
             texinputs,
             force,
-        } => {
-            handle_config(authors, lib, outdir, texmfhome, bibinputs, texinputs, force)?;
-        }
+        } => match subcommand {
+            Some(ConfigSubcommand::Init {
+                author,
+                lib,
+                outdir,
+                texmfhome,
+                bibinputs,
+                texinputs,
+                force,
+            }) => handle_config(author, lib, outdir, texmfhome, bibinputs, texinputs, force)?,
+            Some(ConfigSubcommand::Show { path, scope, json }) => {
+                handle_config_show(path, scope, json)?;
+            }
+            Some(ConfigSubcommand::Get {
+                key,
+                path,
+                scope,
+                json,
+            }) => {
+                handle_config_get(key, path, scope, json)?;
+            }
+            None => {
+                let author = authors.ok_or_else(|| {
+                        OmniDocError::Config(
+                            "An author is required. Use `omnidoc config init --author NAME`, or inspect configuration with `omnidoc config show`."
+                                .to_string(),
+                        )
+                    })?;
+                handle_config(author, lib, outdir, texmfhome, bibinputs, texinputs, force)?;
+            }
+        },
         Commands::Lib {
             install,
             update,

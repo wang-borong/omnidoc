@@ -167,6 +167,13 @@ fn help_prioritizes_workflows_and_keeps_legacy_commands_out_of_the_main_list() {
     assert!(new_help.contains("--type <KEY>"));
     assert!(new_help.contains("--defaults"));
     assert!(!new_help.contains("--title <TITLE> <PATH>"));
+
+    let config_help = assert_success(fixture.command(&["config", "--help"]));
+    assert!(config_help.contains("  init  "));
+    assert!(config_help.contains("  show  "));
+    assert!(config_help.contains("  get   "));
+    assert!(!config_help.contains("-l, --lib <LIB>"));
+    assert!(!config_help.contains("-o, --outdir <OUTDIR>"));
 }
 
 #[test]
@@ -257,6 +264,135 @@ fn relative_update_resolves_the_target_and_infers_the_project_format() {
     assert!(fixture.project.join(".gitignore").is_file());
     assert!(!fixture.project.join(".latexmkrc").exists());
     assert!(!fixture.project.join("project/.gitignore").exists());
+
+    let repository = git2::Repository::open(&fixture.project).expect("updated repository");
+    let commit = repository
+        .head()
+        .expect("repository head")
+        .peel_to_commit()
+        .expect("update commit");
+    assert_eq!(commit.message().expect("commit message"), "Update project");
+}
+
+#[test]
+fn update_preview_is_json_and_does_not_modify_the_project() {
+    let fixture = Fixture::new("update-preview");
+    fs::write(fixture.project.join("notes.md"), "# Notes\n").expect("root markdown");
+    fs::write(fixture.project.join("appendix.tex"), "Appendix\n").expect("root latex");
+
+    let output =
+        assert_success(fixture.command(&["update", "--dry-run", "--json", &fixture.project_arg()]));
+    let report: serde_json::Value = serde_json::from_str(&output).expect("update preview JSON");
+    assert_eq!(report["schema_version"], 1);
+    assert_eq!(report["dry_run"], true);
+    assert_eq!(report["commit"], true);
+    assert_eq!(report["applied"], false);
+
+    let operations = report["actions"]
+        .as_array()
+        .expect("update actions")
+        .iter()
+        .filter_map(|action| action["operation"].as_str())
+        .collect::<Vec<_>>();
+    for expected in [
+        "refresh_file",
+        "initialize_git",
+        "create_directory",
+        "move_file",
+        "commit",
+    ] {
+        assert!(operations.contains(&expected), "missing action {expected}");
+    }
+    assert!(
+        report["actions"].as_array().is_some_and(|actions| {
+            actions.iter().any(|action| {
+                action["operation"] == "move_file"
+                    && action["path"]
+                        .as_str()
+                        .is_some_and(|path| path.ends_with("/appendix.tex"))
+                    && action["destination"]
+                        .as_str()
+                        .is_some_and(|path| path.ends_with("/tex/appendix.tex"))
+            })
+        }),
+        "report: {report}"
+    );
+
+    assert!(fixture.project.join("notes.md").is_file());
+    assert!(fixture.project.join("appendix.tex").is_file());
+    assert!(!fixture.project.join("md/notes.md").exists());
+    assert!(!fixture.project.join("tex/appendix.tex").exists());
+    assert!(!fixture.project.join(".git").exists());
+    assert!(!fixture.project.join(".gitignore").exists());
+    assert!(!fixture.project.join(".omnidoc-cache").exists());
+}
+
+#[test]
+fn update_no_commit_moves_mixed_sources_and_can_be_committed_later() {
+    let fixture = Fixture::new("update-no-commit");
+    fs::write(fixture.project.join("notes.md"), "# Notes\n").expect("root markdown");
+    fs::write(fixture.project.join("appendix.tex"), "Appendix\n").expect("root latex");
+
+    let output = assert_success(fixture.command(&[
+        "update",
+        "--no-commit",
+        "--json",
+        &fixture.project_arg(),
+    ]));
+    let report: serde_json::Value = serde_json::from_str(&output).expect("update report JSON");
+    assert_eq!(report["dry_run"], false);
+    assert_eq!(report["commit"], false);
+    assert_eq!(report["applied"], true);
+    assert!(report["actions"]
+        .as_array()
+        .is_some_and(|actions| { actions.iter().all(|action| action["operation"] != "commit") }));
+
+    assert!(fixture.project.join(".git").is_dir());
+    assert!(fixture.project.join(".gitignore").is_file());
+    assert!(fixture.project.join("md/notes.md").is_file());
+    assert!(fixture.project.join("tex/appendix.tex").is_file());
+    assert!(!fixture.project.join("notes.md").exists());
+    assert!(!fixture.project.join("appendix.tex").exists());
+
+    let repository = git2::Repository::open(&fixture.project).expect("uncommitted repository");
+    assert!(repository.head().is_err());
+
+    assert_success(fixture.command(&["update", "--json", &fixture.project_arg()]));
+    let repository = git2::Repository::open(&fixture.project).expect("committed repository");
+    let commit = repository
+        .head()
+        .expect("repository head")
+        .peel_to_commit()
+        .expect("first update commit");
+    assert_eq!(commit.message().expect("commit message"), "Update project");
+}
+
+#[test]
+fn update_rejects_source_move_collisions_before_writing() {
+    let fixture = Fixture::new("update-collision");
+    fs::create_dir_all(fixture.project.join("md")).expect("markdown directory");
+    fs::write(fixture.project.join("notes.md"), "root copy\n").expect("root markdown");
+    fs::write(fixture.project.join("md/notes.md"), "existing copy\n").expect("existing markdown");
+
+    let output = fixture.command(&["update", "--json", &fixture.project_arg()]);
+    let stdout = assert_failure(output);
+    let error: serde_json::Value = serde_json::from_str(&stdout).expect("update error JSON");
+    assert_eq!(error["error"]["category"], "project");
+    assert!(error["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("destination already exists")));
+
+    assert_eq!(
+        fs::read_to_string(fixture.project.join("notes.md")).expect("root source"),
+        "root copy\n"
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.project.join("md/notes.md")).expect("existing source"),
+        "existing copy\n"
+    );
+    assert!(!fixture.project.join(".git").exists());
+    assert!(!fixture.project.join(".gitignore").exists());
+    assert!(!fixture.project.join(".omnidoc-cache").exists());
 }
 
 #[test]
@@ -814,7 +950,7 @@ compatibility = "readium"
 }
 
 #[test]
-fn json_commands_remain_machine_readable_when_creating_default_config() {
+fn read_only_json_commands_do_not_create_default_config() {
     let fixture = Fixture::new("json-default-config");
     fs::remove_file(fixture.env_root.join("config/omnidoc.toml")).ok();
 
@@ -822,6 +958,79 @@ fn json_commands_remain_machine_readable_when_creating_default_config() {
     let stdout = assert_success(output);
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("pure JSON stdout");
     assert_eq!(parsed, serde_json::json!([]));
+    assert!(!fixture.env_root.join("config/omnidoc.toml").exists());
+}
+
+#[test]
+fn config_show_and_get_are_read_only_and_machine_readable() {
+    let fixture = Fixture::new("config-read");
+    let project = fixture.project_arg();
+
+    let output = assert_success(fixture.command(&["config", "show", "--json", &project]));
+    let shown: serde_json::Value = serde_json::from_str(&output).expect("config show JSON");
+    assert_eq!(shown["schema_version"], 1);
+    assert_eq!(shown["scope"], "merged");
+    assert_eq!(shown["config"]["target"], "smoke");
+    assert!(shown["sources"].as_array().is_some_and(|sources| {
+        sources
+            .iter()
+            .any(|source| source["kind"] == "global" && source["exists"] == false)
+            && sources
+                .iter()
+                .any(|source| source["kind"] == "project" && source["exists"] == true)
+    }));
+
+    let output = assert_success(fixture.command(&["config", "get", "target", "--json", &project]));
+    let value: serde_json::Value = serde_json::from_str(&output).expect("config get JSON");
+    assert_eq!(value["scope"], "merged");
+    assert_eq!(value["key"], "target");
+    assert_eq!(value["value"], "smoke");
+
+    let project_config = assert_success(
+        fixture.command(&["config", "show", "--scope", "project", "--json", &project]),
+    );
+    let project_config: serde_json::Value =
+        serde_json::from_str(&project_config).expect("project config JSON");
+    assert_eq!(project_config["config"]["project"]["target"], "smoke");
+
+    let missing = fixture.command(&["config", "get", "missing.key", "--json", &project]);
+    assert!(!missing.status.success());
+    let error: serde_json::Value =
+        serde_json::from_slice(&missing.stdout).expect("config error JSON");
+    assert_eq!(error["error"]["category"], "configuration");
+    assert!(!fixture.env_root.join("config/omnidoc.toml").exists());
+}
+
+#[test]
+fn config_init_and_legacy_generation_forms_remain_supported() {
+    let grouped = Fixture::new("config-init");
+    assert_success(grouped.command(&[
+        "config",
+        "init",
+        "--author",
+        "Docs Team",
+        "--outdir",
+        "output",
+    ]));
+    let grouped_config =
+        fs::read_to_string(grouped.env_root.join("config/omnidoc.toml")).expect("grouped config");
+    assert!(grouped_config.contains("name = \"Docs Team\""));
+    assert!(grouped_config.contains("outdir = \"output\""));
+    assert!(grouped_config.contains("texinputs = \"./tex//:\""));
+    assert!(grouped_config.contains("bibinputs = \"./biblio//:\""));
+    assert!(grouped_config.contains(
+        grouped
+            .env_root
+            .join("data/omnidoc")
+            .to_string_lossy()
+            .as_ref()
+    ));
+
+    let legacy = Fixture::new("config-legacy");
+    assert_success(legacy.command(&["config", "--authors", "Legacy User"]));
+    let legacy_config =
+        fs::read_to_string(legacy.env_root.join("config/omnidoc.toml")).expect("legacy config");
+    assert!(legacy_config.contains("name = \"Legacy User\""));
 }
 
 #[test]

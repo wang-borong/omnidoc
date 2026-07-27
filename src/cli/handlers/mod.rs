@@ -21,7 +21,7 @@ pub mod watch;
 
 pub use build::handle_build;
 pub use clean::handle_clean;
-pub use config::handle_config;
+pub use config::{handle_config, handle_config_get, handle_config_show};
 pub use figure::{handle_figure, BitfieldOptions};
 pub use fmt::handle_fmt;
 pub use init::handle_init;

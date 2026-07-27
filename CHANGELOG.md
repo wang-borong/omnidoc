@@ -26,6 +26,18 @@
 - Unified project-root discovery across build, watch, publish, validation,
   dependency, lock, plugin, status, open, clean, and update workflows, so the
   same commands and explicit paths work consistently from nested directories.
+- Added grouped `config init`, `config show`, and `config get` workflows with
+  selectable merged/global/project scopes, stable JSON, source provenance, and
+  no implicit config-file creation from read-only commands; legacy flat config
+  options remain accepted but are hidden from primary help.
+- Added `update --dry-run`, `--no-commit`, and stable JSON action reports,
+  project write locking for real updates, collision-safe mixed Markdown/LaTeX
+  source moves, and support for committing a repository previously initialized
+  by a no-commit update.
+- Prevented `watch` rebuild loops by ignoring configured output directories,
+  `dist`, generated figure directories, caches, and exact root-level generated
+  artifacts while continuing to watch unrelated source assets; `watch --once`
+  now returns a failing build's non-zero status instead of reporting success.
 
 ## 1.7.0 - 2026-07-26
 

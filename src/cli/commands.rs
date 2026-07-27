@@ -1,5 +1,5 @@
 use crate::doctype::DocumentFormat;
-use clap::{Parser, Subcommand, ValueHint};
+use clap::{Parser, Subcommand, ValueEnum, ValueHint};
 
 /// The OmniDoc management CLI
 #[derive(Debug, Parser)]
@@ -414,36 +414,57 @@ pub enum Commands {
         path: Option<String>,
     },
 
-    /// refresh project scaffolding for the current OmniDoc version
+    /// preview or refresh project scaffolding for the current OmniDoc version
+    #[command(
+        after_help = "Examples:\n  omnidoc update --dry-run\n  omnidoc update --dry-run --json\n  omnidoc update --no-commit\n  omnidoc update"
+    )]
     Update {
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
         path: Option<String>,
+
+        /// report the update plan without modifying the project
+        #[arg(long)]
+        dry_run: bool,
+
+        /// apply the update without creating a Git commit
+        #[arg(long)]
+        no_commit: bool,
+
+        /// emit a stable JSON update report
+        #[arg(long)]
+        json: bool,
     },
 
-    /// generate a default configuration
+    /// inspect or create OmniDoc configuration
+    #[command(
+        after_help = "Examples:\n  omnidoc config show --json\n  omnidoc config get target\n  omnidoc config init --author 'Docs Team'\n\nThe legacy `omnidoc config --authors NAME` form remains supported."
+    )]
     Config {
+        #[command(subcommand)]
+        subcommand: Option<ConfigSubcommand>,
+
         /// configure the author name
-        #[arg(short, long)]
-        authors: String,
+        #[arg(short, long = "author", visible_alias = "authors", hide = true)]
+        authors: Option<String>,
         /// configure the OmniDoc library path
-        #[arg(short, long)]
+        #[arg(short, long, hide = true)]
         lib: Option<String>,
         /// configure the output directory for building
-        #[arg(short, long)]
+        #[arg(short, long, hide = true)]
         outdir: Option<String>,
         /// configure the TEXMFHOME environment variable (the directory where the system finds the texmf home)
-        #[arg(short = 'T', long)]
+        #[arg(short = 'T', long, hide = true)]
         texmfhome: Option<String>,
         /// configure the BIBINPUTS environment variable (the directory where the system finds the bibliographies)
-        #[arg(short, long)]
+        #[arg(short, long, hide = true)]
         bibinputs: Option<String>,
         /// configure the TEXINPUTS environment variable (the directory where the system finds the tex sources)
-        #[arg(short, long)]
+        #[arg(short, long, hide = true)]
         texinputs: Option<String>,
 
         /// force generation
-        #[arg(short = 'F', long)]
+        #[arg(short = 'F', long, hide = true)]
         force: bool,
     },
 
@@ -588,6 +609,83 @@ pub enum Commands {
         /// source figure files (auto-detect type if no subcommand specified)
         #[arg(value_hint = ValueHint::FilePath)]
         sources: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ConfigScope {
+    /// effective command configuration after global/project merging
+    Merged,
+    /// user-level configuration
+    Global,
+    /// nearest .omnidoc.toml project configuration
+    Project,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ConfigSubcommand {
+    /// create the user-level configuration file explicitly
+    Init {
+        /// configure the author name
+        #[arg(short, long, visible_alias = "authors")]
+        author: String,
+
+        /// configure the OmniDoc library path
+        #[arg(short, long)]
+        lib: Option<String>,
+
+        /// configure the output directory for building
+        #[arg(short, long)]
+        outdir: Option<String>,
+
+        /// configure the TEXMFHOME environment variable
+        #[arg(short = 'T', long)]
+        texmfhome: Option<String>,
+
+        /// configure the BIBINPUTS environment variable
+        #[arg(short, long)]
+        bibinputs: Option<String>,
+
+        /// configure the TEXINPUTS environment variable
+        #[arg(short, long)]
+        texinputs: Option<String>,
+
+        /// overwrite an existing configuration file
+        #[arg(short = 'F', long)]
+        force: bool,
+    },
+
+    /// show a complete configuration scope
+    Show {
+        /// project path used to resolve project/merged configuration
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// configuration scope to inspect
+        #[arg(long, value_enum, default_value = "merged")]
+        scope: ConfigScope,
+
+        /// emit a stable JSON envelope
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// read one dot-separated configuration key
+    Get {
+        /// key such as target, outdir, project.target, or tools.pandoc
+        key: String,
+
+        /// project path used to resolve project/merged configuration
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// configuration scope to inspect
+        #[arg(long, value_enum, default_value = "merged")]
+        scope: ConfigScope,
+
+        /// emit a stable JSON envelope
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -987,7 +1085,9 @@ pub enum FigureSubcommand {
 
 #[cfg(test)]
 mod tests {
-    use super::{CheckSubcommand, Commands, ConvertSubcommand, OmniCli};
+    use super::{
+        CheckSubcommand, Commands, ConfigScope, ConfigSubcommand, ConvertSubcommand, OmniCli,
+    };
     use crate::doctype::DocumentFormat;
     use clap::Parser;
 
@@ -1131,6 +1231,65 @@ mod tests {
                 dry_run: true,
                 json: true
             } if path == "docs"
+        ));
+
+        let update = OmniCli::try_parse_from([
+            "omnidoc",
+            "update",
+            "docs",
+            "--dry-run",
+            "--no-commit",
+            "--json",
+        ])
+        .expect("update command");
+        assert!(matches!(
+            update.command,
+            Commands::Update {
+                path: Some(path),
+                dry_run: true,
+                no_commit: true,
+                json: true
+            } if path == "docs"
+        ));
+    }
+
+    #[test]
+    fn grouped_and_legacy_config_forms_parse() {
+        let show = OmniCli::try_parse_from([
+            "omnidoc", "config", "show", "docs", "--scope", "project", "--json",
+        ])
+        .expect("config show");
+        assert!(matches!(
+            show.command,
+            Commands::Config {
+                subcommand: Some(ConfigSubcommand::Show {
+                    path: Some(path),
+                    scope: ConfigScope::Project,
+                    json: true,
+                }),
+                ..
+            } if path == "docs"
+        ));
+
+        let get =
+            OmniCli::try_parse_from(["omnidoc", "config", "get", "target"]).expect("config get");
+        assert!(matches!(
+            get.command,
+            Commands::Config {
+                subcommand: Some(ConfigSubcommand::Get { key, .. }),
+                ..
+            } if key == "target"
+        ));
+
+        let legacy = OmniCli::try_parse_from(["omnidoc", "config", "--authors", "Docs Team"])
+            .expect("legacy config");
+        assert!(matches!(
+            legacy.command,
+            Commands::Config {
+                subcommand: None,
+                authors: Some(author),
+                ..
+            } if author == "Docs Team"
         ));
     }
 }

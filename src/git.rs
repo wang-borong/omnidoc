@@ -126,7 +126,12 @@ where
     let mut index = repo.index()?;
     let oid = index.write_tree()?;
     let signature = repository_signature(&repo)?;
-    let parent_commit = repo.head()?.peel_to_commit()?;
+    let parent_commit = match repo.head() {
+        Ok(head) => Some(head.peel_to_commit()?),
+        Err(error) if error.code() == git2::ErrorCode::UnbornBranch => None,
+        Err(error) => return Err(error),
+    };
+    let parents = parent_commit.iter().collect::<Vec<_>>();
     let tree = repo.find_tree(oid)?;
     repo.commit(
         Some(git_refs::HEAD),
@@ -134,7 +139,7 @@ where
         &signature,
         msg,
         &tree,
-        &[&parent_commit],
+        &parents,
     )?;
 
     Ok(())
@@ -452,6 +457,30 @@ mod tests {
         git_init(&target, false).expect("init repo");
 
         assert!(target.join(".git").exists());
+
+        let _ = fs::remove_dir_all(target);
+    }
+
+    #[test]
+    fn git_commit_creates_the_first_commit_in_an_unborn_repository() {
+        let target = temp_dir_path("git_first_commit");
+        git_init(&target, false).expect("init repo without commit");
+        fs::write(target.join("README.md"), b"# first\n").expect("write first file");
+        git_add(&target, &["*"], false).expect("stage first file");
+
+        git_commit(&target, "First real commit").expect("create first commit");
+
+        let repository = Repository::open(&target).expect("open repository");
+        let commit = repository
+            .head()
+            .expect("repository head")
+            .peel_to_commit()
+            .expect("head commit");
+        assert_eq!(
+            commit.message().expect("commit message"),
+            "First real commit"
+        );
+        assert_eq!(commit.parent_count(), 0);
 
         let _ = fs::remove_dir_all(target);
     }

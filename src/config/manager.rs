@@ -4,6 +4,7 @@ use crate::config::project::ProjectConfig;
 use crate::config::schema::*;
 use crate::error::Result;
 use crate::utils::directories::data_local_dir;
+use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::path::Path;
@@ -19,7 +20,7 @@ pub struct ConfigManager {
 }
 
 /// 合并后的配置（最终使用的配置值）
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct MergedConfig {
     pub author: Option<String>,
     pub lib_path: Option<String>,

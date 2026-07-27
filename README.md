@@ -74,11 +74,11 @@ they can be run from the project root or nested directories such as
 project.
 
 Commands with `--json` write only JSON to stdout and use a non-zero exit code
-on failure. The new `status` and `clean` responses include a
-`schema_version` field set to `1`: successful `status` calls return one project
-object, successful `clean` calls return a clean report, and their failures return
-`{"schema_version":1,"error":{"category":"...","message":"..."}}` while the
-human-readable diagnostic is written to stderr.
+on failure. The `status`, `clean`, `update`, `config show`, and `config get`
+responses include a `schema_version` field set to `1`. Their command-specific
+success objects can be consumed directly, while failures return
+`{"schema_version":1,"error":{"category":"...","message":"..."}}` and write
+the human-readable diagnostic to stderr.
 
 ### Quick Start
 
@@ -320,7 +320,15 @@ human-readable diagnostic is written to stderr.
    omnidoc watch [PATH] [--to <FORMAT>] [--output <FORMAT>]... [--all] [--debounce-ms 250]
    ```
 
-   `watch` uses the native `notify` backend, rebuilds once immediately, then rebuilds on source changes such as `.md`, `.tex`, `.bib`, `.drawio`, `.dot`, `.json`, and common image assets. Build failures are printed and the watcher keeps running. There is no polling fallback.
+   `watch` uses the native `notify` backend, rebuilds once immediately, then
+   rebuilds on source changes such as `.md`, `.tex`, `.bib`, `.drawio`, `.dot`,
+   `.json`, and common image assets. It ignores the configured build output,
+   `dist/`, cache directories, generated figure output, and exact generated
+   artifacts when the output directory is the project root, preventing build
+   products from triggering a rebuild loop. Build failures are printed and the
+   watcher keeps running. With `--once`, the initial build result is returned
+   directly, including a non-zero exit status on failure. There is no polling
+   fallback.
 
 5. **Publish generated artifacts**
 
@@ -389,13 +397,23 @@ human-readable diagnostic is written to stderr.
 
 9. **Update a document repository**
 
-   Update an existing omnidoc project structure:
+   Preview or refresh an existing OmniDoc project structure:
 
    ```bash
+   omnidoc update [PATH] --dry-run
+   omnidoc update [PATH] --dry-run --json
    omnidoc update [PATH]
+   omnidoc update [PATH] --no-commit
    ```
 
-   This command updates the project structure, template files, and configuration to match the current omnidoc version.
+   The preview lists every managed file refresh, directory creation, source
+   move, Git initialization, and commit without taking a project lock or
+   creating `.omnidoc-cache/`. A regular update refreshes managed scaffolding
+   such as `.gitignore`, `figure/README.md`, and `.latexmkrc` where applicable,
+   then commits the result by default. Use `--no-commit` when reviewing the
+   working tree manually. Root-level Markdown and LaTeX sources are moved to
+   their resolved source directories, but OmniDoc refuses the entire update
+   before writing anything if a destination file already exists.
 
 10. **List all project templates**
 
@@ -413,16 +431,29 @@ human-readable diagnostic is written to stderr.
 
 ### Configuration Commands
 
-9. **Generate default configuration**
+11. **Inspect or create configuration**
 
-   Create or update the global configuration file:
+   Inspect the effective configuration, read one value, or explicitly create
+   the user-level configuration file:
 
    ```bash
-   omnidoc config --authors "Author Name" [OPTIONS]
+   omnidoc config show [PATH]
+   omnidoc config show [PATH] --scope merged --json
+   omnidoc config show --scope global --json
+   omnidoc config get target [PATH]
+   omnidoc config get project.target [PATH] --scope project --json
+   omnidoc config init --author "Author Name" [OPTIONS]
    ```
 
-   Options:
-   - `--authors <AUTHORS>`: Configure the author name (required)
+   `show` and `get` are read-only: on first run they use in-memory defaults and
+   do not create a config directory or `omnidoc.toml`. The default `merged`
+   scope combines user and project configuration and reports every source path;
+   `global` and `project` expose the original schema for that file. Dot-separated
+   keys let scripts read exact values without parsing the whole configuration.
+
+   `config init` starts from the same complete first-run defaults used in
+   memory, then overrides only explicitly supplied values. Its options are:
+   - `--author <AUTHOR>`: Configure the author name (required)
    - `--lib <LIB>`: Configure the OmniDoc library path
    - `--outdir <OUTDIR>`: Configure the output directory for building (default: `build`)
    - `--texmfhome <TEXMFHOME>`: Configure the TEXMFHOME environment variable
@@ -432,10 +463,13 @@ human-readable diagnostic is written to stderr.
 
    Example:
    ```bash
-   omnidoc config --authors "John Doe" --outdir "output" --lib "$HOME/.local/share/omnidoc"
+   omnidoc config init --author "John Doe" --outdir "output" --lib "$HOME/.local/share/omnidoc"
    ```
 
-10. **Maintain the OmniDoc library**
+   The legacy `omnidoc config --authors NAME ...` form remains accepted for
+   existing scripts but is hidden from the primary help surface.
+
+12. **Maintain the OmniDoc library**
 
    Install, update, inspect, or verify the OmniDoc library files (`libs` is a
    visible alias of `lib`):
@@ -457,7 +491,7 @@ human-readable diagnostic is written to stderr.
    A custom `[lib].path` can select a local bundle such as `bundles/libs` for
    development; Git clone installation is no longer supported.
 
-11. **Inspect versioned theme bundles**
+13. **Inspect versioned theme bundles**
 
    Theme bundles are declared by `themes/<name>.toml` inside the installed
    OmniDoc library bundle and

@@ -1,11 +1,10 @@
 use crate::config::schema::ConfigSchema;
 use crate::constants::config as config_consts;
 use crate::error::{OmniDocError, Result};
-use crate::terminal;
 use crate::utils::directories::{config_local_dir, data_local_dir};
 use crate::utils::fs;
 use std::env::var;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// 全局配置管理器（~/.config/omnidoc.toml）
 pub struct GlobalConfig {
@@ -31,22 +30,14 @@ impl GlobalConfig {
 
         let config_file = config_local_dir.join(config_consts::OMNIDOC_CONFIG_FILE);
 
-        fs::create_dir_all(&config_local_dir)?;
-
-        // 如果配置文件不存在，创建默认配置
-        if !fs::exists(&config_file) {
-            Self::create_default(&config_file)?;
-            terminal::info(format!(
-                "Created the '{}' configuration file in '{}'\nYou can modify it to set your author name.",
-                config_consts::OMNIDOC_CONFIG_FILE,
-                config_local_dir.display()
-            ));
-        }
-
-        let content = fs::read_to_string(&config_file)?;
-
-        let config: ConfigSchema = toml::from_str(&content)
-            .map_err(|e| OmniDocError::Config(format!("Failed to parse global config: {}", e)))?;
+        let config = if fs::exists(&config_file) {
+            let content = fs::read_to_string(&config_file)?;
+            toml::from_str(&content).map_err(|e| {
+                OmniDocError::Config(format!("Failed to parse global config: {}", e))
+            })?
+        } else {
+            Self::default_schema()?
+        };
 
         Ok(Self {
             path: config_file,
@@ -55,7 +46,19 @@ impl GlobalConfig {
     }
 
     /// 创建默认全局配置
-    pub fn create_default(path: &PathBuf) -> Result<()> {
+    pub fn create_default(path: &Path) -> Result<()> {
+        let config = Self::default_schema()?;
+        let toml_content = toml::to_string_pretty(&config)
+            .map_err(|e| OmniDocError::Config(format!("Failed to serialize config: {}", e)))?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::atomic_write(path, toml_content.as_bytes())?;
+        Ok(())
+    }
+
+    /// Build the effective first-run defaults without writing to disk.
+    pub fn default_schema() -> Result<ConfigSchema> {
         use crate::config::schema::*;
 
         let mut config = ConfigSchema {
@@ -92,12 +95,7 @@ impl GlobalConfig {
             }),
         };
 
-        let toml_content = toml::to_string_pretty(&config)
-            .map_err(|e| OmniDocError::Config(format!("Failed to serialize config: {}", e)))?;
-
-        fs::write(path, toml_content.as_bytes())?;
-
-        Ok(())
+        Ok(config)
     }
 
     /// 获取配置
@@ -108,5 +106,9 @@ impl GlobalConfig {
     /// 获取配置路径
     pub fn path(&self) -> &PathBuf {
         &self.path
+    }
+
+    pub fn exists(&self) -> bool {
+        self.path.is_file()
     }
 }

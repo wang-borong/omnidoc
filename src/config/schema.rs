@@ -291,7 +291,7 @@ pub struct PathsSection {
 }
 
 /// 路径配置（运行时使用的默认值）
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct PathConfig {
     pub build_dir: String,
     pub main_md: String,
