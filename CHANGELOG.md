@@ -12,6 +12,10 @@
 - Made `new` and `init` titles optional, added direct `--type`, filtered
   `--format`, and non-interactive `--defaults` creation paths, plus actionable
   next-step output and positional shell completion generation.
+- Added `new --dry-run`, `--json`, and `--no-commit` with exact creation action
+  reports and structured failures; new repositories now receive one
+  content-bearing initial commit instead of an empty commit followed by a
+  second project commit.
 - Made project creation fail safely before touching the target when an
   interactive template cannot be selected, stopped cancellation from deleting
   existing init directories, and fixed relative init/open/clean/update path

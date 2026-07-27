@@ -83,8 +83,14 @@ pub fn cli() -> Result<()> {
             doctype,
             format,
             defaults,
+            dry_run,
+            no_commit,
+            json,
         } => {
-            handle_new(&orig_path, path, title, author, doctype, format, defaults)?;
+            handle_new(
+                &orig_path, path, title, author, doctype, format, defaults, dry_run, no_commit,
+                json,
+            )?;
         }
         Commands::Init {
             author,

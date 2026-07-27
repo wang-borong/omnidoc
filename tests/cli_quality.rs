@@ -168,6 +168,9 @@ fn help_prioritizes_workflows_and_keeps_legacy_commands_out_of_the_main_list() {
     assert!(new_help.contains("Usage: omnidoc new [OPTIONS] <PATH>"));
     assert!(new_help.contains("--type <KEY>"));
     assert!(new_help.contains("--defaults"));
+    assert!(new_help.contains("--dry-run"));
+    assert!(new_help.contains("--no-commit"));
+    assert!(new_help.contains("--json"));
     assert!(!new_help.contains("--title <TITLE> <PATH>"));
 
     let config_help = assert_success(fixture.command(&["config", "--help"]));
@@ -242,8 +245,109 @@ fn new_supports_non_interactive_templates_and_infers_the_title() {
         .expect("repository head")
         .peel_to_commit()
         .expect("initial commit");
+    assert_eq!(
+        commit.message().expect("initial commit message"),
+        "Create project"
+    );
+    assert_eq!(commit.parent_count(), 0);
     let tree = commit.tree().expect("initial tree");
     assert!(tree.get_path(Path::new(".omnidoc.toml")).is_ok());
+    let mut revwalk = repo.revwalk().expect("project revision walk");
+    revwalk.push_head().expect("walk project head");
+    assert_eq!(revwalk.count(), 1, "new should create one initial commit");
+}
+
+#[test]
+fn new_preview_and_json_creation_are_safe_and_composable() {
+    let fixture = Fixture::new("new-preview");
+    let preview_target = fixture.base().join("planned-guide");
+    let preview = assert_success(fixture.command_in(
+        fixture.base(),
+        &[
+            "new",
+            "planned-guide",
+            "--type",
+            "ctexart-tex",
+            "--author",
+            "Preview Author",
+            "--dry-run",
+            "--json",
+        ],
+    ));
+    let preview: serde_json::Value =
+        serde_json::from_str(&preview).expect("new preview JSON report");
+    assert_eq!(preview["schema_version"], 1);
+    assert_eq!(preview["dry_run"], true);
+    assert_eq!(preview["applied"], false);
+    assert_eq!(preview["commit"], true);
+    assert_eq!(preview["title"], "planned guide");
+    assert_eq!(preview["author"], "Preview Author");
+    assert_eq!(preview["template"]["key"], "ctexart-tex");
+    assert!(preview["actions"].as_array().is_some_and(|actions| {
+        actions.iter().any(|action| action["operation"] == "commit")
+            && actions.iter().any(|action| {
+                action["path"]
+                    .as_str()
+                    .is_some_and(|path| path.ends_with("/.latexmkrc"))
+            })
+            && actions.iter().all(|action| {
+                action["path"]
+                    .as_str()
+                    .is_none_or(|path| !path.contains("/./"))
+            })
+    }));
+    assert!(!preview_target.exists());
+    assert!(!fixture.env_root.join("config/omnidoc.toml").exists());
+
+    let target = fixture.base().join("uncommitted-guide");
+    let created = assert_success(fixture.command_in(
+        fixture.base(),
+        &[
+            "new",
+            "uncommitted-guide",
+            "--type",
+            "ctex-md",
+            "--no-commit",
+            "--json",
+        ],
+    ));
+    let created: serde_json::Value =
+        serde_json::from_str(&created).expect("new creation JSON report");
+    assert_eq!(created["dry_run"], false);
+    assert_eq!(created["applied"], true);
+    assert_eq!(created["commit"], false);
+    assert!(created["actions"]
+        .as_array()
+        .is_some_and(|actions| { actions.iter().all(|action| action["operation"] != "commit") }));
+    assert!(target.join(".omnidoc.toml").is_file());
+    assert!(target.join("main.md").is_file());
+    let repository = git2::Repository::open(&target).expect("uncommitted project repository");
+    assert!(repository.head().is_err());
+}
+
+#[test]
+fn new_json_errors_suggest_init_without_touching_existing_paths() {
+    let fixture = Fixture::new("new-existing-json");
+    let target = fixture.base().join("existing-directory");
+    fs::create_dir_all(&target).expect("existing target");
+    fs::write(target.join("keep.txt"), "keep\n").expect("existing content");
+
+    let output = fixture.command_in(
+        fixture.base(),
+        &["new", "existing-directory", "--type", "ctex-md", "--json"],
+    );
+    let stdout = assert_failure(output);
+    let error: serde_json::Value =
+        serde_json::from_str(&stdout).expect("structured new error JSON");
+    assert_eq!(error["error"]["category"], "project");
+    assert!(error["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("omnidoc init existing-directory")));
+    assert_eq!(
+        fs::read_to_string(target.join("keep.txt")).expect("preserved existing content"),
+        "keep\n"
+    );
+    assert!(!target.join(".omnidoc.toml").exists());
 }
 
 #[test]

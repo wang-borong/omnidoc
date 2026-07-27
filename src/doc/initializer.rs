@@ -1,7 +1,7 @@
 use super::project::Doc;
 use super::templates::{
     generate_template, get_gitignore_template, get_latexmkrc_template, resolve_project_template,
-    TemplateDocType,
+    ProjectTemplateInfo, TemplateDocType,
 };
 use crate::constants::git as git_constants;
 use crate::constants::{dirs, lang, paths};
@@ -68,7 +68,7 @@ impl<'a> Doc<'a> {
         }
 
         // Initialize git repo if needed
-        self.initialize_git_repo(commit)?;
+        self.initialize_git_repo()?;
 
         // Setup directory structure
         self.setup_directories()?;
@@ -93,52 +93,43 @@ impl<'a> Doc<'a> {
     }
 
     /// Initialize git repository if needed
-    fn initialize_git_repo(&self, create_initial_commit: bool) -> Result<()> {
+    fn initialize_git_repo(&self) -> Result<()> {
         if !is_git_repo(".") {
-            error::git_err(git_init(".", create_initial_commit))?;
+            error::git_err(git_init(".", false))?;
         }
         Ok(())
     }
 
     /// Setup directory structure based on document type
     fn setup_directories(&self) -> Result<()> {
-        let md = Path::new(paths::MD_DIR);
-        let tex = self.get_tex_input_path();
-
         let template = resolve_project_template(&self.doctype)?;
-        let dirs_to_create = vec![
-            dirs::DAC_DIR,
-            dirs::DRAWIO_DIR,
-            dirs::FIGURES_DIR,
-            dirs::BIBLIO_DIR,
-        ];
-
-        // Create markdown directory if needed
-        if !fs::exists(md) && template.format == DocumentFormat::Markdown {
-            fs::create_dir_all(md)?;
-        }
-
-        // Create LaTeX directory if needed
-        if !fs::exists(&tex) && template.format == DocumentFormat::Latex {
-            fs::create_dir_all(&tex)?;
-        }
-
-        // Create common directories
-        for dir in dirs_to_create {
-            let dir_path = Path::new(dir);
-            if !fs::exists(dir_path)
-                && (!template.key.contains("resume") || template.key.contains("moderncv"))
-            {
-                fs::create_dir_all(dir_path)?;
+        for directory in self.project_directories(&template) {
+            if !fs::exists(&directory) {
+                fs::create_dir_all(&directory)?;
             }
         }
 
-        // Create figure directory if needed
-        if !fs::exists(Path::new(paths::FIGURE_DIR)) {
-            fs::create_dir_all(Path::new(paths::FIGURE_DIR))?;
-        }
-
         Ok(())
+    }
+
+    fn project_directories(&self, template: &ProjectTemplateInfo) -> BTreeSet<PathBuf> {
+        let mut directories = BTreeSet::new();
+        if !template.key.contains("resume") || template.key.contains("moderncv") {
+            directories.insert(self.path.join(dirs::DAC_DIR));
+            directories.insert(self.path.join(dirs::DRAWIO_DIR));
+            directories.insert(self.path.join(dirs::FIGURES_DIR));
+            directories.insert(self.path.join(dirs::BIBLIO_DIR));
+        }
+        directories.insert(self.path.join(paths::FIGURE_DIR));
+        match template.format {
+            DocumentFormat::Markdown => {
+                directories.insert(self.path.join(paths::MD_DIR));
+            }
+            DocumentFormat::Latex => {
+                directories.insert(self.resolve_project_path(&self.get_tex_input_path()));
+            }
+        }
+        directories
     }
 
     /// Get the LaTeX input path from envs
@@ -310,22 +301,7 @@ impl<'a> Doc<'a> {
         }
 
         let file_moves = self.planned_file_moves()?;
-        let mut directories = BTreeSet::new();
-        if !template.key.contains("resume") || template.key.contains("moderncv") {
-            directories.insert(self.path.join(dirs::DAC_DIR));
-            directories.insert(self.path.join(dirs::DRAWIO_DIR));
-            directories.insert(self.path.join(dirs::FIGURES_DIR));
-            directories.insert(self.path.join(dirs::BIBLIO_DIR));
-        }
-        directories.insert(self.path.join(paths::FIGURE_DIR));
-        match template.format {
-            DocumentFormat::Markdown => {
-                directories.insert(self.path.join(paths::MD_DIR));
-            }
-            DocumentFormat::Latex => {
-                directories.insert(self.resolve_project_path(&self.get_tex_input_path()));
-            }
-        }
+        let mut directories = self.project_directories(&template);
         for (_, destination) in &file_moves {
             if let Some(parent) = destination.parent() {
                 directories.insert(parent.to_path_buf());
@@ -352,12 +328,48 @@ impl<'a> Doc<'a> {
         Ok(actions)
     }
 
+    /// Describe a new project without touching the target path.
+    pub fn plan_new(&self, commit: bool) -> Result<Vec<ProjectUpdateAction>> {
+        let template = resolve_project_template(&self.doctype)
+            .map_err(|error| OmniDocError::Project(format!("Invalid document type: {error}")))?;
+        let entry = self.path.join(&template.file_name);
+        let mut directories = self.project_directories(&template);
+        if let Some(parent) = entry
+            .parent()
+            .filter(|parent| *parent != self.path.as_path())
+        {
+            directories.insert(parent.to_path_buf());
+        }
+
+        let mut actions = vec![
+            update_action("create_directory", self.path.clone(), None),
+            create_file_action(self.path.join(paths::PROJECT_CONFIG)),
+            create_file_action(entry),
+            update_action("initialize_git", self.path.join(".git"), None),
+        ];
+        actions.extend(
+            directories
+                .into_iter()
+                .map(|directory| update_action("create_directory", directory, None)),
+        );
+        actions.extend(
+            self.managed_template_files()?
+                .into_iter()
+                .map(|(path, _)| create_file_action(path)),
+        );
+        if commit {
+            actions.push(update_action("commit", self.path.clone(), None));
+        }
+        Ok(actions)
+    }
+
     fn resolve_project_path(&self, path: &Path) -> PathBuf {
-        if path.is_absolute() {
+        let resolved = if path.is_absolute() {
             path.to_path_buf()
         } else {
             self.path.join(path)
-        }
+        };
+        resolved.components().collect()
     }
 
     fn create_entry(&self, title: &str, doctype_str: &str) -> Result<()> {
@@ -418,6 +430,16 @@ fn managed_update_action(path: PathBuf, change: &str, diff: Option<String>) -> P
         destination: None,
         change: Some(change.to_string()),
         diff,
+    }
+}
+
+fn create_file_action(path: PathBuf) -> ProjectUpdateAction {
+    ProjectUpdateAction {
+        operation: "create_file".to_string(),
+        path: path.to_string_lossy().to_string(),
+        destination: None,
+        change: Some("create".to_string()),
+        diff: None,
     }
 }
 

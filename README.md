@@ -76,9 +76,9 @@ they can be run from the project root or nested directories such as
 project.
 
 Commands with `--json` write only JSON to stdout and use a non-zero exit code
-on failure. The `status`, `clean`, `update`, `config show`, and `config get`
-responses include a `schema_version` field set to `1`. Their command-specific
-success objects can be consumed directly, while failures return
+on failure. The `new`, `status`, `clean`, `update`, `config show`, and
+`config get` responses include a `schema_version` field set to `1`. Their
+command-specific success objects can be consumed directly, while failures return
 `{"schema_version":1,"error":{"category":"...","message":"..."}}` and write
 the human-readable diagnostic to stderr. Update reports additionally expose
 `ready`, structured repository changes, exact actions, and optional per-action
@@ -105,6 +105,9 @@ unified diffs.
    omnidoc new hello --type ctex-md --author "John Doe"
    omnidoc new hello --defaults
    omnidoc new report --format latex  # only show LaTeX templates in the selector
+   omnidoc new hello --type ctex-md --dry-run
+   omnidoc new hello --type ctex-md --dry-run --json
+   omnidoc new hello --type ctex-md --no-commit
    ```
 
    Without `--type` or `--defaults`, OmniDoc shows a searchable selector for
@@ -128,6 +131,13 @@ unified diffs.
    Run `omnidoc template list` (or add `--json`) to inspect every accepted
    template key before creating a project.
 
+   `--dry-run` resolves the target path, inferred title, author, template,
+   directories, files, Git initialization, and initial commit without creating
+   the target directory. Add `--json` for a stable action report suitable for
+   scripts. A regular creation initializes Git and creates one content-bearing
+   `Create project` commit; `--no-commit` leaves the generated files in an
+   unborn repository for users who want to choose their own first commit.
+
    After selecting a template, the tool creates the repository with the following structure:
 
    ```
@@ -141,7 +151,9 @@ unified diffs.
    main.md     # Main entry file (or main.tex for LaTeX projects)
    ```
 
-   The project is automatically initialized as a git repository.
+   The project is automatically initialized as a Git repository. If the target
+   path already exists, `new` leaves it untouched and points to `omnidoc init`
+   instead.
 
 2. **Initialize an existing repository**
 

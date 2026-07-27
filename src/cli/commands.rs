@@ -23,7 +23,7 @@ pub enum Commands {
     /// create a new OmniDoc project
     #[command(visible_alias = "create")]
     #[command(
-        after_help = "Examples:\n  omnidoc new my-book\n  omnidoc new my-book --type ctex-md\n  omnidoc new my-book --defaults\n  omnidoc new report --format latex"
+        after_help = "Examples:\n  omnidoc new my-book\n  omnidoc new my-book --type ctex-md\n  omnidoc new my-book --defaults\n  omnidoc new report --format latex\n  omnidoc new my-book --type ctex-md --dry-run\n  omnidoc new my-book --type ctex-md --json"
     )]
     New {
         /// set the author name
@@ -51,6 +51,18 @@ pub enum Commands {
         /// accept recommended defaults (ctex-md) without prompting
         #[arg(short = 'y', long, visible_alias = "yes", conflicts_with_all = ["doctype", "format"])]
         defaults: bool,
+
+        /// preview the resolved project plan without creating files
+        #[arg(long)]
+        dry_run: bool,
+
+        /// initialize Git but leave generated files uncommitted
+        #[arg(long)]
+        no_commit: bool,
+
+        /// emit a stable JSON creation report
+        #[arg(long)]
+        json: bool,
 
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
@@ -1198,6 +1210,9 @@ mod tests {
             doctype,
             format,
             defaults,
+            dry_run,
+            no_commit,
+            json,
             ..
         } = cli.command
         else {
@@ -1208,6 +1223,30 @@ mod tests {
         assert_eq!(doctype.as_deref(), Some("ctex-md"));
         assert_eq!(format, Some(DocumentFormat::Markdown));
         assert!(!defaults);
+        assert!(!dry_run);
+        assert!(!no_commit);
+        assert!(!json);
+
+        let preview = OmniCli::try_parse_from([
+            "omnidoc",
+            "new",
+            "guide",
+            "--type",
+            "ctex-md",
+            "--dry-run",
+            "--no-commit",
+            "--json",
+        ])
+        .expect("new preview command");
+        assert!(matches!(
+            preview.command,
+            Commands::New {
+                dry_run: true,
+                no_commit: true,
+                json: true,
+                ..
+            }
+        ));
     }
 
     #[test]
