@@ -7,7 +7,8 @@ use clap::Parser;
 use clap::{Command, CommandFactory};
 use clap_complete::{generate, Generator};
 use commands::{
-    CheckSubcommand, Commands, ConfigSubcommand, ConvertSubcommand, OmniCli, TemplateSubcommand,
+    CheckSubcommand, Commands, ConfigSubcommand, ConvertSubcommand, LibSubcommand, OmniCli,
+    PluginSubcommand, TemplateSubcommand,
 };
 use handlers::*;
 use std::env;
@@ -222,12 +223,15 @@ pub fn cli() -> Result<()> {
             handle_lock(path, check, update)?;
         }
         Commands::Plugin {
+            subcommand,
             path,
             json,
             validate,
-        } => {
-            handle_plugin(path, json, validate)?;
-        }
+        } => match subcommand {
+            Some(PluginSubcommand::List { path, json }) => handle_plugin(path, json, false)?,
+            Some(PluginSubcommand::Validate { path, json }) => handle_plugin(path, json, true)?,
+            None => handle_plugin(path, json, validate)?,
+        },
         Commands::Status { path, json } => {
             handle_status(path, json)?;
         }
@@ -296,14 +300,19 @@ pub fn cli() -> Result<()> {
             }
         },
         Commands::Lib {
+            subcommand,
             install,
             update,
             status,
             verify,
             json,
-        } => {
-            handle_lib(install, update, status, verify, json)?;
-        }
+        } => match subcommand {
+            Some(LibSubcommand::Install { json }) => handle_lib(true, false, false, false, json)?,
+            Some(LibSubcommand::Update { json }) => handle_lib(false, true, false, false, json)?,
+            Some(LibSubcommand::Status { json }) => handle_lib(false, false, true, false, json)?,
+            Some(LibSubcommand::Verify { json }) => handle_lib(false, false, false, true, json)?,
+            None => handle_lib(install, update, status, verify, json)?,
+        },
         Commands::Theme { subcommand } => {
             handle_theme(subcommand)?;
         }

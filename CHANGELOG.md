@@ -5,6 +5,10 @@
 - Added workflow-oriented `check`, `convert`, and `template` command groups
   while retaining the previous flat commands for script compatibility, and
   reorganized top-level help around common project workflows.
+- Added discoverable `lib install|update|status|verify` and
+  `plugin list|validate` command groups while retaining the previous action
+  flags and flat plugin form for script compatibility; grouped plugin JSON
+  failures now preserve the standard machine-readable error envelope.
 - Made `new` and `init` titles optional, added direct `--type`, filtered
   `--format`, and non-interactive `--defaults` creation paths, plus actionable
   next-step output and positional shell completion generation.

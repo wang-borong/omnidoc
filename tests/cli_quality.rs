@@ -159,6 +159,8 @@ fn help_prioritizes_workflows_and_keeps_legacy_commands_out_of_the_main_list() {
     assert!(stdout.contains("omnidoc check --help"));
     assert!(stdout.contains("omnidoc convert --help"));
     assert!(stdout.contains("omnidoc template --help"));
+    assert!(stdout.contains("omnidoc plugin --help"));
+    assert!(stdout.contains("omnidoc lib --help"));
     assert!(!stdout.contains("  config-validate  "));
     assert!(!stdout.contains("  md2pdf  "));
 
@@ -174,6 +176,45 @@ fn help_prioritizes_workflows_and_keeps_legacy_commands_out_of_the_main_list() {
     assert!(config_help.contains("  get   "));
     assert!(!config_help.contains("-l, --lib <LIB>"));
     assert!(!config_help.contains("-o, --outdir <OUTDIR>"));
+
+    let plugin_help = assert_success(fixture.command(&["plugin", "--help"]));
+    assert!(plugin_help.contains("  list      "));
+    assert!(plugin_help.contains("  validate  "));
+    assert!(!plugin_help.contains("\n      --validate"));
+
+    let library_help = assert_success(fixture.command(&["lib", "--help"]));
+    assert!(library_help.contains("  install  "));
+    assert!(library_help.contains("  update   "));
+    assert!(library_help.contains("  status   "));
+    assert!(library_help.contains("  verify   "));
+    assert!(!library_help.contains("\n  -i, --install"));
+}
+
+#[test]
+fn grouped_library_status_matches_the_legacy_form() {
+    let fixture = Fixture::new("library-group");
+    let grouped = assert_success(fixture.command(&["lib", "status", "--json"]));
+    let legacy = assert_success(fixture.command(&["lib", "--status", "--json"]));
+    let grouped: serde_json::Value = serde_json::from_str(&grouped).expect("grouped status JSON");
+    let legacy: serde_json::Value = serde_json::from_str(&legacy).expect("legacy status JSON");
+
+    assert_eq!(grouped, legacy);
+    assert!(grouped["path"].is_string());
+    assert!(grouped["errors"].is_array());
+}
+
+#[test]
+fn grouped_plugin_json_errors_remain_machine_readable() {
+    let fixture = Fixture::new("plugin-json-error");
+    let missing = fixture.base().join("missing-project");
+    let output = fixture.command(&["plugin", "list", &missing.display().to_string(), "--json"]);
+    let stdout = assert_failure(output);
+    let error: serde_json::Value =
+        serde_json::from_str(&stdout).expect("structured plugin error JSON");
+
+    assert_eq!(error["schema_version"], 1);
+    assert!(error["error"]["category"].is_string());
+    assert!(error["error"]["message"].is_string());
 }
 
 #[test]
@@ -1498,6 +1539,9 @@ lint_rule = ["lint.sh"]
     let lint = assert_success(fixture.command(&["lint", &project]));
     assert!(lint.contains("Plugin sample: plugin warning"));
 
-    let plugins = assert_success(fixture.command(&["plugin", "--json", "--validate", &project]));
+    let listed = assert_success(fixture.command(&["plugin", "list", &project, "--json"]));
+    assert!(listed.contains("\"lint_rule\""));
+
+    let plugins = assert_success(fixture.command(&["plugin", "validate", &project, "--json"]));
     assert!(plugins.contains("\"lint_rule\""));
 }

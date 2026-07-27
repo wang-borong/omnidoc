@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand, ValueEnum, ValueHint};
 )]
 #[command(arg_required_else_help = true, propagate_version = true)]
 #[command(
-    after_help = "Quick start:\n  omnidoc new my-book --type ctex-md\n  omnidoc build my-book\n  omnidoc status my-book\n\nWorkflow groups:\n  omnidoc check --help       Project validation and CI\n  omnidoc convert --help     Standalone format conversion\n  omnidoc template --help    Template discovery and validation\n\nLegacy flat command forms remain supported for scripts."
+    after_help = "Quick start:\n  omnidoc new my-book --type ctex-md\n  omnidoc build my-book\n  omnidoc status my-book\n\nWorkflow groups:\n  omnidoc check --help       Project validation and CI\n  omnidoc convert --help     Standalone format conversion\n  omnidoc template --help    Template discovery and validation\n  omnidoc plugin --help      Plugin discovery and validation\n  omnidoc lib --help         Managed library lifecycle\n\nLegacy flat command forms remain supported for scripts."
 )]
 pub struct OmniCli {
     /// document management subcommands
@@ -351,18 +351,25 @@ pub enum Commands {
         update: bool,
     },
 
-    /// list discovered local plugins and external templates
+    /// discover and validate local plugins and external templates
+    #[command(
+        args_conflicts_with_subcommands = true,
+        after_help = "Examples:\n  omnidoc plugin list\n  omnidoc plugin list --json\n  omnidoc plugin validate\n  omnidoc plugin validate docs --json\n\nThe legacy `omnidoc plugin [PATH] --validate` form remains supported."
+    )]
     Plugin {
+        #[command(subcommand)]
+        subcommand: Option<PluginSubcommand>,
+
         /// set the path to a documentation project
-        #[arg(value_hint = ValueHint::DirPath)]
+        #[arg(value_hint = ValueHint::DirPath, hide = true)]
         path: Option<String>,
 
         /// emit JSON plugin metadata
-        #[arg(long)]
+        #[arg(long, hide = true)]
         json: bool,
 
         /// validate discovered plugin/template manifests
-        #[arg(long)]
+        #[arg(long, hide = true)]
         validate: bool,
     },
 
@@ -476,27 +483,34 @@ pub enum Commands {
         force: bool,
     },
 
-    /// maintain the OmniDoc library
-    #[command(visible_alias = "libs")]
+    /// install, inspect, update, and verify the OmniDoc library
+    #[command(
+        visible_alias = "libs",
+        args_conflicts_with_subcommands = true,
+        after_help = "Examples:\n  omnidoc lib install\n  omnidoc lib status --json\n  omnidoc lib verify\n  omnidoc lib update\n\nThe legacy `omnidoc lib --install|--update|--status|--verify` forms remain supported."
+    )]
     Lib {
+        #[command(subcommand)]
+        subcommand: Option<LibSubcommand>,
+
         /// install the release-bound OmniDoc library to XDG_DATA_DIR
-        #[arg(short, long, conflicts_with_all = ["update", "status", "verify"])]
+        #[arg(short, long, conflicts_with_all = ["update", "status", "verify"], hide = true)]
         install: bool,
 
         /// update the OmniDoc library from the release bound to this version
-        #[arg(short, long, conflicts_with_all = ["install", "status", "verify"])]
+        #[arg(short, long, conflicts_with_all = ["install", "status", "verify"], hide = true)]
         update: bool,
 
         /// show installed library version, release, compatibility, and integrity
-        #[arg(long, conflicts_with_all = ["install", "update", "verify"])]
+        #[arg(long, conflicts_with_all = ["install", "update", "verify"], hide = true)]
         status: bool,
 
         /// verify the installed manifest, required resources, and checksums
-        #[arg(long, conflicts_with_all = ["install", "update", "status"])]
+        #[arg(long, conflicts_with_all = ["install", "update", "status"], hide = true)]
         verify: bool,
 
         /// emit status or verification details as JSON
-        #[arg(long)]
+        #[arg(long, hide = true)]
         json: bool,
     },
 
@@ -692,6 +706,62 @@ pub enum ConfigSubcommand {
         scope: ConfigScope,
 
         /// emit a stable JSON envelope
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum LibSubcommand {
+    /// install the release-bound OmniDoc library
+    Install {
+        /// emit installed library details as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// update the library from the release bound to this OmniDoc version
+    Update {
+        /// emit updated library details as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// show installed version, compatibility, and integrity
+    Status {
+        /// emit stable JSON library details
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// verify the installed manifest, required resources, and checksums
+    Verify {
+        /// emit stable JSON verification details
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PluginSubcommand {
+    /// list discovered plugins and external templates
+    List {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// emit JSON plugin metadata
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// validate discovered plugin and template manifests
+    Validate {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// emit JSON validation metadata
         #[arg(long)]
         json: bool,
     },
@@ -1094,7 +1164,8 @@ pub enum FigureSubcommand {
 #[cfg(test)]
 mod tests {
     use super::{
-        CheckSubcommand, Commands, ConfigScope, ConfigSubcommand, ConvertSubcommand, OmniCli,
+        CheckSubcommand, Commands, ConfigScope, ConfigSubcommand, ConvertSubcommand, LibSubcommand,
+        OmniCli, PluginSubcommand,
     };
     use crate::doctype::DocumentFormat;
     use clap::Parser;
@@ -1318,6 +1389,57 @@ mod tests {
                 authors: Some(author),
                 ..
             } if author == "Docs Team"
+        ));
+    }
+
+    #[test]
+    fn grouped_and_legacy_library_and_plugin_forms_parse() {
+        let library = OmniCli::try_parse_from(["omnidoc", "lib", "verify", "--json"])
+            .expect("grouped library verification");
+        assert!(matches!(
+            library.command,
+            Commands::Lib {
+                subcommand: Some(LibSubcommand::Verify { json: true }),
+                ..
+            }
+        ));
+
+        let legacy_library = OmniCli::try_parse_from(["omnidoc", "lib", "--verify", "--json"])
+            .expect("legacy library verification");
+        assert!(matches!(
+            legacy_library.command,
+            Commands::Lib {
+                subcommand: None,
+                verify: true,
+                json: true,
+                ..
+            }
+        ));
+
+        let plugins = OmniCli::try_parse_from(["omnidoc", "plugin", "validate", "docs", "--json"])
+            .expect("grouped plugin validation");
+        assert!(matches!(
+            plugins.command,
+            Commands::Plugin {
+                subcommand: Some(PluginSubcommand::Validate {
+                    path: Some(path),
+                    json: true,
+                }),
+                ..
+            } if path == "docs"
+        ));
+
+        let legacy_plugins =
+            OmniCli::try_parse_from(["omnidoc", "plugin", "docs", "--validate", "--json"])
+                .expect("legacy plugin validation");
+        assert!(matches!(
+            legacy_plugins.command,
+            Commands::Plugin {
+                subcommand: None,
+                path: Some(path),
+                validate: true,
+                json: true,
+            } if path == "docs"
         ));
     }
 }

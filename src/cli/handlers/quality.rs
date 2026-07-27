@@ -1,7 +1,9 @@
 use crate::build::executor::{BuildExecutor, LatexEnginePreference, ResolvedLatexEngine};
 use crate::build::pipeline::{detect_project_type, ProjectType};
 use crate::cli::handlers::build::{build_project_outputs, BuildRunOptions};
-use crate::cli::handlers::common::{create_config_manager, create_config_manager_default};
+use crate::cli::handlers::common::{
+    create_config_manager, create_config_manager_default, print_json_error,
+};
 use crate::cli::handlers::lib::library_diagnostic;
 use crate::cli::handlers::theme::theme_diagnostic;
 use crate::config::CliOverrides;
@@ -357,9 +359,22 @@ pub fn handle_lock(path: Option<String>, check: bool, update: bool) -> Result<()
 }
 
 pub fn handle_plugin(path: Option<String>, json: bool, validate: bool) -> Result<()> {
-    let project_path = path::determine_project_context(path)?;
-    let config_manager = create_config_manager(Some(&project_path), CliOverrides::new())?;
-    let plugins = project_tools::discovered_plugins(&project_path, config_manager.get_merged());
+    let plugins = match (|| {
+        let project_path = path::determine_project_context(path)?;
+        let config_manager = create_config_manager(Some(&project_path), CliOverrides::new())?;
+        Ok(project_tools::discovered_plugins(
+            &project_path,
+            config_manager.get_merged(),
+        ))
+    })() {
+        Ok(plugins) => plugins,
+        Err(error) => {
+            if json {
+                print_json_error(&error);
+            }
+            return Err(error);
+        }
+    };
     if json {
         let content = serde_json::to_string_pretty(&plugins)
             .map_err(|err| OmniDocError::Other(err.to_string()))?;

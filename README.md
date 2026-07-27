@@ -64,6 +64,8 @@ related tools by workflow:
 omnidoc check --help       # diagnostics, validation, dependencies, locks, CI
 omnidoc convert --help     # standalone Markdown conversion
 omnidoc template --help    # template discovery and validation
+omnidoc plugin --help      # plugin discovery and validation
+omnidoc lib --help         # managed library lifecycle
 ```
 
 The previous flat forms such as `config-validate`, `md2pdf`, `md2html`,
@@ -490,14 +492,16 @@ unified diffs.
    visible alias of `lib`):
 
    ```bash
-   omnidoc lib --install       # Install the archive bound to this OmniDoc release
-   omnidoc lib --update        # Verify and replace from the same release channel
-   omnidoc libs --status       # Show version, release and compatibility
-   omnidoc libs --verify       # Verify required files and every SHA-256 entry
-   omnidoc libs --verify --json
+   omnidoc lib install         # Install the archive bound to this OmniDoc release
+   omnidoc lib update          # Verify and replace from the same release channel
+   omnidoc lib status          # Show version, release and compatibility
+   omnidoc lib verify          # Verify required files and every SHA-256 entry
+   omnidoc lib verify --json
    ```
 
-   Install and update fail if the downloaded manifest, compatibility contract,
+   `libs` remains an alias of `lib`, and the previous flag forms such as
+   `omnidoc lib --verify` remain accepted for scripts. Install and update fail
+   if the downloaded manifest, compatibility contract,
    required resources, or payload checksums do not verify. OmniDoc and the
    library bundle always share one version and one GitHub release. Install and
    update read the embedded `omnidoc-libs.toml` contract, download the matching
@@ -735,13 +739,17 @@ procedure is maintained in [`release/CHECKLIST.md`](release/CHECKLIST.md).
 List discovered local plugins and external template manifests:
 
 ```bash
-omnidoc plugin [PATH]
-omnidoc plugin --json
-omnidoc plugin --validate
+omnidoc plugin list [PATH]
+omnidoc plugin list --json
+omnidoc plugin validate [PATH]
+omnidoc plugin validate --json
 ```
 
-`plugin --validate` parses discovered `manifest.toml` files and checks template plugin fields such as `language` and `template_file`.
-`plugin --json` also reports declared hooks, and validation checks local hook command paths when the command contains a path separator.
+`plugin validate` parses discovered `manifest.toml` files and checks template
+plugin fields such as `language` and `template_file`. `plugin list --json` and
+`plugin validate --json` also report declared hooks, and validation checks local
+hook command paths when the command contains a path separator. The previous
+flat `omnidoc plugin [PATH] --validate` form remains supported for scripts.
 Plugin manifests use schema version 1 and may declare their OmniDoc compatibility:
 
 ```toml
