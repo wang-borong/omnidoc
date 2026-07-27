@@ -35,7 +35,7 @@ fn command_needs_library(command: &Commands) -> bool {
 fn prepare_working_directory(command: &mut Commands) -> Result<()> {
     let path = match command {
         Commands::Init { path, .. }
-        | Commands::Open { path }
+        | Commands::Open { path, .. }
         | Commands::Clean { path, .. }
         | Commands::Update { path } => path,
         _ => return Ok(()),
@@ -228,11 +228,23 @@ pub fn cli() -> Result<()> {
         } => {
             handle_plugin(path, json, validate)?;
         }
-        Commands::Open { path } => {
-            handle_open(path)?;
+        Commands::Status { path, json } => {
+            handle_status(path, json)?;
         }
-        Commands::Clean { path, distclean } => {
-            handle_clean(path, distclean)?;
+        Commands::Open {
+            path,
+            to,
+            print_path,
+        } => {
+            handle_open(path, to, print_path)?;
+        }
+        Commands::Clean {
+            path,
+            distclean,
+            dry_run,
+            json,
+        } => {
+            handle_clean(path, distclean, dry_run, json)?;
         }
         Commands::Update { path } => {
             handle_update(path)?;

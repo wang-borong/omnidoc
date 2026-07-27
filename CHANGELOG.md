@@ -16,6 +16,13 @@
   setup and configuration, added JSON template discovery/validation with safe
   relative-path enforcement, and made initial Git commits work on machines
   without global Git identity settings.
+- Added `status [--json]` for resolved project, entry, output, target, and
+  artifact discovery; made `open` honor configured formats/targets and support
+  `--to` plus the composable `--print-path` mode across platform viewers.
+- Added stable JSON clean reports and `clean --dry-run`, aligned regular clean
+  behavior with the documented build-directory contract, preserved unrelated
+  project PDFs, and rejected absolute or project-escaping output directories
+  before deletion.
 
 ## 1.7.0 - 2026-07-26
 

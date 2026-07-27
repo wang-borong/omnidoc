@@ -3,6 +3,7 @@ use crate::cli::handlers::common::{
 };
 use crate::config::CliOverrides;
 use crate::config::MergedConfig;
+use crate::doc::artifacts::expected_output_file;
 use crate::epub::{validate_epub, EpubCompatibilityReport};
 use crate::error::{OmniDocError, Result};
 use crate::project_tools;
@@ -406,24 +407,6 @@ fn normalize_outputs(outputs: Vec<String>) -> Vec<String> {
         normalized.push(output);
     }
     normalized
-}
-
-pub(crate) fn expected_output_file(
-    project_path: &Path,
-    config: &crate::config::MergedConfig,
-    output: &str,
-    target: &str,
-) -> std::path::PathBuf {
-    let outdir = config
-        .outdir
-        .as_ref()
-        .map(|outdir| project_path.join(outdir))
-        .unwrap_or_else(|| project_path.join("build"));
-    let extension = match output {
-        "latex" => "tex",
-        other => other,
-    };
-    outdir.join(format!("{}.{}", target, extension))
 }
 
 #[cfg(test)]

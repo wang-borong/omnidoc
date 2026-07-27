@@ -57,8 +57,8 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 ## Usage
 
 OmniDoc keeps the most common lifecycle commands at the top level (`new`,
-`init`, `build`, `watch`, `publish`, and `open`) and groups related tools by
-workflow:
+`init`, `build`, `watch`, `publish`, `status`, `open`, and `clean`) and groups
+related tools by workflow:
 
 ```bash
 omnidoc check --help       # diagnostics, validation, dependencies, locks, CI
@@ -68,6 +68,13 @@ omnidoc template --help    # template discovery and validation
 
 The previous flat forms such as `config-validate`, `md2pdf`, `md2html`,
 `list`, and `template --validate` remain available for script compatibility.
+
+Commands with `--json` write only JSON to stdout and use a non-zero exit code
+on failure. The new `status` and `clean` responses include a
+`schema_version` field set to `1`: successful `status` calls return one project
+object, successful `clean` calls return a clean report, and their failures return
+`{"schema_version":1,"error":{"category":"...","message":"..."}}` while the
+human-readable diagnostic is written to stderr.
 
 ### Quick Start
 
@@ -167,7 +174,7 @@ The previous flat forms such as `config-validate`, `md2pdf`, `md2html`,
    - Use `--write-lock` to update `omnidoc.lock` after a successful build
    - Use `--strict` to fail on lint/config warnings before building
    - Use `--verbose` to show detailed build messages
-   - The build directory is `build/` (configurable via config), and the output file is named after the repository directory
+   - The build directory is `build/` (configurable via config), and output files use `[project].target` or fall back to the repository directory name
 
    Build reports include the cache decision reason and component-level
    `cache_details`, elapsed milliseconds, input and artifact BLAKE3 digests,
@@ -331,28 +338,52 @@ The previous flat forms such as `config-validate`, `md2pdf`, `md2html`,
    artifacts. `--verify` rechecks the manifest schema, portable paths, exact
    file set, byte sizes, BLAKE3 digests, and embedded libs release contract.
 
-6. **Open the built PDF document**
+6. **Inspect project status and artifacts**
+
+   Resolve the effective entry file, source format, target, output directory,
+   configured formats, and whether each expected artifact exists:
 
    ```bash
-   omnidoc open [PATH]
+   omnidoc status [PATH]
+   omnidoc status [PATH] --json
    ```
 
-   Opens the built PDF document using the system's default PDF viewer.
+   This is a read-only command and is useful both after project creation and
+   in scripts that need to discover artifact paths without reproducing
+   OmniDoc's configuration rules.
 
-7. **Clean the repository**
-
-   Remove build artifacts:
+7. **Open a built document**
 
    ```bash
-   omnidoc clean [PATH] [--distclean]
+   omnidoc open [PATH] [--to <FORMAT>]
+   omnidoc open [PATH] [--to <FORMAT>] --print-path
    ```
 
-   - `clean`: Removes the build directory
-   - `clean --distclean`: Removes build directory and all generated files
+   Without `--to`, OmniDoc opens the configured `[project].to` artifact. It
+   supports PDF, HTML, EPUB, DOCX, PPTX, and generated LaTeX files, honors the
+   configured target and output directory, and uses the platform's default
+   viewer. `--print-path` validates the artifact and prints its absolute path
+   without launching a GUI.
+
+8. **Clean the repository safely**
+
+   Preview or remove build artifacts:
+
+   ```bash
+   omnidoc clean [PATH] --dry-run
+   omnidoc clean [PATH] --dry-run --json
+   omnidoc clean [PATH]
+   omnidoc clean [PATH] --distclean
+   ```
+
+   - `--dry-run` reports every file/directory target, file count, and byte size without modifying the project
+   - `clean` removes the configured build directory; if the output directory is the project root, only known artifacts and temporary files are removed
+   - `clean --distclean` additionally removes known target/entry LaTeX temporary files and the generated `auto/` directory
+   - Cleaning refuses absolute output directories or paths containing `..`, and never removes unrelated root-level PDFs
 
 ### Project Management Commands
 
-7. **Update a document repository**
+9. **Update a document repository**
 
    Update an existing omnidoc project structure:
 
@@ -362,7 +393,7 @@ The previous flat forms such as `config-validate`, `md2pdf`, `md2html`,
 
    This command updates the project structure, template files, and configuration to match the current omnidoc version.
 
-8. **List all project templates**
+10. **List all project templates**
 
    Preview available built-in types and external templates:
 

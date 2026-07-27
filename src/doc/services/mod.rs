@@ -9,7 +9,7 @@ pub mod format;
 // pub mod typst;
 // pub mod epub;
 
-pub use build::BuildService;
+pub use build::{BuildService, CleanOptions, CleanReport, CleanTarget, CleanTargetKind};
 pub use converter::ConverterService;
 pub use figure::FigureService;
 pub use format::FormatService;

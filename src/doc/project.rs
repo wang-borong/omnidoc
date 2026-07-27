@@ -1,7 +1,6 @@
 use crate::error::Result;
 use crate::utils::fs;
 use std::collections::HashMap;
-use std::env;
 use std::path::PathBuf;
 
 /// Document project structure
@@ -32,11 +31,8 @@ impl<'a> Doc<'a> {
     }
 
     pub(super) fn get_docname(&self) -> String {
-        let cur_dir = match env::current_dir() {
-            Ok(dir) => dir,
-            Err(_) => return "unknown".to_string(),
-        };
-        let docname = cur_dir
+        let docname = self
+            .path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");

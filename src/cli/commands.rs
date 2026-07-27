@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand, ValueHint};
 )]
 #[command(arg_required_else_help = true, propagate_version = true)]
 #[command(
-    after_help = "Quick start:\n  omnidoc new my-book --type ctex-md\n  omnidoc build my-book\n\nWorkflow groups:\n  omnidoc check --help       Project validation and CI\n  omnidoc convert --help     Standalone format conversion\n  omnidoc template --help    Template discovery and validation\n\nLegacy flat command forms remain supported for scripts."
+    after_help = "Quick start:\n  omnidoc new my-book --type ctex-md\n  omnidoc build my-book\n  omnidoc status my-book\n\nWorkflow groups:\n  omnidoc check --help       Project validation and CI\n  omnidoc convert --help     Standalone format conversion\n  omnidoc template --help    Template discovery and validation\n\nLegacy flat command forms remain supported for scripts."
 )]
 pub struct OmniCli {
     /// document management subcommands
@@ -362,18 +362,52 @@ pub enum Commands {
         validate: bool,
     },
 
-    /// open the built document
+    /// show resolved project paths, configuration, and build artifacts
+    #[command(visible_alias = "info")]
+    Status {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// emit stable JSON status
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// open a built document in the system viewer
+    #[command(
+        after_help = "Examples:\n  omnidoc open\n  omnidoc open --to html\n  omnidoc open --print-path\n  omnidoc open docs --to epub --print-path"
+    )]
     Open {
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
         path: Option<String>,
+
+        /// select the output format (pdf, html, epub, docx, pptx, latex)
+        #[arg(long, visible_alias = "format", value_name = "FORMAT")]
+        to: Option<String>,
+
+        /// print the resolved artifact path without launching a viewer
+        #[arg(long)]
+        print_path: bool,
     },
 
-    /// clean the document project
+    /// preview or remove generated build artifacts
+    #[command(
+        after_help = "Examples:\n  omnidoc clean --dry-run\n  omnidoc clean --dry-run --json\n  omnidoc clean\n  omnidoc clean --distclean"
+    )]
     Clean {
-        /// distclean the project
+        /// also remove known root-level temporary files and the auto directory
         #[arg(short = 'D', long)]
         distclean: bool,
+
+        /// report exactly what would be removed without modifying the project
+        #[arg(long)]
+        dry_run: bool,
+
+        /// emit a stable JSON clean report
+        #[arg(long)]
+        json: bool,
 
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
@@ -1053,6 +1087,50 @@ mod tests {
                 shell: None,
                 generator: Some(clap_complete::Shell::Bash)
             }
+        ));
+    }
+
+    #[test]
+    fn project_status_open_and_clean_options_parse() {
+        let status = OmniCli::try_parse_from(["omnidoc", "status", "docs", "--json"])
+            .expect("status command");
+        assert!(matches!(
+            status.command,
+            Commands::Status {
+                path: Some(path),
+                json: true
+            } if path == "docs"
+        ));
+
+        let open =
+            OmniCli::try_parse_from(["omnidoc", "open", "docs", "--to", "html", "--print-path"])
+                .expect("open command");
+        assert!(matches!(
+            open.command,
+            Commands::Open {
+                path: Some(path),
+                to: Some(output),
+                print_path: true
+            } if path == "docs" && output == "html"
+        ));
+
+        let clean = OmniCli::try_parse_from([
+            "omnidoc",
+            "clean",
+            "docs",
+            "--distclean",
+            "--dry-run",
+            "--json",
+        ])
+        .expect("clean command");
+        assert!(matches!(
+            clean.command,
+            Commands::Clean {
+                path: Some(path),
+                distclean: true,
+                dry_run: true,
+                json: true
+            } if path == "docs"
         ));
     }
 }

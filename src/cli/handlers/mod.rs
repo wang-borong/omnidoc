@@ -13,6 +13,7 @@ pub mod new;
 pub mod open;
 pub mod publish;
 pub mod quality;
+pub mod status;
 pub mod template;
 pub mod theme;
 pub mod update;
@@ -34,6 +35,7 @@ pub use quality::{
     handle_ci, handle_config_validate, handle_deps, handle_doctor, handle_lint, handle_lock,
     handle_plugin,
 };
+pub use status::handle_status;
 pub use template::handle_template_validate;
 pub use theme::handle_theme;
 pub use update::handle_update;

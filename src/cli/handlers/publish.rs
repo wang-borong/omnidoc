@@ -1,8 +1,8 @@
 use crate::cli::handlers::build::{
-    build_cli_overrides, build_project_outputs_unlocked, expected_output_file, resolve_outputs,
-    BuildRunOptions,
+    build_cli_overrides, build_project_outputs_unlocked, resolve_outputs, BuildRunOptions,
 };
 use crate::cli::handlers::common::create_config_manager;
+use crate::doc::artifacts::expected_output_file;
 use crate::error::{OmniDocError, Result};
 use crate::project_tools::content_digest;
 use crate::utils::path;

@@ -1,6 +1,6 @@
 use crate::config::{CliOverrides, ConfigManager, MergedConfig};
 use crate::doc::services::{BuildService, ConverterService, FigureService};
-use crate::error::Result;
+use crate::error::{OmniDocError, Result};
 use crate::utils::error;
 use std::collections::HashMap;
 use std::path::Path;
@@ -75,4 +75,18 @@ pub fn merged_config_to_envs(
     envs.insert("texinputs", merged_config.texinputs.clone());
     envs.insert("bibinputs", merged_config.bibinputs.clone());
     envs
+}
+
+/// Emit the stable error envelope used by command-specific JSON modes.
+pub fn print_json_error(error: &OmniDocError) {
+    println!(
+        "{}",
+        serde_json::json!({
+            "schema_version": 1,
+            "error": {
+                "category": error.category(),
+                "message": error.message().as_ref(),
+            }
+        })
+    );
 }

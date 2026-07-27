@@ -401,6 +401,112 @@ fn quality_commands_work_on_minimal_project() {
 }
 
 #[test]
+fn status_and_open_resolve_the_configured_artifact_contract() {
+    let fixture = Fixture::new("project-status");
+    let project = fixture.project_arg();
+    let nested = fixture.project.join("chapters/drafts");
+    fs::create_dir_all(&nested).expect("nested project directory");
+
+    let output = assert_success(fixture.command_in(&nested, &["status", "--json"]));
+    let status: serde_json::Value = serde_json::from_str(&output).expect("project status JSON");
+    assert_eq!(status["schema_version"], 1);
+    assert_eq!(
+        Path::new(status["project_root"].as_str().expect("project root")),
+        fixture.project
+    );
+    assert_eq!(status["source_format"], "markdown");
+    assert_eq!(status["target"], "smoke");
+    assert_eq!(status["default_output"], "html");
+    assert_eq!(status["configured_outputs"], serde_json::json!(["html"]));
+    assert_eq!(status["entry"]["exists"], true);
+    assert_eq!(status["artifacts"][0]["format"], "html");
+    assert_eq!(status["artifacts"][0]["exists"], true);
+    assert!(status["artifacts"][0]["path"]
+        .as_str()
+        .is_some_and(|path| path.ends_with("/build/smoke.html")));
+
+    let artifact =
+        assert_success(fixture.command_in(&nested, &["open", "--to", "html", "--print-path"]));
+    assert_eq!(
+        Path::new(artifact.trim()),
+        fixture.project.join("build/smoke.html")
+    );
+
+    let missing = fixture.command(&["open", "--to", "pdf", "--print-path", &project]);
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("omnidoc build --to pdf"));
+}
+
+#[test]
+fn clean_preview_is_json_and_does_not_modify_the_project() {
+    let fixture = Fixture::new("clean-preview");
+    let project = fixture.project_arg();
+    fs::write(fixture.project.join("reference.pdf"), "source asset\n").expect("source PDF");
+
+    let output = assert_success(fixture.command(&["clean", "--dry-run", "--json", &project]));
+    let report: serde_json::Value = serde_json::from_str(&output).expect("clean preview JSON");
+    assert_eq!(report["schema_version"], 1);
+    assert_eq!(report["mode"], "clean");
+    assert_eq!(report["dry_run"], true);
+    assert_eq!(report["removed_targets"], 0);
+    assert_eq!(report["targets"][0]["kind"], "directory");
+    assert_eq!(report["targets"][0]["files"], 1);
+    assert!(fixture.project.join("build/smoke.html").is_file());
+    assert!(fixture.project.join("reference.pdf").is_file());
+    assert!(!fixture.project.join(".omnidoc-cache").exists());
+
+    let output = assert_success(fixture.command(&["clean", "--json", &project]));
+    let report: serde_json::Value = serde_json::from_str(&output).expect("clean report JSON");
+    assert_eq!(report["removed_targets"], 1);
+    assert!(!fixture.project.join("build").exists());
+    assert!(fixture.project.join("reference.pdf").is_file());
+}
+
+#[test]
+fn distclean_preserves_unrelated_pdfs_and_rejects_escaping_output_directories() {
+    let fixture = Fixture::new("clean-safety");
+    let project = fixture.project_arg();
+    fs::write(fixture.project.join("reference.pdf"), "source asset\n").expect("source PDF");
+    fs::write(fixture.project.join("smoke.aux"), "temporary\n").expect("temporary file");
+    fs::create_dir_all(fixture.project.join("auto")).expect("auto dir");
+    fs::write(fixture.project.join("auto/generated.el"), "generated\n").expect("auto file");
+
+    assert_success(fixture.command(&["clean", "--distclean", &project]));
+    assert!(!fixture.project.join("build").exists());
+    assert!(!fixture.project.join("smoke.aux").exists());
+    assert!(!fixture.project.join("auto").exists());
+    assert!(fixture.project.join("reference.pdf").is_file());
+
+    let shared = fixture.base().join("shared");
+    fs::create_dir_all(&shared).expect("shared output dir");
+    fs::write(shared.join("keep.txt"), "keep\n").expect("shared file");
+    fs::write(
+        fixture.project.join(".omnidoc.toml"),
+        r#"[project]
+entry = "main.md"
+from = "markdown"
+to = "html"
+target = "smoke"
+
+[build]
+outdir = "../shared"
+"#,
+    )
+    .expect("unsafe output config");
+
+    let output = fixture.command(&["clean", "--dry-run", "--json", &project]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("escapes the project root"));
+    let error: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("structured clean error");
+    assert_eq!(error["error"]["category"], "project");
+    assert!(error["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("escapes the project root")));
+    assert!(shared.join("keep.txt").is_file());
+}
+
+#[test]
 fn doctor_checks_only_the_configured_output_toolchain() {
     let fixture = Fixture::new("doctor-html");
     let project = fixture.project_arg();

@@ -1,4 +1,5 @@
 // Re-export the main Doc struct for backward compatibility
+pub mod artifacts;
 mod initializer;
 mod opener;
 mod project;

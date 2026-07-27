@@ -275,6 +275,37 @@ pub mod path {
         }
     }
 
+    /// Resolve a project path to its root, preferring an explicit OmniDoc
+    /// configuration before falling back to conventional entry filenames.
+    pub fn determine_project_root(path: Option<String>) -> Result<PathBuf> {
+        let start = determine_project_path(path)?.canonicalize()?;
+        if !start.is_dir() {
+            return Err(OmniDocError::Project(format!(
+                "Path is not a directory: {}",
+                start.display()
+            )));
+        }
+        locate_project_root(&start).ok_or_else(|| {
+            OmniDocError::NotOmniDocProject(format!(
+                "No .omnidoc.toml, main.md, or main.tex was found from '{}' upward",
+                start.display()
+            ))
+        })
+    }
+
+    pub fn locate_project_root(start: &Path) -> Option<PathBuf> {
+        let ancestors = start.ancestors().collect::<Vec<_>>();
+        ancestors
+            .iter()
+            .find(|directory| directory.join(".omnidoc.toml").is_file())
+            .or_else(|| {
+                ancestors.iter().find(|directory| {
+                    directory.join("main.md").is_file() || directory.join("main.tex").is_file()
+                })
+            })
+            .map(|directory| directory.to_path_buf())
+    }
+
     /// 验证项目路径（检查路径是否存在）
     pub fn validate_project_path(path: &Path) -> Result<()> {
         use crate::utils::fs;
@@ -289,14 +320,7 @@ pub mod path {
 
     /// 检查是否为 omnidoc 项目
     pub fn check_omnidoc_project(project_path: &Path) -> Result<()> {
-        use crate::doc::is_omnidoc_project;
-
-        let original_dir = current_dir()?;
-        set_current_dir(project_path)?;
-        let is_project = is_omnidoc_project();
-        set_current_dir(&original_dir)?;
-
-        if !is_project {
+        if locate_project_root(project_path).is_none() {
             return Err(OmniDocError::NotOmniDocProject(format!(
                 "The directory '{}' is not an OmniDoc project",
                 project_path.display()
@@ -345,6 +369,31 @@ pub mod path {
             fs::create_dir_all(&path)?;
         }
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{determine_project_root, locate_project_root};
+        use std::fs;
+
+        #[test]
+        fn resolves_nested_paths_to_the_configured_project_root() {
+            let project = tempfile::tempdir().expect("project");
+            let nested = project.path().join("chapters/drafts");
+            fs::create_dir_all(&nested).expect("nested path");
+            fs::write(project.path().join(".omnidoc.toml"), "[project]\n").expect("project config");
+            fs::write(nested.join("main.md"), "# Draft\n").expect("nested main");
+
+            assert_eq!(
+                locate_project_root(&nested),
+                Some(project.path().to_path_buf())
+            );
+            assert_eq!(
+                determine_project_root(Some(nested.to_string_lossy().to_string()))
+                    .expect("project root"),
+                project.path().canonicalize().expect("canonical root")
+            );
+        }
     }
 }
 
