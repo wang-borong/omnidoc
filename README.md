@@ -78,7 +78,9 @@ on failure. The `status`, `clean`, `update`, `config show`, and `config get`
 responses include a `schema_version` field set to `1`. Their command-specific
 success objects can be consumed directly, while failures return
 `{"schema_version":1,"error":{"category":"...","message":"..."}}` and write
-the human-readable diagnostic to stderr.
+the human-readable diagnostic to stderr. Update reports additionally expose
+`ready`, structured repository changes, exact actions, and optional per-action
+unified diffs.
 
 ### Quick Start
 
@@ -130,8 +132,8 @@ the human-readable diagnostic to stderr.
    biblio/     # Bibliography files (.bib)
    dac/        # D2 diagram source files
    drawio/     # Draw.io diagram source files
-   figure/     # Generated figure output directory
-   figures/    # Third-party figure files
+   figure/     # Third-party/static figure assets
+   figures/    # Generated figure output directory
    md/         # Additional markdown files (for markdown projects)
    tex/        # Additional LaTeX files (for LaTeX projects, if configured)
    main.md     # Main entry file (or main.tex for LaTeX projects)
@@ -147,6 +149,7 @@ the human-readable diagnostic to stderr.
    omnidoc init [PATH] [--title "Document Title"] [--author "Author Name"]
    omnidoc init existing-repo --type ctex-md
    omnidoc init existing-repo --defaults
+   omnidoc init existing-repo --type ctex-md --no-commit
    ```
 
    If `PATH` is not specified, the current directory is used. The tool will:
@@ -155,6 +158,11 @@ the human-readable diagnostic to stderr.
    - Move existing `.md` and `.tex` files to appropriate directories
    - Create the directory structure
    - Initialize git repository if not already present
+
+   When an existing Git repository already has staged, modified, deleted, or
+   untracked files, `init` refuses to include them in its automatic commit. Commit
+   or stash that work first, or use `--no-commit` to initialize OmniDoc files
+   while leaving all Git decisions to the user.
 
 3. **Build the repository**
 
@@ -401,19 +409,26 @@ the human-readable diagnostic to stderr.
 
    ```bash
    omnidoc update [PATH] --dry-run
+   omnidoc update [PATH] --diff
    omnidoc update [PATH] --dry-run --json
    omnidoc update [PATH]
    omnidoc update [PATH] --no-commit
    ```
 
-   The preview lists every managed file refresh, directory creation, source
-   move, Git initialization, and commit without taking a project lock or
-   creating `.omnidoc-cache/`. A regular update refreshes managed scaffolding
-   such as `.gitignore`, `figure/README.md`, and `.latexmkrc` where applicable,
-   then commits the result by default. Use `--no-commit` when reviewing the
-   working tree manually. Root-level Markdown and LaTeX sources are moved to
-   their resolved source directories, but OmniDoc refuses the entire update
-   before writing anything if a destination file already exists.
+   The preview lists only real managed-file changes, directory creation, source
+   moves, Git initialization, and commits without taking a project lock or
+   creating `.omnidoc-cache/`. `--diff` implies preview mode and includes a
+   unified diff for `.gitignore`, `figure/README.md`, and `.latexmkrc` changes;
+   JSON attaches that diff to the corresponding action.
+
+   A regular update writes managed files atomically and creates a commit only
+   when Git-visible content changed. If a repository with existing commits is
+   already dirty, OmniDoc refuses to mix those unrelated changes into its
+   automatic commit. Commit or stash them first, or use `--no-commit`. Repositories
+   without a first commit can still be initialized normally. Root-level Markdown
+   and LaTeX sources are moved to their resolved source directories, and tracked
+   moves correctly record both deletion and addition. Destination collisions
+   abort the entire update before any file is changed.
 
 10. **List all project templates**
 

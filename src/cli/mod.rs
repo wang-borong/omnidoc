@@ -91,9 +91,10 @@ pub fn cli() -> Result<()> {
             doctype,
             format,
             defaults,
+            no_commit,
             ..
         } => {
-            handle_init(title, author, doctype, format, defaults)?;
+            handle_init(title, author, doctype, format, defaults, no_commit)?;
         }
         Commands::Build {
             path,
@@ -248,10 +249,11 @@ pub fn cli() -> Result<()> {
         Commands::Update {
             path,
             dry_run,
+            diff,
             no_commit,
             json,
         } => {
-            handle_update(path, dry_run, no_commit, json)?;
+            handle_update(path, dry_run, diff, no_commit, json)?;
         }
         Commands::Config {
             subcommand,

@@ -30,10 +30,15 @@
   selectable merged/global/project scopes, stable JSON, source provenance, and
   no implicit config-file creation from read-only commands; legacy flat config
   options remain accepted but are hidden from primary help.
-- Added `update --dry-run`, `--no-commit`, and stable JSON action reports,
-  project write locking for real updates, collision-safe mixed Markdown/LaTeX
-  source moves, and support for committing a repository previously initialized
-  by a no-commit update.
+- Added `update --dry-run`, `--diff`, `--no-commit`, and stable JSON action and
+  repository-status reports; previews now contain only real changes and can
+  include unified managed-file diffs.
+- Prevented `update` and `init` from mixing pre-existing repository changes into
+  automatic commits, added `init --no-commit`, made managed-file writes atomic,
+  skipped no-op update commits, staged tracked moves/deletions correctly, and
+  retained support for creating the first commit in an unborn repository.
+- Kept update project locking and collision-safe mixed Markdown/LaTeX source
+  moves, aborting before writes when a destination already exists.
 - Prevented `watch` rebuild loops by ignoring configured output directories,
   `dist`, generated figure directories, caches, and exact root-level generated
   artifacts while continuing to watch unrelated source assets; `watch --once`

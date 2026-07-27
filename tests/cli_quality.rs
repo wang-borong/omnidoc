@@ -256,6 +256,59 @@ fn init_accepts_an_existing_main_file_and_resolves_relative_paths_once() {
 }
 
 #[test]
+fn init_refuses_to_commit_existing_changes_unless_no_commit_is_explicit() {
+    let fixture = Fixture::new("init-dirty-repo");
+    let target = fixture.base().join("existing-repo");
+    fs::create_dir_all(&target).expect("existing repository");
+    fs::write(target.join("main.md"), "# Existing\n").expect("existing entry");
+
+    let repository = git2::Repository::init(&target).expect("initialize repository");
+    let mut index = repository.index().expect("repository index");
+    index
+        .add_path(Path::new("main.md"))
+        .expect("stage existing entry");
+    let tree_id = index.write_tree().expect("write initial tree");
+    let tree = repository.find_tree(tree_id).expect("initial tree");
+    let signature =
+        git2::Signature::now("OmniDoc Test", "omnidoc@example.invalid").expect("signature");
+    let initial_commit = repository
+        .commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            "Initial files",
+            &tree,
+            &[],
+        )
+        .expect("initial commit");
+    drop(tree);
+    drop(repository);
+    fs::write(target.join("notes.md"), "# Uncommitted notes\n").expect("uncommitted file");
+
+    let output = fixture.command_in(
+        fixture.base(),
+        &["init", "existing-repo", "--type", "ctex-md"],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    assert_failure(output);
+    assert!(stderr.contains("repository already has changes"));
+    assert!(stderr.contains("--no-commit"));
+    assert!(!target.join(".omnidoc.toml").exists());
+
+    assert_success(fixture.command_in(
+        fixture.base(),
+        &["init", "existing-repo", "--type", "ctex-md", "--no-commit"],
+    ));
+    assert!(target.join(".omnidoc.toml").is_file());
+    assert!(target.join("md/notes.md").is_file());
+    let repository = git2::Repository::open(&target).expect("open initialized repository");
+    assert_eq!(
+        repository.head().expect("repository head").target(),
+        Some(initial_commit)
+    );
+}
+
+#[test]
 fn relative_update_resolves_the_target_and_infers_the_project_format() {
     let fixture = Fixture::new("update-relative");
 
@@ -368,6 +421,40 @@ fn update_no_commit_moves_mixed_sources_and_can_be_committed_later() {
 }
 
 #[test]
+fn update_commit_records_tracked_source_moves_as_deletions_and_additions() {
+    let fixture = Fixture::new("update-tracked-move");
+    fs::write(fixture.project.join("notes.md"), "# Tracked notes\n").expect("tracked notes");
+    let repository = git2::Repository::init(&fixture.project).expect("initialize repository");
+    let mut index = repository.index().expect("repository index");
+    index
+        .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+        .expect("stage baseline");
+    index.write().expect("persist baseline index");
+    let tree_id = index.write_tree().expect("write baseline tree");
+    let tree = repository.find_tree(tree_id).expect("baseline tree");
+    let signature =
+        git2::Signature::now("OmniDoc Test", "omnidoc@example.invalid").expect("signature");
+    repository
+        .commit(Some("HEAD"), &signature, &signature, "Baseline", &tree, &[])
+        .expect("baseline commit");
+    drop(tree);
+    drop(repository);
+
+    assert_success(fixture.command(&["update", "--json", &fixture.project_arg()]));
+
+    let repository = git2::Repository::open(&fixture.project).expect("updated repository");
+    let tree = repository
+        .head()
+        .expect("updated head")
+        .peel_to_commit()
+        .expect("updated commit")
+        .tree()
+        .expect("updated tree");
+    assert!(tree.get_path(Path::new("notes.md")).is_err());
+    assert!(tree.get_path(Path::new("md/notes.md")).is_ok());
+}
+
+#[test]
 fn update_rejects_source_move_collisions_before_writing() {
     let fixture = Fixture::new("update-collision");
     fs::create_dir_all(fixture.project.join("md")).expect("markdown directory");
@@ -393,6 +480,174 @@ fn update_rejects_source_move_collisions_before_writing() {
     assert!(!fixture.project.join(".git").exists());
     assert!(!fixture.project.join(".gitignore").exists());
     assert!(!fixture.project.join(".omnidoc-cache").exists());
+}
+
+#[test]
+fn update_skips_noop_commits_and_reports_only_real_changes() {
+    let fixture = Fixture::new("update-noop");
+    assert_success(fixture.command(&["update", "--json", &fixture.project_arg()]));
+    let repository = git2::Repository::open(&fixture.project).expect("updated repository");
+    let first_head = repository
+        .head()
+        .expect("first head")
+        .target()
+        .expect("head id");
+    drop(repository);
+
+    let output =
+        assert_success(fixture.command(&["update", "--dry-run", "--json", &fixture.project_arg()]));
+    let preview: serde_json::Value = serde_json::from_str(&output).expect("no-op preview JSON");
+    assert_eq!(preview["ready"], true);
+    assert_eq!(preview["repository"]["clean"], true);
+    assert_eq!(preview["actions"], serde_json::json!([]));
+
+    let output = assert_success(fixture.command(&["update", "--json", &fixture.project_arg()]));
+    let report: serde_json::Value = serde_json::from_str(&output).expect("no-op update JSON");
+    assert_eq!(report["actions"], serde_json::json!([]));
+    assert_eq!(report["will_commit"], false);
+    let repository = git2::Repository::open(&fixture.project).expect("repository after no-op");
+    assert_eq!(
+        repository.head().expect("head after no-op").target(),
+        Some(first_head)
+    );
+    drop(repository);
+
+    fs::write(fixture.project.join("main.md"), "# Existing user change\n")
+        .expect("dirty unrelated source");
+    let output = assert_success(fixture.command(&["update", "--json", &fixture.project_arg()]));
+    let report: serde_json::Value = serde_json::from_str(&output).expect("dirty no-op update JSON");
+    assert_eq!(report["ready"], true);
+    assert_eq!(report["will_commit"], false);
+    assert_eq!(report["actions"], serde_json::json!([]));
+    let repository = git2::Repository::open(&fixture.project).expect("dirty no-op repository");
+    assert_eq!(
+        repository.head().expect("dirty no-op head").target(),
+        Some(first_head)
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.project.join("main.md")).expect("preserved user change"),
+        "# Existing user change\n"
+    );
+}
+
+#[test]
+fn update_diff_is_a_read_only_managed_file_preview() {
+    let fixture = Fixture::new("update-diff");
+    assert_success(fixture.command(&["update", "--json", &fixture.project_arg()]));
+    let gitignore = fixture.project.join(".gitignore");
+    let mut customized = fs::read_to_string(&gitignore).expect("managed gitignore");
+    customized.push_str("\n# local rule\ncustom-output/\n");
+    fs::write(&gitignore, &customized).expect("customized gitignore");
+
+    let output = assert_success(fixture.command(&[
+        "update",
+        "--diff",
+        "--no-commit",
+        "--json",
+        &fixture.project_arg(),
+    ]));
+    let report: serde_json::Value = serde_json::from_str(&output).expect("update diff JSON");
+    assert_eq!(report["dry_run"], true);
+    assert_eq!(report["diff"], true);
+    assert_eq!(report["applied"], false);
+    assert_eq!(report["ready"], true);
+    let action = report["actions"]
+        .as_array()
+        .expect("diff actions")
+        .iter()
+        .find(|action| {
+            action["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("/.gitignore"))
+        })
+        .expect("gitignore action");
+    assert_eq!(action["operation"], "refresh_file");
+    assert_eq!(action["change"], "update");
+    assert!(action["diff"]
+        .as_str()
+        .is_some_and(|diff| diff.contains("--- a/.gitignore")
+            && diff.contains("+++ b/.gitignore")
+            && diff.contains("-# local rule")));
+    assert_eq!(
+        fs::read_to_string(&gitignore).expect("preserved customized gitignore"),
+        customized
+    );
+}
+
+#[test]
+fn update_refuses_to_mix_existing_changes_into_automatic_commit() {
+    let fixture = Fixture::new("update-dirty-repo");
+    assert_success(fixture.command(&["update", "--json", &fixture.project_arg()]));
+    let repository = git2::Repository::open(&fixture.project).expect("updated repository");
+    let original_head = repository
+        .head()
+        .expect("original head")
+        .target()
+        .expect("original head id");
+    drop(repository);
+    fs::write(fixture.project.join("main.md"), "# User work\n").expect("dirty source");
+    let gitignore = fixture.project.join(".gitignore");
+    let mut customized_gitignore = fs::read_to_string(&gitignore).expect("managed gitignore");
+    customized_gitignore.push_str("\n# local customization\n");
+    fs::write(&gitignore, &customized_gitignore).expect("dirty managed file");
+
+    let preview =
+        assert_success(fixture.command(&["update", "--dry-run", "--json", &fixture.project_arg()]));
+    let preview: serde_json::Value = serde_json::from_str(&preview).expect("dirty preview JSON");
+    assert_eq!(preview["ready"], false);
+    assert_eq!(preview["repository"]["exists"], true);
+    assert_eq!(preview["repository"]["has_commits"], true);
+    assert_eq!(preview["repository"]["clean"], false);
+    assert_eq!(preview["will_commit"], true);
+    assert!(preview["repository"]["changes"]
+        .as_array()
+        .is_some_and(|changes| changes
+            .iter()
+            .any(|change| { change["path"] == "main.md" && change["worktree"] == "modified" })));
+
+    let output = fixture.command(&["update", "--json", &fixture.project_arg()]);
+    let stdout = assert_failure(output);
+    let error: serde_json::Value = serde_json::from_str(&stdout).expect("dirty update error JSON");
+    assert!(error["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("--no-commit")));
+    assert_eq!(
+        fs::read_to_string(fixture.project.join("main.md")).expect("preserved source"),
+        "# User work\n"
+    );
+    assert_eq!(
+        fs::read_to_string(&gitignore).expect("preserved managed file"),
+        customized_gitignore
+    );
+    let repository = git2::Repository::open(&fixture.project).expect("repository after refusal");
+    assert_eq!(
+        repository.head().expect("head after refusal").target(),
+        Some(original_head)
+    );
+    drop(repository);
+
+    let output = assert_success(fixture.command(&[
+        "update",
+        "--no-commit",
+        "--json",
+        &fixture.project_arg(),
+    ]));
+    let report: serde_json::Value = serde_json::from_str(&output).expect("no-commit JSON");
+    assert_eq!(report["ready"], true);
+    assert_eq!(report["commit"], false);
+    assert_eq!(report["will_commit"], false);
+    assert!(!fs::read_to_string(&gitignore)
+        .expect("refreshed managed file")
+        .contains("local customization"));
+    assert_eq!(
+        fs::read_to_string(fixture.project.join("main.md")).expect("preserved user work"),
+        "# User work\n"
+    );
+    let repository = git2::Repository::open(&fixture.project).expect("no-commit repository");
+    assert_eq!(
+        repository.head().expect("head after no-commit").target(),
+        Some(original_head)
+    );
 }
 
 #[test]

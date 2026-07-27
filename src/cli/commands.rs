@@ -59,7 +59,7 @@ pub enum Commands {
 
     /// initialize an existing directory as an OmniDoc project
     #[command(
-        after_help = "Examples:\n  omnidoc init\n  omnidoc init . --type ctex-md\n  omnidoc init existing-repo --defaults"
+        after_help = "Examples:\n  omnidoc init\n  omnidoc init . --type ctex-md\n  omnidoc init existing-repo --defaults\n  omnidoc init existing-repo --type ctex-md --no-commit"
     )]
     Init {
         /// set the author name
@@ -87,6 +87,10 @@ pub enum Commands {
         /// accept recommended defaults (ctex-md) without prompting
         #[arg(short = 'y', long, visible_alias = "yes", conflicts_with_all = ["doctype", "format"])]
         defaults: bool,
+
+        /// initialize files without creating a Git commit
+        #[arg(long)]
+        no_commit: bool,
 
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
@@ -416,7 +420,7 @@ pub enum Commands {
 
     /// preview or refresh project scaffolding for the current OmniDoc version
     #[command(
-        after_help = "Examples:\n  omnidoc update --dry-run\n  omnidoc update --dry-run --json\n  omnidoc update --no-commit\n  omnidoc update"
+        after_help = "Examples:\n  omnidoc update --dry-run\n  omnidoc update --diff\n  omnidoc update --dry-run --json\n  omnidoc update --no-commit\n  omnidoc update"
     )]
     Update {
         /// set the path to a documentation project
@@ -426,6 +430,10 @@ pub enum Commands {
         /// report the update plan without modifying the project
         #[arg(long)]
         dry_run: bool,
+
+        /// show unified managed-file diffs and imply --dry-run
+        #[arg(long)]
+        diff: bool,
 
         /// apply the update without creating a Git commit
         #[arg(long)]
@@ -1238,6 +1246,7 @@ mod tests {
             "update",
             "docs",
             "--dry-run",
+            "--diff",
             "--no-commit",
             "--json",
         ])
@@ -1247,8 +1256,27 @@ mod tests {
             Commands::Update {
                 path: Some(path),
                 dry_run: true,
+                diff: true,
                 no_commit: true,
                 json: true
+            } if path == "docs"
+        ));
+
+        let init = OmniCli::try_parse_from([
+            "omnidoc",
+            "init",
+            "docs",
+            "--type",
+            "ctex-md",
+            "--no-commit",
+        ])
+        .expect("init no-commit command");
+        assert!(matches!(
+            init.command,
+            Commands::Init {
+                path: Some(path),
+                no_commit: true,
+                ..
             } if path == "docs"
         ));
     }

@@ -1,6 +1,7 @@
 use crate::config::{CliOverrides, ConfigManager, MergedConfig};
 use crate::doc::services::{BuildService, ConverterService, FigureService};
 use crate::error::{OmniDocError, Result};
+use crate::git::{git_worktree_changes, GitWorktreeChange};
 use crate::utils::error;
 use std::collections::HashMap;
 use std::path::Path;
@@ -89,4 +90,48 @@ pub fn print_json_error(error: &OmniDocError) {
             }
         })
     );
+}
+
+/// Return user-visible Git changes while ignoring an untracked internal cache.
+pub fn user_git_changes(project_path: &Path) -> Result<Vec<GitWorktreeChange>> {
+    let mut changes = git_worktree_changes(project_path)?;
+    changes.retain(|change| {
+        !(change.index.is_none()
+            && change.worktree.as_deref() == Some("untracked")
+            && (change.path == ".omnidoc-cache" || change.path.starts_with(".omnidoc-cache/")))
+    });
+    Ok(changes)
+}
+
+pub fn format_git_change(change: &GitWorktreeChange) -> String {
+    let mut states = Vec::new();
+    if let Some(index) = &change.index {
+        states.push(format!("index:{index}"));
+    }
+    if let Some(worktree) = &change.worktree {
+        states.push(format!("worktree:{worktree}"));
+    }
+    if change.conflicted {
+        states.push("conflicted".to_string());
+    }
+    format!("{} ({})", change.path, states.join(", "))
+}
+
+pub fn dirty_auto_commit_error(
+    commit_description: &str,
+    bypass_flag: &str,
+    changes: &[GitWorktreeChange],
+) -> OmniDocError {
+    let mut paths = changes
+        .iter()
+        .take(8)
+        .map(format_git_change)
+        .collect::<Vec<_>>();
+    if changes.len() > paths.len() {
+        paths.push(format!("... and {} more", changes.len() - paths.len()));
+    }
+    OmniDocError::Project(format!(
+        "Refusing to create {commit_description} because the repository already has changes:\n  {}\nCommit or stash them first, or rerun with `{bypass_flag}`. No files were changed.",
+        paths.join("\n  ")
+    ))
 }

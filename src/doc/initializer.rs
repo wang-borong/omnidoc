@@ -8,10 +8,13 @@ use crate::constants::{dirs, lang, paths};
 use crate::doc::templates::generator::try_generate_dynamic;
 use crate::doctype::{DocumentFormat, DocumentType, DocumentTypeRegistry};
 use crate::error::{OmniDocError, Result};
-use crate::git::{git_add, git_commit, git_init, is_git_repo};
+use crate::git::{
+    git_commit, git_has_commits, git_init, git_stage_all, git_worktree_changes, is_git_repo,
+};
 use crate::utils::{error, fs};
 use console::style;
 use serde::Serialize;
+use similar::TextDiff;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -25,6 +28,10 @@ pub struct ProjectUpdateAction {
     pub operation: String,
     pub path: String,
     pub destination: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub change: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff: Option<String>,
 }
 
 impl<'a> Doc<'a> {
@@ -38,7 +45,7 @@ impl<'a> Doc<'a> {
         self.init_project_with_options(update, true, true)
     }
 
-    fn init_project_with_options(
+    pub(crate) fn init_project_with_options(
         &self,
         update: bool,
         commit: bool,
@@ -206,27 +213,32 @@ impl<'a> Doc<'a> {
 
     /// Create template files (README, .gitignore, .latexmkrc)
     fn create_template_files(&self) -> Result<()> {
-        // Create figure README
-        Doc::gen_file(FIGURE_README_CONTENT, paths::FIGURE_README)?;
-
-        // Write embedded gitignore template
-        let gitignore_content = get_gitignore_template();
-        Doc::gen_file(gitignore_content, paths::GITIGNORE)?;
-
-        // Write embedded latexmkrc template only for LaTeX document types
-        let template = resolve_project_template(&self.doctype)
-            .map_err(|e| OmniDocError::Project(format!("Invalid document type: {}", e)))?;
-        if template.format == DocumentFormat::Latex {
-            let latexmkrc_content = get_latexmkrc_template();
-            Doc::gen_file(latexmkrc_content, paths::LATEXMKRC)?;
+        for (path, content) in self.managed_template_files()? {
+            write_managed_file(&path, content)?;
         }
 
         Ok(())
     }
 
+    fn managed_template_files(&self) -> Result<Vec<(PathBuf, &'static str)>> {
+        let template = resolve_project_template(&self.doctype)
+            .map_err(|error| OmniDocError::Project(format!("Invalid document type: {error}")))?;
+        let mut files = vec![
+            (self.path.join(paths::FIGURE_README), FIGURE_README_CONTENT),
+            (self.path.join(paths::GITIGNORE), get_gitignore_template()),
+        ];
+        if template.format == DocumentFormat::Latex {
+            files.push((self.path.join(paths::LATEXMKRC), get_latexmkrc_template()));
+        }
+        Ok(files)
+    }
+
     /// Commit changes to git
-    fn commit_changes(&self, update: bool) -> Result<()> {
-        error::git_err(git_add(".", &["*"], false))?;
+    fn commit_changes(&self, update: bool) -> Result<bool> {
+        error::git_err(git_stage_all("."))?;
+        if error::git_err(git_worktree_changes("."))?.is_empty() {
+            return Ok(false);
+        }
 
         let cmsg = if update {
             git_constants::UPDATE_COMMIT_MSG
@@ -235,7 +247,7 @@ impl<'a> Doc<'a> {
         };
         error::git_err(git_commit(".", cmsg))?;
 
-        Ok(())
+        Ok(true)
     }
 
     /// Print success message
@@ -262,43 +274,34 @@ impl<'a> Doc<'a> {
     }
 
     pub fn update_project_with_options(&mut self, commit: bool, print_success: bool) -> Result<()> {
-        // Validate all source moves before refreshing any managed file so an
-        // update can never partially mutate a project because of a collision.
         let file_moves = self.planned_file_moves()?;
-        let mut update_files = vec![paths::FIGURE_README, paths::GITIGNORE];
-
-        // Only update .latexmkrc for LaTeX document types
-        let template = resolve_project_template(&self.doctype)
-            .map_err(|e| OmniDocError::Project(format!("Invalid document type: {}", e)))?;
-        if template.format == DocumentFormat::Latex {
-            update_files.push(paths::LATEXMKRC);
-        }
-
-        for uf in update_files {
-            if fs::exists(Path::new(uf)) {
-                fs::remove_file(uf)?;
-            }
-        }
-
         self.init_project_with_planned_moves(true, commit, print_success, &file_moves)
     }
 
-    pub fn plan_update(&self, commit: bool) -> Result<Vec<ProjectUpdateAction>> {
+    pub fn plan_update(
+        &self,
+        commit: bool,
+        include_diff: bool,
+    ) -> Result<Vec<ProjectUpdateAction>> {
         let template = resolve_project_template(&self.doctype)
             .map_err(|error| OmniDocError::Project(format!("Invalid document type: {error}")))?;
         let mut actions = Vec::new();
-        for file in [paths::FIGURE_README, paths::GITIGNORE] {
-            actions.push(update_action("refresh_file", self.path.join(file), None));
-        }
-        if template.format == DocumentFormat::Latex {
-            actions.push(update_action(
-                "refresh_file",
-                self.path.join(paths::LATEXMKRC),
-                None,
-            ));
+        for (path, content) in self.managed_template_files()? {
+            if let Some(change) = managed_file_change(&path, content)? {
+                let diff = include_diff
+                    .then(|| managed_file_diff(&self.path, &path, content))
+                    .transpose()?;
+                actions.push(managed_update_action(path, change, diff));
+            }
         }
 
-        if !is_git_repo(&self.path) {
+        let repository_exists = is_git_repo(&self.path);
+        let repository_has_commits = if repository_exists {
+            error::git_err(git_has_commits(&self.path))?
+        } else {
+            false
+        };
+        if !repository_exists {
             actions.push(update_action(
                 "initialize_git",
                 self.path.join(".git"),
@@ -338,7 +341,12 @@ impl<'a> Doc<'a> {
             actions.push(update_action("move_file", source, Some(destination)));
         }
 
-        if commit {
+        let has_commit_changes = !repository_exists
+            || !repository_has_commits
+            || actions
+                .iter()
+                .any(|action| matches!(action.operation.as_str(), "refresh_file" | "move_file"));
+        if commit && has_commit_changes {
             actions.push(update_action("commit", self.path.clone(), None));
         }
         Ok(actions)
@@ -398,7 +406,61 @@ fn update_action(
         operation: operation.to_string(),
         path: path.to_string_lossy().to_string(),
         destination: destination.map(|path| path.to_string_lossy().to_string()),
+        change: None,
+        diff: None,
     }
+}
+
+fn managed_update_action(path: PathBuf, change: &str, diff: Option<String>) -> ProjectUpdateAction {
+    ProjectUpdateAction {
+        operation: "refresh_file".to_string(),
+        path: path.to_string_lossy().to_string(),
+        destination: None,
+        change: Some(change.to_string()),
+        diff,
+    }
+}
+
+fn managed_file_change(path: &Path, content: &str) -> Result<Option<&'static str>> {
+    match std::fs::read(path) {
+        Ok(existing) if existing == content.as_bytes() => Ok(None),
+        Ok(_) => Ok(Some("update")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Some("create")),
+        Err(error) => Err(OmniDocError::Io(error)),
+    }
+}
+
+fn write_managed_file(path: &Path, content: &str) -> Result<bool> {
+    if managed_file_change(path, content)?.is_none() {
+        return Ok(false);
+    }
+    fs::atomic_write(path, content.as_bytes())?;
+    Ok(true)
+}
+
+fn managed_file_diff(project_root: &Path, path: &Path, content: &str) -> Result<String> {
+    let (original, old_label) = match std::fs::read(path) {
+        Ok(bytes) => (
+            String::from_utf8_lossy(&bytes).into_owned(),
+            format!("a/{}", portable_relative_path(project_root, path)),
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            (String::new(), "/dev/null".to_string())
+        }
+        Err(error) => return Err(OmniDocError::Io(error)),
+    };
+    let new_label = format!("b/{}", portable_relative_path(project_root, path));
+    Ok(TextDiff::from_lines(&original, content)
+        .unified_diff()
+        .header(&old_label, &new_label)
+        .to_string())
+}
+
+fn portable_relative_path(project_root: &Path, path: &Path) -> String {
+    path.strip_prefix(project_root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 fn map_document_type_to_template(dt: &DocumentType) -> Result<TemplateDocType> {
