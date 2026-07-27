@@ -189,9 +189,14 @@ fn help_prioritizes_workflows_and_keeps_legacy_commands_out_of_the_main_list() {
     assert!(!config_help.contains("-o, --outdir <OUTDIR>"));
 
     let plugin_help = assert_success(fixture.command(&["plugin", "--help"]));
+    assert!(plugin_help.contains("  examples  "));
+    assert!(plugin_help.contains("  add       "));
     assert!(plugin_help.contains("  list      "));
     assert!(plugin_help.contains("  validate  "));
     assert!(!plugin_help.contains("\n      --validate"));
+
+    let theme_help = assert_success(fixture.command(&["theme", "--help"]));
+    assert!(theme_help.contains("  apply     "));
 
     let library_help = assert_success(fixture.command(&["lib", "--help"]));
     assert!(library_help.contains("  install  "));
@@ -1430,6 +1435,7 @@ fn theme_commands_discover_inspect_and_validate_bundles() {
     fs::create_dir_all(library.join("pandoc/css")).expect("theme css");
     fs::create_dir_all(library.join("pandoc/data/filters")).expect("theme filters");
     fs::create_dir_all(library.join("texmf/tex/common")).expect("theme latex");
+    fs::create_dir_all(library.join("pandoc/data/reference-docs")).expect("reference docs");
     fs::write(
         library.join("pandoc/css/engineering-book.css"),
         "body { max-width: 56rem; }\n",
@@ -1446,11 +1452,18 @@ fn theme_commands_discover_inspect_and_validate_bundles() {
     )
     .expect("latex package");
     fs::write(
+        library.join("pandoc/data/reference-docs/engineering-book.docx"),
+        "reference doc",
+    )
+    .expect("docx reference");
+    fs::write(
         library.join("themes/engineering-book.toml"),
         r#"manifest_version = 1
 name = "engineering-book"
 version = "1.0.0"
 description = "Matching engineering book output styles"
+category = "book"
+recommended_for = ["engineering textbooks", "training material"]
 compatible_omnidoc = ">=1.3.0,<2.0.0"
 compatibility = "readium"
 
@@ -1459,6 +1472,7 @@ html_css = ["pandoc/css/engineering-book.css"]
 epub_css = ["pandoc/css/engineering-book.css"]
 latex_packages = ["texmf/tex/common/omni-engineering-book.sty"]
 lua_filters = ["pandoc/data/filters/admonition.lua"]
+docx_reference_doc = "pandoc/data/reference-docs/engineering-book.docx"
 
 [requirements]
 fonts = ["Noto Serif CJK SC"]
@@ -1479,11 +1493,6 @@ target = "smoke"
 [build]
 outdir = "build"
 outputs = ["html"]
-
-[theme]
-name = "engineering-book"
-version = "1"
-compatibility = "readium"
 "#,
     )
     .expect("themed project config");
@@ -1495,14 +1504,152 @@ compatibility = "readium"
     let inspected =
         assert_success(fixture.command(&["theme", "inspect", "engineering-book", "--json"]));
     assert!(inspected.contains("\"compatibility\": \"readium\""));
+    assert!(inspected.contains("\"category\": \"book\""));
+    assert!(inspected.contains("\"docx\""));
     assert!(inspected.contains("Noto Serif CJK SC"));
     assert_success(fixture.command(&["theme", "validate", "engineering-book"]));
+
+    let before = fs::read_to_string(fixture.project.join(".omnidoc.toml")).expect("config");
+    let preview = assert_success(fixture.command(&[
+        "theme",
+        "apply",
+        "engineering-book",
+        &fixture.project_arg(),
+        "--dry-run",
+        "--json",
+    ]));
+    let preview: serde_json::Value = serde_json::from_str(&preview).expect("theme apply JSON");
+    assert_eq!(preview["key"], "theme.name");
+    assert_eq!(preview["value"], "engineering-book");
+    assert_eq!(preview["applied"], false);
+    assert_eq!(
+        fs::read_to_string(fixture.project.join(".omnidoc.toml")).expect("preview config"),
+        before
+    );
+    assert_success(fixture.command(&["theme", "use", "engineering-book", &fixture.project_arg()]));
+    let selected = fs::read_to_string(fixture.project.join(".omnidoc.toml")).expect("selected");
+    assert!(selected.contains("[theme]"));
+    assert!(selected.contains("name = \"engineering-book\""));
     assert_success(fixture.command(&["config-validate", &fixture.project_arg()]));
 
     fs::remove_file(library.join("pandoc/css/engineering-book.css")).expect("remove css");
     let failed =
         assert_failure(fixture.command(&["theme", "validate", "engineering-book", "--json"]));
     assert!(failed.contains("missing theme resource"));
+}
+
+#[test]
+fn bundled_theme_and_plugin_example_catalogs_are_complete() {
+    let fixture = Fixture::new("bundled-catalogs");
+    let library = Path::new(env!("CARGO_MANIFEST_DIR")).join("bundles/libs");
+    fs::write(
+        fixture.env_root.join("config/omnidoc.toml"),
+        format!("[lib]\npath = {:?}\n", library.to_string_lossy()),
+    )
+    .expect("global config");
+
+    let themes = assert_success(fixture.command(&["theme", "list", "--json"]));
+    let themes: serde_json::Value = serde_json::from_str(&themes).expect("theme catalog JSON");
+    let names = themes
+        .as_array()
+        .expect("theme array")
+        .iter()
+        .filter_map(|theme| theme["name"].as_str())
+        .collect::<Vec<_>>();
+    for expected in [
+        "engineering-book",
+        "corporate-docs",
+        "classic-book",
+        "clean-document",
+        "modern-slides",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "missing bundled theme {expected}"
+        );
+    }
+    assert!(themes
+        .as_array()
+        .is_some_and(|themes| themes.iter().all(|theme| theme["valid"] == true)));
+    assert_success(fixture.command(&["theme", "validate", "--json"]));
+
+    let examples = assert_success(fixture.command(&["plugin", "examples", "--json"]));
+    let examples: serde_json::Value =
+        serde_json::from_str(&examples).expect("plugin examples JSON");
+    let presets = examples
+        .as_array()
+        .expect("example array")
+        .iter()
+        .filter_map(|example| example["preset"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(presets, ["asset-index", "build-journal", "quality-gate"]);
+    assert!(examples
+        .as_array()
+        .is_some_and(|examples| examples.iter().all(|example| example["valid"] == true)));
+}
+
+#[test]
+fn plugin_examples_install_transactionally_with_dry_run_and_conflict_protection() {
+    let fixture = Fixture::new("plugin-add");
+    let example = fixture
+        .env_root
+        .join("data/omnidoc/plugin-examples/quality-gate");
+    fs::create_dir_all(example.join("scripts")).expect("example scripts");
+    fs::write(
+        example.join("manifest.toml"),
+        r#"manifest_version = 1
+key = "quality-gate"
+name = "Quality Gate"
+version = "1.0.0"
+compatible_omnidoc = ">=1.7.0,<2.0.0"
+description = "Fixture quality checks"
+kind = "plugin"
+
+[hooks]
+lint_rule = ["lint-tool"]
+"#,
+    )
+    .expect("example manifest");
+    fs::write(example.join("scripts/rules.txt"), "fixture rules\n").expect("example file");
+
+    let project = fixture.project_arg();
+    let examples = assert_success(fixture.command(&["plugin", "examples", &project, "--json"]));
+    let examples: serde_json::Value = serde_json::from_str(&examples).expect("examples JSON");
+    assert_eq!(examples[0]["preset"], "quality-gate");
+    assert_eq!(examples[0]["hooks"], serde_json::json!(["lint_rule"]));
+
+    let destination = fixture.project.join("plugins/quality-gate");
+    let preview = assert_success(fixture.command(&[
+        "plugin",
+        "add",
+        "quality_gate",
+        &project,
+        "--dry-run",
+        "--json",
+    ]));
+    let preview: serde_json::Value = serde_json::from_str(&preview).expect("preview JSON");
+    assert_eq!(preview["dry_run"], true);
+    assert_eq!(preview["installed"], false);
+    assert!(!destination.exists());
+
+    let installed =
+        assert_success(fixture.command(&["plugin", "add", "quality-gate", &project, "--json"]));
+    let installed: serde_json::Value = serde_json::from_str(&installed).expect("install JSON");
+    assert_eq!(installed["installed"], true);
+    assert!(destination.join("manifest.toml").is_file());
+    assert_eq!(
+        fs::read_to_string(destination.join("scripts/rules.txt")).expect("installed file"),
+        "fixture rules\n"
+    );
+    assert_success(fixture.command(&["plugin", "validate", &project, "--json"]));
+    assert_failure(fixture.command(&["plugin", "add", "quality-gate", &project]));
+
+    let missing =
+        assert_failure(fixture.command(&["plugin", "add", "missing", &project, "--json"]));
+    let missing: serde_json::Value = serde_json::from_str(&missing).expect("error JSON");
+    assert!(missing["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("available examples")));
 }
 
 #[test]

@@ -1,16 +1,16 @@
 manifest_version = 1
-name = "engineering-book"
-version = "1.1.0"
-description = "Matching HTML, EPUB, PDF, and PPTX styles for engineering teaching material"
-category = "book"
-recommended_for = ["engineering textbooks", "training material", "technical courses"]
-compatible_omnidoc = ">=1.3.0,<2.0.0"
+name = "modern-slides"
+version = "1.0.0"
+description = "A high-contrast presentation theme for product briefings, reviews, training, and technical talks"
+category = "presentation"
+recommended_for = ["product briefings", "technical talks", "training decks", "project reviews"]
+compatible_omnidoc = ">=1.7.0,<2.0.0"
 compatibility = "readium"
 
 [resources]
 html_css = [
-  "pandoc/css/modules/engineering-tokens.css",
-  "pandoc/css/engineering-book.css",
+  "pandoc/css/modules/slides-tokens.css",
+  "pandoc/css/modern-slides.css",
   "pandoc/css/modules/semantic-blocks.css",
   "pandoc/css/modules/code.css",
   "pandoc/css/modules/tables.css",
@@ -18,23 +18,22 @@ html_css = [
   "pandoc/css/modules/figures.css",
 ]
 epub_css = [
-  "pandoc/css/modules/engineering-tokens.css",
-  "pandoc/css/engineering-book.css",
+  "pandoc/css/modules/slides-tokens.css",
+  "pandoc/css/modern-slides.css",
   "pandoc/css/modules/semantic-blocks.css",
   "pandoc/css/modules/code.css",
   "pandoc/css/modules/tables.css",
   "pandoc/css/modules/math.css",
   "pandoc/css/modules/figures.css",
 ]
-latex_packages = ["texmf/tex/common/omni-engineering-book.sty"]
-latex_headers = ["pandoc/headers/engineering-book.tex"]
+latex_packages = ["texmf/tex/common/omni-document-themes.sty"]
+latex_headers = ["pandoc/headers/modern-slides.tex"]
 lua_filters = [
   "pandoc/data/filters/display-math.lua",
   "pandoc/data/filters/admonition.lua",
   "pandoc/data/filters/fonts-and-alignment.lua",
 ]
-docx_reference_doc = "pandoc/data/reference-docs/engineering-book.docx"
-pptx_reference_doc = "pandoc/data/reference-docs/engineering-slides.pptx"
+pptx_reference_doc = "pandoc/data/reference-docs/modern-slides.pptx"
 
 [requirements]
 fonts = ["Noto Serif CJK SC", "Noto Sans CJK SC", "Noto Sans Mono CJK SC"]
@@ -49,7 +48,6 @@ system_latex_packages = [
   "iftex",
   "listings",
   "tcolorbox",
-  "tikz",
   "titlesec",
   "xcolor",
   "xeCJK",
@@ -57,3 +55,5 @@ system_latex_packages = [
 
 [metadata.defaults]
 lang = "zh-CN"
+documentclass = "article"
+papersize = "a4"

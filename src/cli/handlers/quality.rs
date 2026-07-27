@@ -1,9 +1,7 @@
 use crate::build::executor::{BuildExecutor, LatexEnginePreference, ResolvedLatexEngine};
 use crate::build::pipeline::{detect_project_type, ProjectType};
 use crate::cli::handlers::build::{build_project_outputs, BuildRunOptions};
-use crate::cli::handlers::common::{
-    create_config_manager, create_config_manager_default, print_json_error,
-};
+use crate::cli::handlers::common::{create_config_manager, create_config_manager_default};
 use crate::cli::handlers::lib::library_diagnostic;
 use crate::cli::handlers::theme::theme_diagnostic;
 use crate::config::CliOverrides;
@@ -355,47 +353,5 @@ pub fn handle_lock(path: Option<String>, check: bool, update: bool) -> Result<()
         project_tools::acquire_project_write_lock(&project_path, "update lock file")?;
     project_tools::write_lock_targets(&project_path, &inputs)?;
     println!("Wrote {}", project_path.join("omnidoc.lock").display());
-    Ok(())
-}
-
-pub fn handle_plugin(path: Option<String>, json: bool, validate: bool) -> Result<()> {
-    let plugins = match (|| {
-        let project_path = path::determine_project_context(path)?;
-        let config_manager = create_config_manager(Some(&project_path), CliOverrides::new())?;
-        Ok(project_tools::discovered_plugins(
-            &project_path,
-            config_manager.get_merged(),
-        ))
-    })() {
-        Ok(plugins) => plugins,
-        Err(error) => {
-            if json {
-                print_json_error(&error);
-            }
-            return Err(error);
-        }
-    };
-    if json {
-        let content = serde_json::to_string_pretty(&plugins)
-            .map_err(|err| OmniDocError::Other(err.to_string()))?;
-        println!("{}", content);
-    } else if plugins.is_empty() {
-        println!("No plugins or external templates discovered.");
-    } else {
-        for plugin in &plugins {
-            let status = if plugin.valid { "ok" } else { "fail" };
-            if let Some(error) = &plugin.error {
-                println!("{} {} ({}) - {}", status, plugin.key, plugin.path, error);
-            } else {
-                println!("{} {} ({})", status, plugin.key, plugin.path);
-            }
-        }
-    }
-
-    if validate && plugins.iter().any(|plugin| !plugin.valid) {
-        return Err(OmniDocError::Project(
-            "plugin validation failed".to_string(),
-        ));
-    }
     Ok(())
 }

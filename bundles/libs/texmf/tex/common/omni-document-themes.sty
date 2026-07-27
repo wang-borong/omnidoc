@@ -1,0 +1,196 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{omni-document-themes}[2026/07/27 v0.1 OmniDoc multi-purpose document themes]
+
+\newif\ifOmniCorporate
+\newif\ifOmniClassic
+\newif\ifOmniClean
+\newif\ifOmniSlides
+\DeclareOption{corporate}{\OmniCorporatetrue}
+\DeclareOption{classic}{\OmniClassictrue}
+\DeclareOption{clean}{\OmniCleantrue}
+\DeclareOption{slides}{\OmniSlidestrue}
+\ProcessOptions\relax
+\ifOmniCorporate\else
+  \ifOmniClassic\else
+    \ifOmniClean\else
+      \ifOmniSlides\else\OmniCleantrue\fi
+    \fi
+  \fi
+\fi
+
+\RequirePackage{iftex}
+\ifXeTeX
+  \RequirePackage{fontspec}
+  \RequirePackage{xeCJK}
+\else
+  \PackageError{omni-document-themes}{A XeTeX-compatible engine is required}{Use XeLaTeX or Tectonic for this theme.}
+\fi
+\RequirePackage{titlesec}
+\RequirePackage{fancyhdr}
+\RequirePackage{enumitem}
+\RequirePackage{booktabs}
+\RequirePackage{array}
+\RequirePackage{colortbl}
+\RequirePackage{listings}
+\RequirePackage{etoolbox}
+\RequirePackage{omni-blocks}
+
+\ifOmniCorporate
+  \definecolor{OmniThemeAccent}{HTML}{155EEF}
+  \definecolor{OmniThemeSecondary}{HTML}{0E9384}
+  \definecolor{OmniThemeInk}{HTML}{182230}
+  \definecolor{OmniThemeMuted}{HTML}{667085}
+  \definecolor{OmniThemePale}{HTML}{F5F8FF}
+  \definecolor{OmniThemeLine}{HTML}{D0D5DD}
+\else\ifOmniClassic
+  \definecolor{OmniThemeAccent}{HTML}{77543D}
+  \definecolor{OmniThemeSecondary}{HTML}{A67C3D}
+  \definecolor{OmniThemeInk}{HTML}{322A25}
+  \definecolor{OmniThemeMuted}{HTML}{746B64}
+  \definecolor{OmniThemePale}{HTML}{F6F0E6}
+  \definecolor{OmniThemeLine}{HTML}{D8CBBB}
+\else\ifOmniSlides
+  \definecolor{OmniThemeAccent}{HTML}{3451B2}
+  \definecolor{OmniThemeSecondary}{HTML}{008F95}
+  \definecolor{OmniThemeInk}{HTML}{202939}
+  \definecolor{OmniThemeMuted}{HTML}{5D6B82}
+  \definecolor{OmniThemePale}{HTML}{EDF2FF}
+  \definecolor{OmniThemeLine}{HTML}{CBD5E1}
+\else
+  \definecolor{OmniThemeAccent}{HTML}{374151}
+  \definecolor{OmniThemeSecondary}{HTML}{6B7280}
+  \definecolor{OmniThemeInk}{HTML}{202124}
+  \definecolor{OmniThemeMuted}{HTML}{6B7280}
+  \definecolor{OmniThemePale}{HTML}{F7F7F8}
+  \definecolor{OmniThemeLine}{HTML}{D9DCE1}
+\fi\fi\fi
+
+\setmainfont{Noto Serif CJK SC}
+\setsansfont{Noto Sans CJK SC}
+\setmonofont{Noto Sans Mono CJK SC}
+\setCJKmainfont{Noto Serif CJK SC}
+\setCJKsansfont{Noto Sans CJK SC}
+\setCJKmonofont{Noto Sans Mono CJK SC}
+\ifOmniCorporate\renewcommand{\familydefault}{\sfdefault}\fi
+\ifOmniSlides\renewcommand{\familydefault}{\sfdefault}\fi
+
+\setlength{\emergencystretch}{3em}
+\setlength{\headheight}{16pt}
+\setlist{leftmargin=2em,topsep=0.45em,itemsep=0.18em}
+\ifOmniClassic
+  \setlength{\parindent}{2em}
+  \setlength{\parskip}{0.18em}
+\else
+  \setlength{\parindent}{0pt}
+  \setlength{\parskip}{0.5em}
+\fi
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{OmniThemePale},
+  rulecolor=\color{OmniThemeLine},
+  frame=single,
+  framesep=0.55em,
+  xleftmargin=0.3em,
+  xrightmargin=0.3em,
+  columns=fullflexible,
+  keepspaces=true,
+  breaklines=true,
+  breakatwhitespace=false,
+  showstringspaces=false,
+  tabsize=2,
+  upquote=true
+}
+
+\ifOmniClassic
+  \titleformat{\section}{\Large\rmfamily\bfseries\color{OmniThemeAccent}\centering}{}{0pt}{}
+  \titleformat{\subsection}{\large\rmfamily\bfseries\color{OmniThemeInk}}{}{0pt}{}
+  \titleformat{\subsubsection}{\normalsize\rmfamily\bfseries\color{OmniThemeSecondary}}{}{0pt}{}
+\else
+  \titleformat{\section}{\Large\sffamily\bfseries\color{OmniThemeAccent}}{}{0pt}{}
+  \titleformat{\subsection}{\large\sffamily\bfseries\color{OmniThemeInk}}{}{0pt}{}
+  \titleformat{\subsubsection}{\normalsize\sffamily\bfseries\color{OmniThemeSecondary}}{}{0pt}{}
+\fi
+\titlespacing*{\section}{0pt}{2.1em}{0.7em}
+\titlespacing*{\subsection}{0pt}{1.6em}{0.55em}
+\titlespacing*{\subsubsection}{0pt}{1.3em}{0.45em}
+
+\makeatletter
+\@ifundefined{chapter}{}{%
+  \ifOmniClassic
+    \titleformat{\chapter}[display]
+      {\centering\rmfamily\bfseries\color{OmniThemeInk}}
+      {}{0pt}{\fontsize{25}{32}\selectfont}
+      [\vspace{0.65em}\color{OmniThemeSecondary}\titlerule]
+  \else
+    \titleformat{\chapter}[display]
+      {\sffamily\bfseries\color{OmniThemeAccent}}
+      {}{0pt}{\fontsize{25}{31}\selectfont}
+      [\vspace{0.55em}\color{OmniThemeLine}\titlerule]
+  \fi
+  \titlespacing*{\chapter}{0pt}{-1em}{1.8em}
+}
+
+\renewcommand{\maketitle}{%
+  \begin{titlepage}
+  \color{OmniThemeInk}
+  \ifOmniClassic
+    \vspace*{32mm}
+    \begin{center}
+      {\rmfamily\bfseries\fontsize{32}{42}\selectfont \@title\par}
+      \vspace{9mm}{\color{OmniThemeSecondary}\rule{45mm}{0.8pt}\par}
+      \vfill
+      {\large \def\and{\par}\@author\par}
+      \vspace{4mm}{\normalsize\color{OmniThemeMuted}\@date\par}
+    \end{center}
+  \else\ifOmniCorporate
+    \vspace*{24mm}
+    {\color{OmniThemeAccent}\rule{\textwidth}{5pt}\par}
+    \vspace{18mm}
+    {\sffamily\bfseries\fontsize{34}{43}\selectfont \@title\par}
+    \vspace{8mm}{\color{OmniThemeSecondary}\rule{42mm}{2pt}\par}
+    \vfill
+    {\sffamily\large \def\and{\par}\@author\par}
+    \vspace{3mm}{\sffamily\color{OmniThemeMuted}\@date\par}
+  \else\ifOmniSlides
+    \vspace*{35mm}
+    {\color{OmniThemeAccent}\rule{\textwidth}{7pt}\par}
+    \vspace{14mm}
+    {\sffamily\bfseries\fontsize{38}{46}\selectfont \@title\par}
+    \vfill
+    {\sffamily\large\color{OmniThemeSecondary}\def\and{\par}\@author\par}
+    \vspace{3mm}{\sffamily\color{OmniThemeMuted}\@date\par}
+  \else
+    \vspace*{28mm}
+    {\sffamily\bfseries\fontsize{31}{39}\selectfont \@title\par}
+    \vspace{6mm}{\color{OmniThemeLine}\rule{\textwidth}{1pt}\par}
+    \vfill
+    {\large \def\and{\par}\@author\par}
+    \vspace{3mm}{\color{OmniThemeMuted}\@date\par}
+  \fi\fi\fi
+  \end{titlepage}
+  \color{OmniThemeInk}
+  \clearpage}
+\makeatother
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\sffamily\color{OmniThemeMuted}\leftmark}
+\fancyfoot[R]{\small\sffamily\color{OmniThemeMuted}\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{OmniThemeLine}\leaders\hrule height \headrulewidth\hfill}}
+\fancypagestyle{plain}{%
+  \fancyhf{}
+  \fancyfoot[R]{\small\sffamily\color{OmniThemeMuted}\thepage}
+  \renewcommand{\headrulewidth}{0pt}}
+
+\renewenvironment{quote}
+  {\begin{tcolorbox}[enhanced,breakable,colback=OmniThemePale,colframe=OmniThemeSecondary,
+    boxrule=0pt,leftrule=2.5pt,arc=1mm,left=1em,right=1em,top=0.65em,bottom=0.65em]}
+  {\end{tcolorbox}}
+
+\providecommand{\rowcolors}[4][]{}
+\AtBeginEnvironment{longtable}{\small\rowcolors{2}{OmniThemePale}{white}}
+\AtBeginDocument{\color{OmniThemeInk}}
+
+\endinput

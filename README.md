@@ -575,18 +575,28 @@ template selector; pass `--type <KEY>` or `--defaults` explicitly.
 
    Theme bundles are declared by `themes/<name>.toml` inside the installed
    OmniDoc library bundle and
-   can bind matching HTML CSS, EPUB CSS, LaTeX packages, PPTX reference decks,
-   Lua filters, font
+   can bind matching HTML CSS, EPUB CSS, LaTeX packages, DOCX/PPTX reference
+   documents, Lua filters, font
    requirements, metadata defaults, and an OmniDoc compatibility range:
 
    ```bash
    omnidoc theme list
-   omnidoc theme inspect engineering-book
-   omnidoc theme validate engineering-book
-   omnidoc theme validate engineering-book --check-fonts
-   omnidoc theme validate engineering-book --check-fonts --check-latex
+   omnidoc theme inspect corporate-docs
+   omnidoc theme validate corporate-docs
+   omnidoc theme apply corporate-docs ./docs
+   omnidoc theme apply modern-slides ./talk --dry-run
+   omnidoc theme validate corporate-docs --check-fonts
+   omnidoc theme validate corporate-docs --check-fonts --check-latex
    omnidoc theme validate --json       # validate every installed theme
    ```
+
+   Bundled profiles cover engineering textbooks (`engineering-book`), company
+   manuals and developer guides (`corporate-docs`), long-form books
+   (`classic-book`), ordinary reports/specifications (`clean-document`), and
+   presentations (`modern-slides`). `theme list` reports each category,
+   description, and supported outputs; `theme apply` (alias `theme use`) uses
+   the safe comment-preserving configuration editor and supports `--dry-run`,
+   `--diff`, and `--json`.
 
    ```toml
    manifest_version = 1
@@ -601,6 +611,7 @@ template selector; pass `--type <KEY>` or `--defaults` explicitly.
    latex_packages = ["texmf/tex/common/omni-engineering-book.sty"]
    latex_headers = ["pandoc/headers/engineering-book.tex"]
    latex_template = "pandoc/data/templates/pantext.latex"
+   docx_reference_doc = "pandoc/data/reference-docs/engineering-book.docx"
    pptx_reference_doc = "pandoc/data/reference-docs/engineering-slides.pptx"
    lua_filters = ["pandoc/data/filters/admonition.lua"]
 
@@ -635,9 +646,14 @@ template selector; pass `--type <KEY>` or `--defaults` explicitly.
    template (the same template printed by `pandoc -D latex`). Book styling is
    layered through theme headers and `.sty` packages, so routine Pandoc
    upgrades do not require copying and rebasing the full upstream template.
+   `docx_reference_doc` binds Word styles to the theme, while
    `pptx_reference_doc` binds a Pandoc reference presentation to the theme;
-   project-level `pandoc.pptx_reference_doc` (or the legacy shared
+   project-level `pandoc.reference_doc` overrides the themed DOCX reference.
+   Project-level `pandoc.pptx_reference_doc` (or the legacy shared
    `pandoc.reference_doc`) takes precedence.
+
+   The full theme comparison and cross-format notes live in
+   [`bundles/libs/THEMES.md`](bundles/libs/THEMES.md).
 
 ### Project Quality and CI Commands
 
@@ -800,11 +816,24 @@ procedure is maintained in [`release/CHECKLIST.md`](release/CHECKLIST.md).
 List discovered local plugins and external template manifests:
 
 ```bash
+omnidoc plugin examples
+omnidoc plugin add quality-gate [PATH]
+omnidoc plugin add asset-index [PATH] --dry-run
 omnidoc plugin list [PATH]
 omnidoc plugin list --json
 omnidoc plugin validate [PATH]
 omnidoc plugin validate --json
 ```
+
+Bundled examples are inert until `plugin add` copies one into the selected
+project's `plugins/` directory. Installation is transactional, refuses to
+overwrite an existing plugin, supports side-effect-free `--dry-run`, and emits
+a stable report with `--json`. The included examples provide a documentation
+quality gate (`lint_rule`), a generated asset inventory (`asset_provider`), and
+a structured build lifecycle journal (`pre_build`/`post_build`). See
+[`bundles/libs/PLUGINS.md`](bundles/libs/PLUGINS.md) for their behavior and
+customization points. Files belonging to active hook plugins are included in
+dependency graphs, cache identities, reports, and lock files.
 
 `plugin validate` parses discovered `manifest.toml` files and checks template
 plugin fields such as `language` and `template_file`. `plugin list --json` and
@@ -1208,12 +1237,19 @@ lint_rule = ["scripts/lint.sh"]
 creation. Nested entry paths such as `docs/index.md` are supported.
 
 Hook environment variables:
+
 - `OMNIDOC_PROJECT_DIR`
 - `OMNIDOC_PLUGIN_DIR`
 - `OMNIDOC_PLUGIN_KEY`
+- `OMNIDOC_PLUGIN_MANIFEST_VERSION`
 - `OMNIDOC_HOOK`
 - `OMNIDOC_OUTPUT`
 - `OMNIDOC_TARGET`
+
+Hook argument arrays also support `{plugin_dir}`, `{project_dir}`, `{output}`,
+and `{target}` substitutions without invoking a shell. Use `{python}` as the
+program for a portable Python 3 launcher; OmniDoc checks `OMNIDOC_PYTHON`,
+`python3`, `python`, and Windows `py -3` in that order.
 
 `lint_rule` commands can print diagnostics in this format:
 

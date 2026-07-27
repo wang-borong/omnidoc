@@ -1,0 +1,38 @@
+@charset "utf-8";
+
+html {
+  color: var(--omni-ink);
+  background: #e8edf7;
+  font-family: "Noto Sans CJK SC", "Source Han Sans CN", system-ui, sans-serif;
+  line-height: 1.55;
+}
+
+body { box-sizing: border-box; margin: 0; background: var(--omni-page); }
+p { margin: 0.65em 0; }
+h1, h2, h3, h4 { color: var(--omni-navy); break-after: avoid; page-break-after: avoid; }
+h1 { margin: 1.2em 0 0.8em; padding-top: 0.45em; border-top: 0.22em solid var(--omni-blue); font-size: 2.55em; line-height: 1.15; }
+h2 { margin: 1.8em 0 0.7em; color: var(--omni-blue); font-size: 1.8em; }
+h3 { margin: 1.4em 0 0.55em; font-size: 1.35em; }
+h4 { margin: 1.2em 0 0.45em; color: var(--omni-teal); font-size: 1.08em; }
+a { color: var(--omni-blue); }
+blockquote { margin: 1.1em 0; padding: 0.9em 1.1em; border: 1px solid #c7d2fe; border-left: 0.32em solid var(--omni-blue); border-radius: 0.45em; background: var(--omni-pale); }
+nav#toc { margin: 1.5em 0 2em; padding: 1em 1.25em; border-radius: 0.55em; background: var(--omni-pale); }
+nav#toc a { text-decoration: none; }
+
+@media screen and (min-width: 72rem) {
+  body { max-width: 76rem; min-height: 42.75rem; margin: 2.5rem auto; padding: 3.5rem 5rem 5rem; border-radius: 0.75rem; box-shadow: 0 1.2rem 3.5rem rgb(30 41 59 / 14%); }
+}
+
+@media print {
+  html { background: white; }
+  body { padding: 0; box-shadow: none; }
+}
+
+@media (prefers-color-scheme: dark) {
+  html { background: #0f172a; }
+  body { color: #e5e7eb; background: #151d30; box-shadow: none; }
+  h1, h3 { color: #f8fafc; }
+  h2 { color: #9db2ff; }
+  h4 { color: #5eead4; }
+  nav#toc, blockquote { background: #1e293b; border-color: #475569; }
+}

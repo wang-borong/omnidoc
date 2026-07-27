@@ -1,7 +1,10 @@
-use crate::cli::commands::ThemeSubcommand;
+use crate::cli::commands::{ConfigWriteScope, ThemeSubcommand};
+use crate::cli::handlers::common::create_config_manager;
+use crate::cli::handlers::config::handle_config_set;
 use crate::cli::handlers::lib::configured_library_path;
-use crate::config::global::GlobalConfig;
+use crate::config::{global::GlobalConfig, CliOverrides};
 use crate::error::{OmniDocError, Result};
+use crate::utils::path;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -18,6 +21,10 @@ pub(crate) struct ThemeManifest {
     pub(crate) version: String,
     #[serde(default)]
     pub(crate) description: Option<String>,
+    #[serde(default)]
+    pub(crate) category: Option<String>,
+    #[serde(default)]
+    pub(crate) recommended_for: Vec<String>,
     pub(crate) compatible_omnidoc: String,
     #[serde(default)]
     pub(crate) compatibility: Option<String>,
@@ -50,6 +57,8 @@ pub(crate) struct ThemeResources {
     #[serde(default)]
     pub(crate) latex_template: Option<String>,
     #[serde(default)]
+    pub(crate) docx_reference_doc: Option<String>,
+    #[serde(default)]
     pub(crate) pptx_reference_doc: Option<String>,
 }
 
@@ -74,6 +83,7 @@ struct ThemeReport {
     theme: Option<ThemeManifest>,
     compatible: Option<bool>,
     valid: bool,
+    outputs: Vec<String>,
     font_check_performed: bool,
     missing_fonts: Vec<String>,
     latex_check_performed: bool,
@@ -82,14 +92,14 @@ struct ThemeReport {
 }
 
 pub fn handle_theme(subcommand: ThemeSubcommand) -> Result<()> {
-    let global_config = GlobalConfig::load()?;
-    let library = configured_library_path(&global_config)?;
     match subcommand {
         ThemeSubcommand::List { json } => {
+            let library = default_library_path()?;
             let reports = load_theme_reports(&library, false, false)?;
             print_reports(&reports, json, false)?;
         }
         ThemeSubcommand::Inspect { name, json } => {
+            let library = default_library_path()?;
             let report = load_named_theme(&library, &name, false, false)?;
             print_reports(std::slice::from_ref(&report), json, true)?;
         }
@@ -99,6 +109,7 @@ pub fn handle_theme(subcommand: ThemeSubcommand) -> Result<()> {
             check_fonts,
             check_latex,
         } => {
+            let library = default_library_path()?;
             let reports = match name {
                 Some(name) => vec![load_named_theme(&library, &name, check_fonts, check_latex)?],
                 None => load_theme_reports(&library, check_fonts, check_latex)?,
@@ -106,8 +117,44 @@ pub fn handle_theme(subcommand: ThemeSubcommand) -> Result<()> {
             print_reports(&reports, json, false)?;
             ensure_valid(&reports)?;
         }
+        ThemeSubcommand::Apply {
+            name,
+            path,
+            dry_run,
+            diff,
+            json,
+        } => {
+            let library = project_library_path(path.clone())?;
+            let report = load_named_theme(&library, &name, false, false)?;
+            ensure_valid(std::slice::from_ref(&report))?;
+            handle_config_set(
+                "theme.name".to_string(),
+                name,
+                path,
+                ConfigWriteScope::Project,
+                dry_run,
+                diff,
+                json,
+            )?;
+        }
     }
     Ok(())
+}
+
+fn default_library_path() -> Result<PathBuf> {
+    configured_library_path(&GlobalConfig::load()?)
+}
+
+fn project_library_path(requested_path: Option<String>) -> Result<PathBuf> {
+    let project_path = path::determine_project_root(requested_path)?;
+    let manager = create_config_manager(Some(&project_path), CliOverrides::new())?;
+    manager
+        .get_merged()
+        .lib_path
+        .as_ref()
+        .map(PathBuf::from)
+        .map(Ok)
+        .unwrap_or_else(default_library_path)
 }
 
 fn load_named_theme(
@@ -211,6 +258,7 @@ fn inspect_manifest(
         theme: None,
         compatible: None,
         valid: false,
+        outputs: Vec::new(),
         font_check_performed: false,
         missing_fonts: Vec::new(),
         latex_check_performed: false,
@@ -253,6 +301,7 @@ fn inspect_manifest(
         &mut report,
     );
     report.valid = report.errors.is_empty();
+    report.outputs = theme_outputs(&manifest);
     report.theme = Some(manifest);
     report
 }
@@ -316,6 +365,29 @@ fn validate_manifest(
             .errors
             .push("compatibility profile must not be empty".to_string());
     }
+    if manifest
+        .category
+        .as_deref()
+        .is_some_and(|category| category.trim().is_empty())
+    {
+        report
+            .errors
+            .push("theme category must not be empty".to_string());
+    }
+    let mut recommendations = BTreeSet::new();
+    for recommendation in &manifest.recommended_for {
+        let normalized = recommendation.trim().to_lowercase();
+        if normalized.is_empty() {
+            report
+                .errors
+                .push("theme recommendation must not be empty".to_string());
+        } else if !recommendations.insert(normalized) {
+            report.errors.push(format!(
+                "duplicate theme recommendation: {}",
+                recommendation
+            ));
+        }
+    }
 
     if manifest.resources.html_css.is_empty()
         && manifest.resources.epub_css.is_empty()
@@ -326,6 +398,7 @@ fn validate_manifest(
         && manifest.resources.html_template.is_none()
         && manifest.resources.epub_template.is_none()
         && manifest.resources.latex_template.is_none()
+        && manifest.resources.docx_reference_doc.is_none()
         && manifest.resources.pptx_reference_doc.is_none()
     {
         report
@@ -386,6 +459,10 @@ fn validate_manifest(
         (
             "latex_template",
             manifest.resources.latex_template.as_deref(),
+        ),
+        (
+            "docx_reference_doc",
+            manifest.resources.docx_reference_doc.as_deref(),
         ),
         (
             "pptx_reference_doc",
@@ -473,6 +550,30 @@ fn validate_manifest(
             ));
         }
     }
+}
+
+fn theme_outputs(manifest: &ThemeManifest) -> Vec<String> {
+    let mut outputs = Vec::new();
+    if !manifest.resources.html_css.is_empty() || manifest.resources.html_template.is_some() {
+        outputs.push("html".to_string());
+    }
+    if !manifest.resources.epub_css.is_empty() || manifest.resources.epub_template.is_some() {
+        outputs.push("epub".to_string());
+    }
+    if !manifest.resources.latex_packages.is_empty()
+        || !manifest.resources.latex_headers.is_empty()
+        || manifest.resources.latex_template.is_some()
+    {
+        outputs.push("pdf".to_string());
+        outputs.push("latex".to_string());
+    }
+    if manifest.resources.docx_reference_doc.is_some() {
+        outputs.push("docx".to_string());
+    }
+    if manifest.resources.pptx_reference_doc.is_some() {
+        outputs.push("pptx".to_string());
+    }
+    outputs
 }
 
 pub(crate) fn valid_theme_metadata_key(key: &str) -> bool {
@@ -600,14 +701,41 @@ fn print_reports(reports: &[ThemeReport], json: bool, detailed: bool) -> Result<
             .map(|theme| theme.version.as_str())
             .unwrap_or("unknown");
         println!(
-            "{} {} ({})",
+            "{} {} [{}] ({}){}",
             name,
             version,
-            if report.valid { "valid" } else { "invalid" }
+            report
+                .theme
+                .as_ref()
+                .and_then(|theme| theme.category.as_deref())
+                .unwrap_or("general"),
+            if report.valid { "valid" } else { "invalid" },
+            report
+                .theme
+                .as_ref()
+                .and_then(|theme| theme.description.as_deref())
+                .map(|description| format!(" - {description}"))
+                .unwrap_or_default()
         );
+        if !detailed && !report.outputs.is_empty() {
+            println!("  outputs: {}", report.outputs.join(", "));
+        }
         if detailed {
             if let Some(theme) = &report.theme {
                 println!("  manifest: {}", report.manifest);
+                println!(
+                    "  category: {}",
+                    theme.category.as_deref().unwrap_or("general")
+                );
+                println!(
+                    "  recommended for: {}",
+                    if theme.recommended_for.is_empty() {
+                        "not specified".to_string()
+                    } else {
+                        theme.recommended_for.join(", ")
+                    }
+                );
+                println!("  outputs: {}", report.outputs.join(", "));
                 println!(
                     "  compatibility: {}",
                     theme.compatibility.as_deref().unwrap_or("default")
@@ -645,6 +773,14 @@ fn print_reports(reports: &[ThemeReport], json: bool, detailed: bool) -> Result<
                     theme
                         .resources
                         .latex_template
+                        .as_deref()
+                        .unwrap_or("default")
+                );
+                println!(
+                    "  DOCX reference: {}",
+                    theme
+                        .resources
+                        .docx_reference_doc
                         .as_deref()
                         .unwrap_or("default")
                 );

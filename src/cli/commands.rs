@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand, ValueEnum, ValueHint};
 )]
 #[command(arg_required_else_help = true, propagate_version = true)]
 #[command(
-    after_help = "Quick start:\n  omnidoc new my-book --type ctex-md\n  omnidoc build my-book\n  omnidoc status my-book\n\nWorkflow groups:\n  omnidoc check --help       Project validation and CI\n  omnidoc convert --help     Standalone format conversion\n  omnidoc template --help    Template discovery and validation\n  omnidoc plugin --help      Plugin discovery and validation\n  omnidoc lib --help         Managed library lifecycle\n\nLegacy flat command forms remain supported for scripts."
+    after_help = "Quick start:\n  omnidoc new my-book --type ctex-md\n  omnidoc build my-book\n  omnidoc status my-book\n\nWorkflow groups:\n  omnidoc check --help       Project validation and CI\n  omnidoc convert --help     Standalone format conversion\n  omnidoc template --help    Template discovery and validation\n  omnidoc plugin --help      Plugin examples and project hooks\n  omnidoc lib --help         Managed library lifecycle\n\nLegacy flat command forms remain supported for scripts."
 )]
 pub struct OmniCli {
     /// document management subcommands
@@ -375,10 +375,10 @@ pub enum Commands {
         update: bool,
     },
 
-    /// discover and validate local plugins and external templates
+    /// discover, install, and validate project plugins
     #[command(
         args_conflicts_with_subcommands = true,
-        after_help = "Examples:\n  omnidoc plugin list\n  omnidoc plugin list --json\n  omnidoc plugin validate\n  omnidoc plugin validate docs --json\n\nThe legacy `omnidoc plugin [PATH] --validate` form remains supported."
+        after_help = "Examples:\n  omnidoc plugin examples\n  omnidoc plugin add quality-gate docs\n  omnidoc plugin add asset-index docs --dry-run\n  omnidoc plugin list docs\n  omnidoc plugin validate docs --json\n\nBundled examples are inert until `plugin add` copies one into a project's `plugins/` directory. The legacy `omnidoc plugin [PATH] --validate` form remains supported."
     )]
     Plugin {
         #[command(subcommand)]
@@ -538,7 +538,10 @@ pub enum Commands {
         json: bool,
     },
 
-    /// discover and validate versioned theme bundles
+    /// discover, validate, and select versioned theme bundles
+    #[command(
+        after_help = "Examples:\n  omnidoc theme list\n  omnidoc theme inspect corporate-docs\n  omnidoc theme apply corporate-docs ./docs\n  omnidoc theme apply modern-slides ./talk --dry-run\n  omnidoc theme validate --json"
+    )]
     Theme {
         #[command(subcommand)]
         subcommand: ThemeSubcommand,
@@ -837,6 +840,35 @@ pub enum LibSubcommand {
 
 #[derive(Debug, Subcommand)]
 pub enum PluginSubcommand {
+    /// list bundled plugin examples that can be installed explicitly
+    Examples {
+        /// optional project path used to resolve the configured library
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// emit stable JSON example metadata
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// install one bundled example into a project's plugins directory
+    Add {
+        /// bundled example key, such as quality-gate or asset-index
+        preset: String,
+
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// report the installation without writing files
+        #[arg(long)]
+        dry_run: bool,
+
+        /// emit a stable JSON installation report
+        #[arg(long)]
+        json: bool,
+    },
+
     /// list discovered plugins and external templates
     List {
         /// set the path to a documentation project
@@ -1030,6 +1062,29 @@ pub enum ThemeSubcommand {
         /// verify required system LaTeX packages with kpsewhich
         #[arg(long)]
         check_latex: bool,
+    },
+
+    /// select an installed theme for a project
+    #[command(visible_alias = "use")]
+    Apply {
+        /// installed theme name
+        name: String,
+
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// report the configuration change without writing it
+        #[arg(long)]
+        dry_run: bool,
+
+        /// show a unified configuration diff and imply --dry-run
+        #[arg(long)]
+        diff: bool,
+
+        /// emit a stable JSON configuration change report
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1604,6 +1659,42 @@ mod tests {
                 }),
                 ..
             } if path == "docs"
+        ));
+
+        let examples = OmniCli::try_parse_from(["omnidoc", "plugin", "examples", "docs", "--json"])
+            .expect("plugin example discovery");
+        assert!(matches!(
+            examples.command,
+            Commands::Plugin {
+                subcommand: Some(PluginSubcommand::Examples {
+                    path: Some(path),
+                    json: true,
+                }),
+                ..
+            } if path == "docs"
+        ));
+
+        let add = OmniCli::try_parse_from([
+            "omnidoc",
+            "plugin",
+            "add",
+            "quality-gate",
+            "docs",
+            "--dry-run",
+            "--json",
+        ])
+        .expect("plugin example installation");
+        assert!(matches!(
+            add.command,
+            Commands::Plugin {
+                subcommand: Some(PluginSubcommand::Add {
+                    preset,
+                    path: Some(path),
+                    dry_run: true,
+                    json: true,
+                }),
+                ..
+            } if preset == "quality-gate" && path == "docs"
         ));
 
         let legacy_plugins =

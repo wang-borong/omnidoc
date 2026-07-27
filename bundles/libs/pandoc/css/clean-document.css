@@ -1,0 +1,31 @@
+@charset "utf-8";
+
+html {
+  color: var(--omni-ink);
+  background: var(--omni-page);
+  font-family: "Noto Serif CJK SC", "Source Han Serif CN", serif;
+  line-height: 1.65;
+}
+
+body { box-sizing: border-box; margin: 5%; }
+p { margin: 0.58em 0; }
+h1, h2, h3, h4 { color: var(--omni-navy); font-family: "Noto Sans CJK SC", "Source Han Sans CN", sans-serif; break-after: avoid; page-break-after: avoid; }
+h1 { margin: 2.2em 0 1em; padding-bottom: 0.3em; border-bottom: 2px solid var(--omni-navy); font-size: 2em; }
+h2 { margin: 1.8em 0 0.75em; padding-bottom: 0.2em; border-bottom: 1px solid var(--omni-line); font-size: 1.45em; }
+h3 { margin: 1.45em 0 0.55em; font-size: 1.18em; }
+h4 { margin: 1.25em 0 0.45em; color: var(--omni-muted); font-size: 1em; }
+a { color: #315b8a; }
+blockquote { margin: 1em 0; padding: 0.65em 1em; color: var(--omni-muted); border-left: 3px solid var(--omni-line); background: var(--omni-pale); }
+nav#toc { margin: 1.5em 0 2em; }
+nav#toc a { text-decoration: none; }
+
+@media screen and (min-width: 58rem) {
+  body { max-width: 50rem; margin: 0 auto; padding: 3rem 2rem 5rem; }
+}
+
+@media (prefers-color-scheme: dark) {
+  html, body { color: #e5e7eb; background: #17181a; }
+  h1, h2, h3 { color: #f3f4f6; }
+  h1, h2 { border-color: #4b5563; }
+  blockquote { background: #202226; border-color: #4b5563; }
+}

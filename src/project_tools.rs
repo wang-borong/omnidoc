@@ -1091,6 +1091,8 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
         }
     }
 
+    add_active_plugin_resources(&mut resources, project_path, &library_root, config);
+
     let mut resolved_filter_paths = BTreeSet::new();
     for filter in output_kind.filters(config) {
         // Keep this resolution identical to PandocBuilder::push_lua_filters:
@@ -1319,7 +1321,10 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
     }
 
     if output_kind == PandocOutputKind::Docx {
-        if let Some(reference_doc) = config.pandoc_reference_doc.as_deref() {
+        let themed = theme
+            .as_ref()
+            .and_then(|theme| theme.resources.docx_reference_doc.as_deref());
+        if let Some(reference_doc) = config.pandoc_reference_doc.as_deref().or(themed) {
             if let Some(path) =
                 resolve_resource_path(project_path, &library_root, reference_doc, None)
             {
@@ -1416,6 +1421,54 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
     }
 
     resources.into_values().collect()
+}
+
+fn add_active_plugin_resources(
+    resources: &mut BTreeMap<String, ResolvedResource>,
+    project_path: &Path,
+    library_root: &Path,
+    config: &MergedConfig,
+) {
+    for plugin in loaded_plugins(project_path, config)
+        .into_iter()
+        .filter(|plugin| plugin.info.valid && !plugin.info.hooks.is_empty())
+    {
+        for entry in WalkDir::new(&plugin.base_dir)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|entry| {
+                entry.depth() == 0
+                    || !matches!(
+                        entry.file_name().to_str().unwrap_or(""),
+                        ".git"
+                            | ".omnidoc-cache"
+                            | ".venv"
+                            | "__pycache__"
+                            | "node_modules"
+                            | "target"
+                            | "venv"
+                    )
+            })
+            .flatten()
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let relative = entry
+                .path()
+                .strip_prefix(&plugin.base_dir)
+                .unwrap_or(entry.path())
+                .to_string_lossy()
+                .replace('\\', "/");
+            add_resolved_resource(
+                resources,
+                project_path,
+                library_root,
+                format!("plugin:{}:{}", plugin.info.key, relative),
+                entry.path().to_path_buf(),
+            );
+        }
+    }
 }
 
 fn omnidoc_library_root(config: &MergedConfig) -> PathBuf {
@@ -2455,6 +2508,10 @@ pub fn discovered_plugins(project_path: &Path, config: &MergedConfig) -> Vec<Plu
         .collect()
 }
 
+pub fn inspect_plugin_manifest(path: &Path) -> PluginInfo {
+    load_plugin_manifest(path).info
+}
+
 pub fn run_plugin_hook(context: &PluginContext<'_>, hook: PluginHook) -> Result<()> {
     for plugin in loaded_plugins(context.project_path, context.config)
         .into_iter()
@@ -2899,7 +2956,7 @@ fn run_hook_command_capture(
     command: &HookCommand,
     hook: PluginHook,
 ) -> Result<String> {
-    let argv = hook_argv(command);
+    let argv = resolved_hook_argv(context, plugin, command)?;
     if argv.is_empty() {
         return Err(OmniDocError::Project(format!(
             "Plugin hook command is empty: {}",
@@ -2952,6 +3009,66 @@ fn hook_argv(command: &HookCommand) -> Vec<String> {
         HookCommand::String(command) => command.split_whitespace().map(str::to_string).collect(),
         HookCommand::Args(args) => args.clone(),
     }
+}
+
+fn resolved_hook_argv(
+    context: &PluginContext<'_>,
+    plugin: &LoadedPlugin,
+    command: &HookCommand,
+) -> Result<Vec<String>> {
+    let mut argv = hook_argv(command)
+        .into_iter()
+        .map(|argument| {
+            expand_hook_argument(
+                &argument,
+                context.project_path,
+                &plugin.base_dir,
+                context.output,
+                context.target,
+            )
+        })
+        .collect::<Vec<_>>();
+    if argv.first().is_some_and(|program| program == "{python}") {
+        let launcher = portable_python_launcher().ok_or_else(|| {
+            OmniDocError::Project(format!(
+                "Plugin {} requires Python 3, but no python3, python, or py launcher was found",
+                plugin.info.key
+            ))
+        })?;
+        argv.splice(0..1, launcher);
+    }
+    Ok(argv)
+}
+
+fn expand_hook_argument(
+    argument: &str,
+    project_path: &Path,
+    plugin_dir: &Path,
+    output: Option<&str>,
+    target: Option<&str>,
+) -> String {
+    argument
+        .replace("{project_dir}", &project_path.to_string_lossy())
+        .replace("{plugin_dir}", &plugin_dir.to_string_lossy())
+        .replace("{output}", output.unwrap_or(""))
+        .replace("{target}", target.unwrap_or(""))
+}
+
+fn portable_python_launcher() -> Option<Vec<String>> {
+    if let Some(configured) = std::env::var_os("OMNIDOC_PYTHON").filter(|value| !value.is_empty()) {
+        return Some(vec![PathBuf::from(configured)
+            .to_string_lossy()
+            .to_string()]);
+    }
+    for candidate in ["python3", "python"] {
+        if let Ok(path) = which::which(candidate) {
+            return Some(vec![path.to_string_lossy().to_string()]);
+        }
+    }
+    if let Ok(path) = which::which("py") {
+        return Some(vec![path.to_string_lossy().to_string(), "-3".to_string()]);
+    }
+    None
 }
 
 fn resolve_hook_program(base_dir: &Path, program: &str) -> PathBuf {
@@ -3104,12 +3221,18 @@ fn validate_hook_command(manifest_path: &Path, command: &HookCommand) -> Option<
     if argv.is_empty() {
         return Some("command is empty".to_string());
     }
-    let program = Path::new(&argv[0]);
+    if argv[0] == "{python}" {
+        return portable_python_launcher()
+            .is_none()
+            .then(|| "Python 3 launcher not found (tried python3, python, and py)".to_string());
+    }
+    let base_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    let expanded_program = argv[0].replace("{plugin_dir}", &base_dir.to_string_lossy());
+    let program = Path::new(&expanded_program);
     if program.components().count() <= 1 && !program.is_absolute() {
         return None;
     }
-    let base_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
-    let resolved = resolve_hook_program(base_dir, &argv[0]);
+    let resolved = resolve_hook_program(base_dir, &expanded_program);
     if resolved.exists() {
         None
     } else {
@@ -3173,12 +3296,12 @@ fn warning(message: String, path: Option<String>, line: Option<usize>) -> Projec
 mod tests {
     use super::{
         acquire_project_write_lock, build_input_digest, build_report, cache_hit,
-        changed_cache_components, dependency_graph, filter_depfile_metadata_key,
-        filter_depfile_name, hook_argv, latex_engine_preference, lint_project, manifest_hook_names,
-        pandoc_option_file_references, parse_lint_rule_output, supported_outputs, validate_config,
-        validate_hook_command, write_cache, write_lock, write_lock_targets, HookCommand,
-        LoadedPlugin, LockFile, LockTargetInput, PluginHooks, PluginInfo, PluginManifest,
-        CACHE_DIR, INCLUDE_DEPFILE, LATEX_INPUT_DEPFILE,
+        changed_cache_components, dependency_graph, expand_hook_argument,
+        filter_depfile_metadata_key, filter_depfile_name, hook_argv, latex_engine_preference,
+        lint_project, manifest_hook_names, pandoc_option_file_references, parse_lint_rule_output,
+        supported_outputs, validate_config, validate_hook_command, write_cache, write_lock,
+        write_lock_targets, HookCommand, LoadedPlugin, LockFile, LockTargetInput, PluginHooks,
+        PluginInfo, PluginManifest, CACHE_DIR, INCLUDE_DEPFILE, LATEX_INPUT_DEPFILE,
     };
     use crate::build::executor::LatexEnginePreference;
     use crate::config::MergedConfig;
@@ -3956,6 +4079,18 @@ user@example.com
     }
 
     #[test]
+    fn expands_hook_arguments_without_a_shell() {
+        let expanded = expand_hook_argument(
+            "{plugin_dir}/lint.py:{project_dir}:{output}:{target}",
+            Path::new("/tmp/project"),
+            Path::new("/tmp/plugin"),
+            Some("html"),
+            Some("manual"),
+        );
+        assert_eq!(expanded, "/tmp/plugin/lint.py:/tmp/project:html:manual");
+    }
+
+    #[test]
     fn lists_and_validates_hook_metadata() {
         let manifest = PluginManifest {
             manifest_version: Some(1),
@@ -3989,6 +4124,56 @@ user@example.com
             &HookCommand::String("scripts/missing.sh".to_string())
         )
         .is_some());
+    }
+
+    #[test]
+    fn active_plugin_files_are_tracked_build_resources() {
+        let project = temporary_project("plugin-resource-project");
+        let library = temporary_project("plugin-resource-library");
+        let plugin_dir = project.join("plugins/quality-gate");
+        fs::create_dir_all(&plugin_dir).expect("plugin directory");
+        fs::create_dir_all(&library).expect("library directory");
+        fs::write(project.join("main.md"), "# Guide\n").expect("entry");
+        fs::write(
+            plugin_dir.join("manifest.toml"),
+            r#"manifest_version = 1
+key = "quality-gate"
+kind = "plugin"
+
+[hooks]
+pre_build = ["tool"]
+"#,
+        )
+        .expect("plugin manifest");
+        let rules = plugin_dir.join("rules.txt");
+        fs::write(&rules, "first rule\n").expect("plugin support file");
+        let config = MergedConfig {
+            entry: Some("main.md".to_string()),
+            to: Some("html".to_string()),
+            lib_path: Some(library.to_string_lossy().to_string()),
+            ..Default::default()
+        };
+
+        let first_graph = dependency_graph(&project, &config);
+        assert!(first_graph
+            .resources
+            .iter()
+            .any(|resource| { resource.logical_name == "plugin:quality-gate:manifest.toml" }));
+        assert!(first_graph
+            .resources
+            .iter()
+            .any(|resource| { resource.logical_name == "plugin:quality-gate:rules.txt" }));
+        let first_digest =
+            build_input_digest(&project, &first_graph, &config, "html").expect("first digest");
+
+        fs::write(&rules, "updated rule\n").expect("updated plugin support file");
+        let second_graph = dependency_graph(&project, &config);
+        let second_digest =
+            build_input_digest(&project, &second_graph, &config, "html").expect("second digest");
+        assert_ne!(first_digest, second_digest);
+
+        fs::remove_dir_all(project).expect("project cleanup");
+        fs::remove_dir_all(library).expect("library cleanup");
     }
 
     #[test]
@@ -4095,7 +4280,7 @@ user@example.com
         let script = plugin_dir.join("hook.sh");
         fs::write(
             &script,
-            "#!/bin/sh\nprintf '%s:%s' \"$OMNIDOC_HOOK\" \"$OMNIDOC_OUTPUT\"\n",
+            "#!/bin/sh\nprintf '%s:%s:%s:%s:%s:%s' \"$OMNIDOC_HOOK\" \"$OMNIDOC_OUTPUT\" \"$1\" \"$2\" \"$3\" \"$4\"\n",
         )
         .expect("script");
         let mut permissions = fs::metadata(&script).expect("metadata").permissions();
@@ -4141,12 +4326,25 @@ user@example.com
         let output = run_hook_command_capture(
             &context,
             &plugin,
-            &HookCommand::Args(vec!["hook.sh".to_string()]),
+            &HookCommand::Args(vec![
+                "hook.sh".to_string(),
+                "{plugin_dir}".to_string(),
+                "{project_dir}".to_string(),
+                "{output}".to_string(),
+                "{target}".to_string(),
+            ]),
             PluginHook::PreBuild,
         )
         .expect("hook output");
 
-        assert_eq!(output, "pre_build:html");
+        assert_eq!(
+            output,
+            format!(
+                "pre_build:html:{}:{}:html:manual",
+                plugin.base_dir.display(),
+                root.display()
+            )
+        );
         let _ = fs::remove_dir_all(root);
     }
 }

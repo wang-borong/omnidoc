@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Added `corporate-docs`, `classic-book`, `clean-document`, and
+  `modern-slides` theme bundles with distinct HTML/EPUB/PDF styling, themed
+  DOCX reference documents, a modern PPTX reference deck, categorized theme
+  discovery, and safe `theme apply|use` project selection.
+- Added opt-in `quality-gate`, `asset-index`, and `build-journal` plugin
+  examples plus `plugin examples` and transactional `plugin add` workflows;
+  hook arguments now support safe project/plugin/output placeholders and a
+  portable `{python}` launcher, while active plugin files now participate in
+  dependency, cache, report, and lock identities.
 - Added workflow-oriented `check`, `convert`, and `template` command groups
   while retaining the previous flat commands for script compatibility, and
   reorganized top-level help around common project workflows.

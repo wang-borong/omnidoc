@@ -248,6 +248,13 @@ pub fn cli() -> Result<()> {
             json,
             validate,
         } => match subcommand {
+            Some(PluginSubcommand::Examples { path, json }) => handle_plugin_examples(path, json)?,
+            Some(PluginSubcommand::Add {
+                preset,
+                path,
+                dry_run,
+                json,
+            }) => handle_plugin_add(preset, path, dry_run, json)?,
             Some(PluginSubcommand::List { path, json }) => handle_plugin(path, json, false)?,
             Some(PluginSubcommand::Validate { path, json }) => handle_plugin(path, json, true)?,
             None => handle_plugin(path, json, validate)?,
