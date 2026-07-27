@@ -6,7 +6,7 @@ use crate::error::{OmniDocError, Result};
 use clap::Parser;
 use clap::{Command, CommandFactory};
 use clap_complete::{generate, Generator};
-use commands::{Commands, OmniCli};
+use commands::{CheckSubcommand, Commands, ConvertSubcommand, OmniCli, TemplateSubcommand};
 use handlers::*;
 use std::env;
 use std::path::Path;
@@ -16,47 +16,63 @@ fn print_completions<G: Generator>(gen: G, cmd: &mut Command) {
     generate(gen, cmd, cmd.get_name().to_string(), &mut std::io::stdout());
 }
 
+fn command_needs_library(command: &Commands) -> bool {
+    matches!(
+        command,
+        Commands::Build { .. }
+            | Commands::Watch { .. }
+            | Commands::Publish { verify: false, .. }
+            | Commands::Ci { .. }
+            | Commands::Md2pdf { .. }
+            | Commands::Md2html { .. }
+            | Commands::Convert { .. }
+            | Commands::Check {
+                subcommand: CheckSubcommand::Ci { .. }
+            }
+    )
+}
+
+fn prepare_working_directory(command: &mut Commands) -> Result<()> {
+    let path = match command {
+        Commands::Init { path, .. }
+        | Commands::Open { path }
+        | Commands::Clean { path, .. }
+        | Commands::Update { path } => path,
+        _ => return Ok(()),
+    };
+
+    let Some(path) = path else {
+        return Ok(());
+    };
+    let canonical = Path::new(path).canonicalize().map_err(|_| {
+        OmniDocError::Project(format!(
+            "Path does not exist or is not accessible: {}",
+            path
+        ))
+    })?;
+    if !canonical.is_dir() {
+        return Err(OmniDocError::Project(format!(
+            "Path is not a directory: {}",
+            canonical.display()
+        )));
+    }
+    env::set_current_dir(&canonical).map_err(OmniDocError::Io)?;
+    *path = canonical.to_string_lossy().to_string();
+    Ok(())
+}
+
 /// Main CLI entry point
 pub fn cli() -> Result<()> {
-    let args = OmniCli::parse();
+    let mut args = OmniCli::parse();
 
     let orig_path = env::current_dir().map_err(OmniDocError::Io)?;
 
     // Ensure the release-bound library exists for commands that need it.
-    match args.command {
-        Commands::New { .. }
-        | Commands::Init { .. }
-        | Commands::Build { .. }
-        | Commands::Watch { .. }
-        | Commands::Publish { verify: false, .. }
-        | Commands::Ci { .. }
-        | Commands::Md2pdf { .. }
-        | Commands::Md2html { .. }
-            if !omnidoc_lib_exists() =>
-        {
-            handle_lib(true, false, false, false, false)?;
-        }
-        _ => {}
+    if command_needs_library(&args.command) && !omnidoc_lib_exists() {
+        handle_lib(true, false, false, false, false)?;
     }
 
-    // Handle directory changes for commands that need it
-    match args.command {
-        Commands::Init { ref path, .. }
-        | Commands::Open { ref path }
-        | Commands::Clean { ref path, .. }
-        | Commands::Update { ref path } => {
-            if let Some(path) = path {
-                if !Path::new(&path).exists() {
-                    return Err(OmniDocError::Project(format!(
-                        "Path does not exist: {}",
-                        path
-                    )));
-                }
-                env::set_current_dir(path).map_err(OmniDocError::Io)?;
-            }
-        }
-        _ => {}
-    }
+    prepare_working_directory(&mut args.command)?;
 
     // Route to appropriate command handler
     match args.command {
@@ -64,15 +80,21 @@ pub fn cli() -> Result<()> {
             path,
             author,
             title,
+            doctype,
+            format,
+            defaults,
         } => {
-            handle_new(&orig_path, path, title, author)?;
+            handle_new(&orig_path, path, title, author, doctype, format, defaults)?;
         }
         Commands::Init {
-            path,
             author,
             title,
+            doctype,
+            format,
+            defaults,
+            ..
         } => {
-            handle_init(&orig_path, path, title, author)?;
+            handle_init(title, author, doctype, format, defaults)?;
         }
         Commands::Build {
             path,
@@ -169,6 +191,9 @@ pub fn cli() -> Result<()> {
                 verbose,
             )?;
         }
+        Commands::Check { subcommand } => {
+            handle_check(subcommand)?;
+        }
         Commands::Doctor {
             path,
             json,
@@ -238,16 +263,35 @@ pub fn cli() -> Result<()> {
         Commands::List => {
             print_doctypes();
         }
-        Commands::Complete { generator } => {
-            if let Some(generator) = generator {
-                let mut cmd = OmniCli::command();
-                print_completions(generator, &mut cmd);
+        Commands::Complete { shell, generator } => {
+            let generator = shell.or(generator).ok_or_else(|| {
+                OmniDocError::Other(
+                    "A shell is required. Example: `omnidoc complete zsh`".to_string(),
+                )
+            })?;
+            let mut cmd = OmniCli::command();
+            print_completions(generator, &mut cmd);
+        }
+        Commands::Template {
+            subcommand,
+            validate,
+        } => {
+            if validate {
+                handle_template_validate(None, false)?;
+            } else {
+                match subcommand {
+                    Some(TemplateSubcommand::List { format, json }) => {
+                        print_templates(format, json)?;
+                    }
+                    Some(TemplateSubcommand::Validate { key, json }) => {
+                        handle_template_validate(key, json)?;
+                    }
+                    None => print_templates(None, false)?,
+                }
             }
         }
-        Commands::Template { validate } => {
-            if validate {
-                handle_template_validate();
-            }
+        Commands::Convert { subcommand } => {
+            handle_convert(subcommand)?;
         }
         Commands::Md2pdf {
             lang,
@@ -285,4 +329,39 @@ pub fn cli() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn handle_check(subcommand: CheckSubcommand) -> Result<()> {
+    match subcommand {
+        CheckSubcommand::Doctor {
+            path,
+            json,
+            strict,
+            outputs,
+        } => handle_doctor(path, json, strict, outputs),
+        CheckSubcommand::Config { path } => handle_config_validate(path),
+        CheckSubcommand::Lint { path, strict } => handle_lint(path, strict),
+        CheckSubcommand::Deps { path, json } => handle_deps(path, json),
+        CheckSubcommand::Lock {
+            path,
+            check,
+            update,
+        } => handle_lock(path, check, update),
+        CheckSubcommand::Ci { path, outputs } => handle_ci(path, outputs),
+    }
+}
+
+fn handle_convert(subcommand: ConvertSubcommand) -> Result<()> {
+    match subcommand {
+        ConvertSubcommand::Pdf {
+            lang,
+            inputs,
+            output,
+        } => handle_md2pdf(lang, inputs, output),
+        ConvertSubcommand::Html {
+            inputs,
+            output,
+            css,
+        } => handle_md2html(inputs, output, css),
+    }
 }

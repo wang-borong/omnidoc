@@ -1,9 +1,17 @@
+use crate::doctype::DocumentFormat;
 use clap::{Parser, Subcommand, ValueHint};
 
 /// The OmniDoc management CLI
 #[derive(Debug, Parser)]
 #[command(name = "omnidoc")]
-#[command(version, about = "The OmniDoc management CLI", long_about = None)]
+#[command(
+    version,
+    about = "Create, build, validate, and publish document projects"
+)]
+#[command(arg_required_else_help = true, propagate_version = true)]
+#[command(
+    after_help = "Quick start:\n  omnidoc new my-book --type ctex-md\n  omnidoc build my-book\n\nWorkflow groups:\n  omnidoc check --help       Project validation and CI\n  omnidoc convert --help     Standalone format conversion\n  omnidoc template --help    Template discovery and validation\n\nLegacy flat command forms remain supported for scripts."
+)]
 pub struct OmniCli {
     /// document management subcommands
     #[command(subcommand)]
@@ -12,7 +20,11 @@ pub struct OmniCli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// create a new project
+    /// create a new OmniDoc project
+    #[command(visible_alias = "create")]
+    #[command(
+        after_help = "Examples:\n  omnidoc new my-book\n  omnidoc new my-book --type ctex-md\n  omnidoc new my-book --defaults\n  omnidoc new report --format latex"
+    )]
     New {
         /// set the author name
         #[arg(short, long)]
@@ -20,14 +32,35 @@ pub enum Commands {
 
         /// set the document title
         #[arg(short = 't', long)]
-        title: String,
+        title: Option<String>,
+
+        /// use a template key directly and skip the selector
+        #[arg(
+            short = 'T',
+            long = "type",
+            visible_alias = "template",
+            alias = "doctype",
+            value_name = "KEY"
+        )]
+        doctype: Option<String>,
+
+        /// limit template selection to one source format
+        #[arg(long, value_enum)]
+        format: Option<DocumentFormat>,
+
+        /// accept recommended defaults (ctex-md) without prompting
+        #[arg(short = 'y', long, visible_alias = "yes", conflicts_with_all = ["doctype", "format"])]
+        defaults: bool,
 
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
         path: String,
     },
 
-    /// init a project
+    /// initialize an existing directory as an OmniDoc project
+    #[command(
+        after_help = "Examples:\n  omnidoc init\n  omnidoc init . --type ctex-md\n  omnidoc init existing-repo --defaults"
+    )]
     Init {
         /// set the author name
         #[arg(short, long)]
@@ -35,7 +68,25 @@ pub enum Commands {
 
         /// set the document title
         #[arg(short = 't', long)]
-        title: String,
+        title: Option<String>,
+
+        /// use a template key directly and skip the selector
+        #[arg(
+            short = 'T',
+            long = "type",
+            visible_alias = "template",
+            alias = "doctype",
+            value_name = "KEY"
+        )]
+        doctype: Option<String>,
+
+        /// limit template selection to one source format
+        #[arg(long, value_enum)]
+        format: Option<DocumentFormat>,
+
+        /// accept recommended defaults (ctex-md) without prompting
+        #[arg(short = 'y', long, visible_alias = "yes", conflicts_with_all = ["doctype", "format"])]
+        defaults: bool,
 
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
@@ -211,6 +262,12 @@ pub enum Commands {
         verbose: bool,
     },
 
+    /// validate, inspect, lock, and test a project
+    Check {
+        #[command(subcommand)]
+        subcommand: CheckSubcommand,
+    },
+
     /// diagnose local tools, configuration, and template library
     Doctor {
         /// set the path to a documentation project
@@ -231,6 +288,7 @@ pub enum Commands {
     },
 
     /// validate OmniDoc configuration files
+    #[command(hide = true)]
     ConfigValidate {
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
@@ -238,6 +296,7 @@ pub enum Commands {
     },
 
     /// lint document sources for missing resources and weak references
+    #[command(hide = true)]
     Lint {
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
@@ -249,6 +308,7 @@ pub enum Commands {
     },
 
     /// print the tracked project dependency graph
+    #[command(hide = true)]
     Deps {
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
@@ -260,6 +320,7 @@ pub enum Commands {
     },
 
     /// run strict CI checks and configured builds
+    #[command(hide = true)]
     Ci {
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
@@ -271,6 +332,7 @@ pub enum Commands {
     },
 
     /// create or update omnidoc.lock
+    #[command(hide = true)]
     Lock {
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
@@ -300,7 +362,7 @@ pub enum Commands {
         validate: bool,
     },
 
-    /// open the built doc
+    /// open the built document
     Open {
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
@@ -318,7 +380,7 @@ pub enum Commands {
         path: Option<String>,
     },
 
-    /// update a doc repo
+    /// refresh project scaffolding for the current OmniDoc version
     Update {
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
@@ -382,23 +444,39 @@ pub enum Commands {
     },
 
     /// list all supported document types
+    #[command(hide = true)]
     List,
 
-    /// template toolkit
+    /// discover and validate built-in and external project templates
     Template {
+        #[command(subcommand)]
+        subcommand: Option<TemplateSubcommand>,
+
         /// validate external template manifests & files
-        #[arg(long)]
+        #[arg(long, hide = true)]
         validate: bool,
     },
 
     /// generate shell completion
+    #[command(visible_aliases = ["completion", "completions"])]
     Complete {
-        /// If provided, outputs the completion file for given shell
-        #[arg(short, long = "generate", value_enum)]
+        /// shell to generate completion for
+        #[arg(value_enum, value_name = "SHELL", conflicts_with = "generator")]
+        shell: Option<clap_complete::Shell>,
+
+        /// legacy form of the shell selection option
+        #[arg(short, long = "generate", value_enum, hide = true)]
         generator: Option<clap_complete::Shell>,
     },
 
+    /// convert standalone Markdown files without creating a project
+    Convert {
+        #[command(subcommand)]
+        subcommand: ConvertSubcommand,
+    },
+
     /// convert markdown files to PDF
+    #[command(hide = true)]
     Md2pdf {
         /// language (cn or en)
         #[arg(short, long)]
@@ -413,6 +491,7 @@ pub enum Commands {
     },
 
     /// convert markdown files to HTML
+    #[command(hide = true)]
     Md2html {
         /// output file path (for single input) or directory (for multiple inputs)
         #[arg(short, long)]
@@ -428,6 +507,7 @@ pub enum Commands {
     },
 
     /// format documents (recursively format directories or format files)
+    #[command(visible_alias = "format")]
     Fmt {
         /// create backup files
         #[arg(short, long, conflicts_with_all = ["check", "diff"])]
@@ -474,6 +554,141 @@ pub enum Commands {
         /// source figure files (auto-detect type if no subcommand specified)
         #[arg(value_hint = ValueHint::FilePath)]
         sources: Vec<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CheckSubcommand {
+    /// diagnose local tools, configuration, and template library
+    Doctor {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// emit JSON diagnostics
+        #[arg(long)]
+        json: bool,
+
+        /// return a non-zero exit status when any check fails
+        #[arg(long)]
+        strict: bool,
+
+        /// diagnose one or more output formats instead of every configured output
+        #[arg(long = "output", value_name = "FORMAT")]
+        outputs: Vec<String>,
+    },
+
+    /// validate OmniDoc configuration files
+    #[command(visible_alias = "validate")]
+    Config {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+    },
+
+    /// lint document sources for missing resources and weak references
+    Lint {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// treat warnings as errors
+        #[arg(long)]
+        strict: bool,
+    },
+
+    /// print the tracked project dependency graph
+    Deps {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// emit JSON dependency graph
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// create, update, or verify omnidoc.lock
+    Lock {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// check whether omnidoc.lock matches current project inputs
+        #[arg(long, conflicts_with = "update")]
+        check: bool,
+
+        /// rewrite the lock file
+        #[arg(long)]
+        update: bool,
+    },
+
+    /// run strict CI checks and configured builds
+    Ci {
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// output format to build (repeatable)
+        #[arg(long = "output")]
+        outputs: Vec<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TemplateSubcommand {
+    /// list template keys accepted by new and init
+    List {
+        /// filter templates by source format
+        #[arg(long, value_enum)]
+        format: Option<DocumentFormat>,
+
+        /// emit stable JSON metadata
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// validate external template manifests and rendering
+    Validate {
+        /// validate only one template key
+        key: Option<String>,
+
+        /// emit validation results as JSON
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ConvertSubcommand {
+    /// convert Markdown files to PDF
+    Pdf {
+        /// language (cn or en)
+        #[arg(short, long)]
+        lang: Option<String>,
+
+        /// output file path
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// input Markdown files
+        #[arg(required = true, value_hint = ValueHint::FilePath)]
+        inputs: Vec<String>,
+    },
+
+    /// convert Markdown files to HTML
+    Html {
+        /// output file path (for single input) or directory (for multiple inputs)
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// CSS file path
+        #[arg(short, long)]
+        css: Option<String>,
+
+        /// input Markdown files
+        #[arg(required = true, value_hint = ValueHint::FilePath)]
+        inputs: Vec<String>,
     },
 }
 
@@ -738,7 +953,8 @@ pub enum FigureSubcommand {
 
 #[cfg(test)]
 mod tests {
-    use super::{Commands, OmniCli};
+    use super::{CheckSubcommand, Commands, ConvertSubcommand, OmniCli};
+    use crate::doctype::DocumentFormat;
     use clap::Parser;
 
     #[test]
@@ -755,5 +971,88 @@ mod tests {
             panic!("expected build command");
         };
         assert_eq!(latex_backend.as_deref(), Some("engine"));
+    }
+
+    #[test]
+    fn new_supports_inferred_titles_and_direct_template_selection() {
+        let cli = OmniCli::try_parse_from([
+            "omnidoc", "new", "guide", "--type", "ctex-md", "--format", "markdown",
+        ])
+        .expect("new command");
+        let Commands::New {
+            path,
+            title,
+            doctype,
+            format,
+            defaults,
+            ..
+        } = cli.command
+        else {
+            panic!("expected new command");
+        };
+        assert_eq!(path, "guide");
+        assert_eq!(title, None);
+        assert_eq!(doctype.as_deref(), Some("ctex-md"));
+        assert_eq!(format, Some(DocumentFormat::Markdown));
+        assert!(!defaults);
+    }
+
+    #[test]
+    fn workflow_groups_and_legacy_conversion_forms_both_parse() {
+        let grouped = OmniCli::try_parse_from(["omnidoc", "check", "lint", "--strict", "docs"])
+            .expect("grouped check command");
+        assert!(matches!(
+            grouped.command,
+            Commands::Check {
+                subcommand: CheckSubcommand::Lint { strict: true, .. }
+            }
+        ));
+
+        let convert = OmniCli::try_parse_from(["omnidoc", "convert", "html", "README.md"])
+            .expect("grouped conversion command");
+        assert!(matches!(
+            convert.command,
+            Commands::Convert {
+                subcommand: ConvertSubcommand::Html { .. }
+            }
+        ));
+
+        let legacy = OmniCli::try_parse_from(["omnidoc", "md2html", "README.md"])
+            .expect("legacy conversion command");
+        assert!(matches!(legacy.command, Commands::Md2html { .. }));
+
+        let legacy_template = OmniCli::try_parse_from(["omnidoc", "template", "--validate"])
+            .expect("legacy template validation command");
+        assert!(matches!(
+            legacy_template.command,
+            Commands::Template { validate: true, .. }
+        ));
+
+        let legacy_list =
+            OmniCli::try_parse_from(["omnidoc", "list"]).expect("legacy template list command");
+        assert!(matches!(legacy_list.command, Commands::List));
+    }
+
+    #[test]
+    fn shell_completion_accepts_positional_and_legacy_forms() {
+        let positional = OmniCli::try_parse_from(["omnidoc", "complete", "zsh"])
+            .expect("positional completion shell");
+        assert!(matches!(
+            positional.command,
+            Commands::Complete {
+                shell: Some(clap_complete::Shell::Zsh),
+                generator: None
+            }
+        ));
+
+        let legacy = OmniCli::try_parse_from(["omnidoc", "complete", "--generate", "bash"])
+            .expect("legacy completion shell");
+        assert!(matches!(
+            legacy.command,
+            Commands::Complete {
+                shell: None,
+                generator: Some(clap_complete::Shell::Bash)
+            }
+        ));
     }
 }

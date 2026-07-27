@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Added workflow-oriented `check`, `convert`, and `template` command groups
+  while retaining the previous flat commands for script compatibility, and
+  reorganized top-level help around common project workflows.
+- Made `new` and `init` titles optional, added direct `--type`, filtered
+  `--format`, and non-interactive `--defaults` creation paths, plus actionable
+  next-step output and positional shell completion generation.
+- Made project creation fail safely before touching the target when an
+  interactive template cannot be selected, stopped cancellation from deleting
+  existing init directories, and fixed relative init/open/clean/update path
+  handling.
+- Carried external template language and entry-file metadata through project
+  setup and configuration, added JSON template discovery/validation with safe
+  relative-path enforcement, and made initial Git commits work on machines
+  without global Git identity settings.
+
 ## 1.7.0 - 2026-07-26
 
 - Bundled the official Tectonic 0.16.9 engine in platform release archives and

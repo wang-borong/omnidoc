@@ -1,83 +1,91 @@
 use crate::cli::handlers::common::{create_config_manager_default, merged_config_to_envs};
-use crate::cli::utils::get_doctype_from_readline;
+use crate::cli::utils::{infer_title, resolve_creation_template};
 use crate::config::ProjectConfig;
-use crate::constants::paths_internal;
 use crate::doc::Doc;
-use crate::doctype::DocumentTypeRegistry;
+use crate::doctype::DocumentFormat;
 use crate::error::{OmniDocError, Result};
 use crate::utils::fs;
 use std::env;
+use std::path::Path;
 
 /// Handle the 'new' command
 pub fn handle_new(
     orig_path: &std::path::Path,
     path: String,
-    title: String,
+    title: Option<String>,
     author: Option<String>,
+    doctype: Option<String>,
+    format: Option<DocumentFormat>,
+    defaults: bool,
 ) -> Result<()> {
-    // Create directory and change to it
-    if fs::exists(&path) {
+    let requested_path = Path::new(&path);
+    let target_path = if requested_path.is_absolute() {
+        requested_path.to_path_buf()
+    } else {
+        orig_path.join(requested_path)
+    };
+    if fs::exists(&target_path) {
         return Err(OmniDocError::Project(format!(
             "The path already exists: {}",
-            path
+            target_path.display()
         )));
     }
 
-    fs::create_dir_all(&path)?;
-    env::set_current_dir(&path).map_err(|e| {
-        let _ = env::set_current_dir(orig_path);
-        let _ = fs::remove_dir_all(&path);
-        OmniDocError::Io(e)
-    })?;
-
-    // Load config and get envs
-    let config_manager = create_config_manager_default(None).inspect_err(|_| {
-        let _ = env::set_current_dir(orig_path);
-        let _ = fs::remove_dir_all(&path);
-    })?;
-
+    let config_manager = create_config_manager_default(None)?;
     let merged_config = config_manager.get_merged();
     let envs = merged_config_to_envs(merged_config);
-
     let author = author
         .or_else(|| merged_config.author.clone())
         .unwrap_or_else(|| "Someone".to_string());
+    let template = resolve_creation_template(doctype, format, defaults)?;
+    let title = title.unwrap_or_else(|| infer_title(&target_path));
 
-    // Get document type from user
-    let doctype_str = get_doctype_from_readline(orig_path, &path)?;
-
-    // Create the project
-    let doc = Doc::new(&title, &path, &author, &doctype_str, envs);
-    doc.create_project().map_err(|e| {
-        let _ = env::set_current_dir(paths_internal::PARENT_DIR);
-        let _ = fs::remove_dir_all(&path);
-        OmniDocError::Project(format!("Failed to create project: {}", e))
+    fs::create_dir_all(&target_path)?;
+    let target_path = target_path.canonicalize().map_err(|error| {
+        let _ = fs::remove_dir_all(&target_path);
+        OmniDocError::Io(error)
+    })?;
+    env::set_current_dir(&target_path).map_err(|error| {
+        let _ = env::set_current_dir(orig_path);
+        let _ = fs::remove_dir_all(&target_path);
+        OmniDocError::Io(error)
     })?;
 
-    // 创建项目配置文件
-    // 使用当前目录（已切换到新项目目录）而不是相对路径
-    let project_path = env::current_dir().map_err(OmniDocError::Io)?;
-    let doctype = DocumentTypeRegistry::parse(&doctype_str)
-        .map_err(|e| OmniDocError::Project(format!("Invalid document type: {}", e)))?;
+    let path_string = target_path.to_string_lossy().to_string();
+    let doc = Doc::new(&title, &path_string, &author, &template.key, envs);
+    let result: Result<()> = (|| {
+        let target_name = target_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("document");
+        ProjectConfig::create_default(
+            &target_path,
+            Some(&template.file_name),
+            Some(template.format.as_str()),
+            Some("pdf"),
+            Some(target_name),
+        )?;
+        doc.create_project()?;
+        Ok(())
+    })();
 
-    let entry = Some(doctype.file_name());
-    let from = if doctype.file_extension() == "md" {
-        Some("markdown")
-    } else {
-        Some("latex")
-    };
-    let to = Some("pdf");
-    let target_name = project_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("document");
-
-    ProjectConfig::create_default(&project_path, entry, from, to, Some(target_name))?;
+    if let Err(error) = result {
+        let _ = env::set_current_dir(orig_path);
+        let _ = fs::remove_dir_all(&target_path);
+        return Err(OmniDocError::Project(format!(
+            "Failed to create project: {}",
+            error
+        )));
+    }
 
     println!(
-        "✓ Created project configuration file: {}/.omnidoc.toml",
-        path
+        "✓ Ready: '{}' ({}, {})",
+        target_path.display(),
+        template.key,
+        template.format.as_str()
     );
+    println!("  Next: cd {:?} && omnidoc build", target_path);
+    let _ = env::set_current_dir(orig_path);
 
     Ok(())
 }

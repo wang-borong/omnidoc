@@ -76,17 +76,45 @@ template_file = "template.md"
     }
 
     fn command(&self, args: &[&str]) -> Output {
+        self.command_builder(args).output().expect("run omnidoc")
+    }
+
+    fn command_in(&self, current_dir: &Path, args: &[&str]) -> Output {
+        let mut command = self.command_builder(args);
+        command.current_dir(current_dir);
+        command.output().expect("run omnidoc")
+    }
+
+    fn command_in_with_env(
+        &self,
+        current_dir: &Path,
+        args: &[&str],
+        env: &[(&str, &Path)],
+    ) -> Output {
+        let mut command = self.command_builder(args);
+        command.current_dir(current_dir);
+        for (name, value) in env {
+            command.env(name, value);
+        }
+        command.output().expect("run omnidoc")
+    }
+
+    fn command_builder(&self, args: &[&str]) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_omnidoc"));
         command
             .args(args)
             .env("HOME", self.env_root.join("home"))
             .env("XDG_CONFIG_HOME", self.env_root.join("config"))
             .env("XDG_DATA_HOME", self.env_root.join("data"));
-        command.output().expect("run omnidoc")
+        command
     }
 
     fn project_arg(&self) -> String {
         self.project.display().to_string()
+    }
+
+    fn base(&self) -> &Path {
+        self.project.parent().expect("fixture base")
     }
 }
 
@@ -123,6 +151,213 @@ fn assert_failure(output: Output) -> String {
 }
 
 #[test]
+fn help_prioritizes_workflows_and_keeps_legacy_commands_out_of_the_main_list() {
+    let fixture = Fixture::new("help-groups");
+    let output = fixture.command(&["--help"]);
+    let stdout = assert_success(output);
+
+    assert!(stdout.contains("omnidoc check --help"));
+    assert!(stdout.contains("omnidoc convert --help"));
+    assert!(stdout.contains("omnidoc template --help"));
+    assert!(!stdout.contains("  config-validate  "));
+    assert!(!stdout.contains("  md2pdf  "));
+
+    let new_help = assert_success(fixture.command(&["new", "--help"]));
+    assert!(new_help.contains("Usage: omnidoc new [OPTIONS] <PATH>"));
+    assert!(new_help.contains("--type <KEY>"));
+    assert!(new_help.contains("--defaults"));
+    assert!(!new_help.contains("--title <TITLE> <PATH>"));
+}
+
+#[test]
+fn new_supports_non_interactive_templates_and_infers_the_title() {
+    let fixture = Fixture::new("new-direct");
+    let target = fixture.base().join("my-guide");
+
+    let stdout = assert_success(fixture.command_in(
+        fixture.base(),
+        &["new", "my-guide", "--type", "ctex-md", "--author", "Tester"],
+    ));
+
+    assert!(stdout.contains("Next:"));
+    assert!(target.join(".omnidoc.toml").is_file());
+    let main = fs::read_to_string(target.join("main.md")).expect("generated entry");
+    assert!(main.contains("title: my guide"));
+    assert!(main.contains("- Tester"));
+    let config = fs::read_to_string(target.join(".omnidoc.toml")).expect("project config");
+    assert!(config.contains("entry = \"main.md\""));
+    assert!(config.contains("from = \"markdown\""));
+
+    let repo = git2::Repository::open(&target).expect("created git repository");
+    let commit = repo
+        .head()
+        .expect("repository head")
+        .peel_to_commit()
+        .expect("initial commit");
+    let tree = commit.tree().expect("initial tree");
+    assert!(tree.get_path(Path::new(".omnidoc.toml")).is_ok());
+}
+
+#[test]
+fn non_interactive_new_without_a_template_fails_before_creating_the_path() {
+    let fixture = Fixture::new("new-no-template");
+    let target = fixture.base().join("needs-choice");
+    let output = fixture.command_in(fixture.base(), &["new", "needs-choice"]);
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--type <KEY>"));
+    assert!(!target.exists());
+
+    let invalid_target = fixture.base().join("invalid-template");
+    let invalid = fixture.command_in(
+        fixture.base(),
+        &["new", "invalid-template", "--type", "ctex-m"],
+    );
+    assert!(!invalid.status.success());
+    let stderr = String::from_utf8_lossy(&invalid.stderr);
+    assert!(stderr.contains("did you mean 'ctex-md'"));
+    assert!(stderr.contains("omnidoc template list"));
+    assert!(!invalid_target.exists());
+}
+
+#[test]
+fn init_accepts_an_existing_main_file_and_resolves_relative_paths_once() {
+    let fixture = Fixture::new("init-relative");
+    let target = fixture.base().join("existing-notes");
+    fs::create_dir_all(&target).expect("existing repository");
+    fs::write(target.join("main.md"), "# Existing notes\n").expect("existing entry");
+
+    assert_success(fixture.command_in(
+        fixture.base(),
+        &[
+            "init",
+            "existing-notes",
+            "--type",
+            "ctex-md",
+            "--title",
+            "Existing Notes",
+        ],
+    ));
+
+    assert!(target.join(".omnidoc.toml").is_file());
+    assert!(!target.join("existing-notes/.omnidoc.toml").exists());
+    assert_eq!(
+        fs::read_to_string(target.join("main.md")).expect("preserved entry"),
+        "# Existing notes\n"
+    );
+}
+
+#[test]
+fn relative_update_resolves_the_target_and_infers_the_project_format() {
+    let fixture = Fixture::new("update-relative");
+
+    assert_success(fixture.command_in(fixture.base(), &["update", "project"]));
+
+    assert!(fixture.project.join(".gitignore").is_file());
+    assert!(!fixture.project.join(".latexmkrc").exists());
+    assert!(!fixture.project.join("project/.gitignore").exists());
+}
+
+#[test]
+fn external_templates_work_for_direct_creation_listing_and_validation() {
+    let fixture = Fixture::new("external-template");
+    let templates = fixture.base().join("templates");
+    let custom = templates.join("team-note");
+    fs::create_dir_all(&custom).expect("external template directory");
+    fs::write(
+        custom.join("manifest.toml"),
+        r#"key = "team-note"
+name = "Team Note"
+description = "A short team note"
+language = "markdown"
+template_file = "template.md"
+file_name = "docs/index.md"
+"#,
+    )
+    .expect("external template manifest");
+    fs::write(
+        custom.join("template.md"),
+        "# {{ title }}\n\nOwner: {{ author }}\n",
+    )
+    .expect("external template body");
+
+    let env = [("OMNIDOC_TEMPLATE_DIR", templates.as_path())];
+    assert_success(fixture.command_in_with_env(
+        fixture.base(),
+        &[
+            "new",
+            "team-handbook",
+            "--type",
+            "team-note",
+            "--author",
+            "Docs Team",
+        ],
+        &env,
+    ));
+
+    let target = fixture.base().join("team-handbook");
+    let entry = fs::read_to_string(target.join("docs/index.md")).expect("external entry");
+    assert!(entry.contains("# team handbook"));
+    assert!(entry.contains("Owner: Docs Team"));
+    let config = fs::read_to_string(target.join(".omnidoc.toml")).expect("project config");
+    assert!(config.contains("entry = \"docs/index.md\""));
+
+    let listed = assert_success(fixture.command_in_with_env(
+        fixture.base(),
+        &["template", "list", "--json"],
+        &env,
+    ));
+    let listed: serde_json::Value = serde_json::from_str(&listed).expect("template list JSON");
+    assert!(listed.as_array().is_some_and(|templates| templates
+        .iter()
+        .any(|template| template["key"] == "team-note")));
+
+    let validated = assert_success(fixture.command_in_with_env(
+        fixture.base(),
+        &["template", "validate", "team-note", "--json"],
+        &env,
+    ));
+    let validated: serde_json::Value =
+        serde_json::from_str(&validated).expect("template validation JSON");
+    assert_eq!(validated[0]["valid"], true);
+
+    let unsafe_template = templates.join("unsafe-note");
+    fs::create_dir_all(&unsafe_template).expect("unsafe template directory");
+    fs::write(
+        unsafe_template.join("manifest.toml"),
+        r#"key = "unsafe-note"
+language = "markdown"
+template_file = "template.md"
+file_name = "../../escaped.md"
+"#,
+    )
+    .expect("unsafe template manifest");
+    fs::write(unsafe_template.join("template.md"), "# {{ title }}\n")
+        .expect("unsafe template body");
+
+    let invalid = assert_failure(fixture.command_in_with_env(
+        fixture.base(),
+        &["template", "validate", "unsafe-note", "--json"],
+        &env,
+    ));
+    let invalid: serde_json::Value =
+        serde_json::from_str(&invalid).expect("invalid template validation JSON");
+    assert_eq!(invalid[0]["valid"], false);
+    assert!(invalid[0]["error"]
+        .as_str()
+        .is_some_and(|error| error.contains("safe relative path")));
+
+    assert_failure(fixture.command_in_with_env(
+        fixture.base(),
+        &["new", "unsafe-project", "--type", "unsafe-note"],
+        &env,
+    ));
+    assert!(!fixture.base().join("unsafe-project").exists());
+    assert!(!fixture.base().join("escaped.md").exists());
+}
+
+#[test]
 fn fatal_errors_use_the_structured_terminal_layout() {
     let fixture = Fixture::new("error-layout");
     fs::write(
@@ -148,10 +383,14 @@ fn quality_commands_work_on_minimal_project() {
 
     assert_success(fixture.command(&["config-validate", &project]));
     assert_success(fixture.command(&["lint", "--strict", &project]));
+    assert_success(fixture.command(&["check", "config", &project]));
+    assert_success(fixture.command(&["check", "lint", "--strict", &project]));
 
     let deps = assert_success(fixture.command(&["deps", "--json", &project]));
     assert!(deps.contains("main.md"));
     assert!(deps.contains(".omnidoc.toml"));
+    let grouped_deps = assert_success(fixture.command(&["check", "deps", "--json", &project]));
+    assert!(grouped_deps.contains("main.md"));
 
     assert_success(fixture.command(&["lock", "--update", &project]));
     assert_success(fixture.command(&["lock", "--check", &project]));

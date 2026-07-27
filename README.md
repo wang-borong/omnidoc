@@ -56,42 +56,62 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
 ## Usage
 
+OmniDoc keeps the most common lifecycle commands at the top level (`new`,
+`init`, `build`, `watch`, `publish`, and `open`) and groups related tools by
+workflow:
+
+```bash
+omnidoc check --help       # diagnostics, validation, dependencies, locks, CI
+omnidoc convert --help     # standalone Markdown conversion
+omnidoc template --help    # template discovery and validation
+```
+
+The previous flat forms such as `config-validate`, `md2pdf`, `md2html`,
+`list`, and `template --validate` remain available for script compatibility.
+
 ### Quick Start
 
 1. **Create a new documentation repository**
 
    ```bash
-   omnidoc new <PATH> --title "Document Title" [--author "Author Name"]
+   omnidoc new <PATH> [--title "Document Title"] [--author "Author Name"]
    ```
 
-   Example:
+   The title defaults to the directory name, so the shortest useful form is:
+
    ```bash
-   omnidoc new hello --title "My Document" --author "John Doe"
+   omnidoc new hello
    ```
 
-   You'll be prompted to choose a template (built-in + external) with an interactive selector. Use arrow keys to navigate, Enter to select. You can also type an external template key directly (e.g., `simple-md`).
+   Use `--type` for a direct, scriptable creation path, or `--defaults` to use
+   the recommended `ctex-md` template without prompting:
+
+   ```bash
+   omnidoc new hello --type ctex-md --author "John Doe"
+   omnidoc new hello --defaults
+   omnidoc new report --format latex  # only show LaTeX templates in the selector
+   ```
+
+   Without `--type` or `--defaults`, OmniDoc shows a searchable selector for
+   built-in and external templates. In non-interactive environments it exits
+   with guidance instead of attempting to open a prompt or leaving a partial
+   directory behind.
 
    Example (inquire-based selection):
 
    ```
-   $ omnidoc new hello --title "hello"
+   $ omnidoc new hello
 
-   ? Select document type:
-   > ctex-md — ctex class based markdown document writing system
-     ebook-md — elegantbook class based markdown document writing system
-     enote-md — elegantnote class based markdown document writing system
-     ctexart-tex — raw ctexart document type
-     ctexrep-tex — raw ctexrep document type
-     ctexbook-tex — raw ctexbook document type
-     ebook-tex — elegantbook class based latex document writing system
-     enote-tex — elegantnote class based latex document writing system
-     ctart-tex — ctart class based latex document writing system
-     ctrep-tex — ctrep class based latex document writing system
+   ? Select project template:
+   > markdown ctex-md — ctex class based markdown document writing system [built-in]
+     markdown ebook-md — elegantbook class based markdown document writing system [built-in]
+     latex    ctexart-tex — raw ctexart document type [built-in]
 
-   [Use arrow keys to navigate, Enter to confirm, Esc/Ctrl+C to cancel]
+   [Type to filter, use arrow keys to navigate, Enter to confirm, Esc/Ctrl+C to cancel]
    ```
 
-   The suffixes `-tex` and `-md` indicate the text format for built-in types; external templates are shown under "External templates".
+   Run `omnidoc template list` (or add `--json`) to inspect every accepted
+   template key before creating a project.
 
    After selecting a template, the tool creates the repository with the following structure:
 
@@ -113,11 +133,14 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
    If you have an existing directory with markdown or LaTeX files, you can initialize it as an omnidoc project:
 
    ```bash
-   omnidoc init [PATH] --title "Document Title" [--author "Author Name"]
+   omnidoc init [PATH] [--title "Document Title"] [--author "Author Name"]
+   omnidoc init existing-repo --type ctex-md
+   omnidoc init existing-repo --defaults
    ```
 
    If `PATH` is not specified, the current directory is used. The tool will:
-   - Prompt you to select a document type
+   - Infer the title from the directory name when `--title` is omitted
+   - Prompt for a template, or use `--type`/`--defaults` non-interactively
    - Move existing `.md` and `.tex` files to appropriate directories
    - Create the directory structure
    - Initialize git repository if not already present
@@ -339,15 +362,19 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
    This command updates the project structure, template files, and configuration to match the current omnidoc version.
 
-8. **List all supported document types**
+8. **List all project templates**
 
    Preview available built-in types and external templates:
 
    ```bash
-   omnidoc list
+   omnidoc template list
+   omnidoc template list --format markdown
+   omnidoc template list --json
    ```
 
-   This displays all built-in document types and external templates that are available for selection.
+   This displays the key, format, source, entry filename, and description for
+   every template accepted by `new --type` and `init --type`. The legacy
+   `omnidoc list` form is still supported.
 
 ### Configuration Commands
 
@@ -468,11 +495,14 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 Run environment diagnostics:
 
 ```bash
-omnidoc doctor [PATH]
-omnidoc doctor --json
-omnidoc doctor --strict [PATH]
-omnidoc doctor --strict --output html [PATH]
+omnidoc check doctor [PATH]
+omnidoc check doctor --json
+omnidoc check doctor --strict [PATH]
+omnidoc check doctor --strict --output html [PATH]
 ```
+
+`omnidoc doctor ...` remains a top-level shortcut for this frequently used
+diagnostic.
 
 `doctor` derives its checks from the configured entry format and outputs. It
 reports the resolved executable and version for required Pandoc, cross-reference,
@@ -490,20 +520,20 @@ Explicit executable paths can be configured under `[tools]`, including
 Validate project configuration:
 
 ```bash
-omnidoc config-validate [PATH]
+omnidoc check config [PATH]
 ```
 
 Lint source references and configured resources:
 
 ```bash
-omnidoc lint [PATH] [--strict]
+omnidoc check lint [PATH] [--strict]
 ```
 
 Inspect the tracked dependency graph used by cache, reports, and lock files:
 
 ```bash
-omnidoc deps [PATH]
-omnidoc deps --json
+omnidoc check deps [PATH]
+omnidoc check deps --json
 ```
 
 The graph merges project references with the latest include-filter depfiles;
@@ -520,9 +550,9 @@ stale or unrelated filter data cannot pollute the target dependency graph.
 Create or refresh the lock file:
 
 ```bash
-omnidoc lock [PATH]
-omnidoc lock --update
-omnidoc lock --check
+omnidoc check lock [PATH]
+omnidoc check lock --update
+omnidoc check lock --check
 ```
 
 `lock --check` exits with an error when `omnidoc.lock` is missing or stale.
@@ -535,7 +565,7 @@ Toolchain identities now participate in cache keys, so replacing Pandoc,
 XeLaTeX, or a font invalidates existing outputs. When the library bundle
 provides a manifest, its declared version plus manifest/checksum digests are
 locked as well. Older lock files must be regenerated with
-`omnidoc lock --update`.
+`omnidoc check lock --update`.
 Lock, cache, and build-report files are replaced atomically. Mutating build and
 lock-update commands also hold `.omnidoc-cache/project.lock`, so
 two OmniDoc processes cannot concurrently publish inconsistent project state.
@@ -550,10 +580,12 @@ cache entry, so it does not require a second build to stabilize.
 Run CI-mode validation and builds:
 
 ```bash
-omnidoc ci [PATH] [--output pdf] [--output html]
+omnidoc check ci [PATH] [--output pdf] [--output html]
 ```
 
-`ci` runs strict validation, builds all configured/default outputs, writes `build/omnidoc-report.json`, and updates `omnidoc.lock`.
+`check ci` runs strict validation, builds all configured/default outputs,
+writes `build/omnidoc-report.json`, and updates `omnidoc.lock`. The legacy flat
+quality commands remain supported for existing automation.
 
 Run the real Pandoc Golden Book gate locally before release-oriented changes:
 
@@ -873,7 +905,7 @@ ranges, and plugins incompatible with the running OmniDoc version fail
     Convert markdown files directly to PDF without creating a full project:
 
     ```bash
-    omnidoc md2pdf <INPUTS>... [OPTIONS]
+    omnidoc convert pdf <INPUTS>... [OPTIONS]
     ```
 
     Options:
@@ -882,8 +914,8 @@ ranges, and plugins incompatible with the running OmniDoc version fail
 
     Examples:
     ```bash
-    omnidoc md2pdf document.md --lang cn --output document.pdf
-    omnidoc md2pdf file1.md file2.md --output combined.pdf
+    omnidoc convert pdf document.md --lang cn --output document.pdf
+    omnidoc convert pdf file1.md file2.md --output combined.pdf
     ```
 
 14. **Convert markdown to HTML**
@@ -891,7 +923,7 @@ ranges, and plugins incompatible with the running OmniDoc version fail
     Convert markdown files to HTML:
 
     ```bash
-    omnidoc md2html <INPUTS>... [OPTIONS]
+    omnidoc convert html <INPUTS>... [OPTIONS]
     ```
 
     Options:
@@ -900,18 +932,23 @@ ranges, and plugins incompatible with the running OmniDoc version fail
 
     Examples:
     ```bash
-    omnidoc md2html document.md --output document.html
-    omnidoc md2html file1.md file2.md --output html/ --css style.css
+    omnidoc convert html document.md --output document.html
+    omnidoc convert html file1.md file2.md --output html/ --css style.css
     ```
+
+    `md2pdf` and `md2html` remain accepted as legacy command forms.
 
 ### Template Management Commands
 
 15. **Template toolkit**
 
-    Validate external template manifests and files:
+    List templates or validate external template manifests and files:
 
     ```bash
-    omnidoc template --validate
+    omnidoc template list
+    omnidoc template list --json
+    omnidoc template validate
+    omnidoc template validate simple-md --json
     ```
 
     This command validates all external templates (hot-loaded, no restart needed). It checks:
@@ -926,7 +963,7 @@ ranges, and plugins incompatible with the running OmniDoc version fail
     Generate shell completion scripts for bash, zsh, fish, elvish, or PowerShell:
 
     ```bash
-    omnidoc complete --generate <SHELL>
+    omnidoc complete <SHELL>
     ```
 
     Supported shells: `bash`, `zsh`, `fish`, `elvish`, `powershell`
@@ -934,11 +971,13 @@ ranges, and plugins incompatible with the running OmniDoc version fail
     Example:
     ```bash
     # For zsh
-    omnidoc complete --generate zsh > ~/.zsh_completions/_omnidoc
+    omnidoc complete zsh > ~/.zsh_completions/_omnidoc
 
     # For bash
-    omnidoc complete --generate bash > ~/.bash_completion.d/omnidoc
+    omnidoc complete bash > ~/.bash_completion.d/omnidoc
     ```
+
+    The previous `omnidoc complete --generate <SHELL>` form is still accepted.
 
 ## Dynamic Templates (External)
 
@@ -1011,6 +1050,10 @@ post_build = ["scripts/post-build.sh"]
 lint_rule = ["scripts/lint.sh"]
 ```
 
+`template_file` and `file_name` must be safe relative paths. Absolute paths and
+`..` traversal are rejected by validation and cannot be used during project
+creation. Nested entry paths such as `docs/index.md` are supported.
+
 Hook environment variables:
 - `OMNIDOC_PROJECT_DIR`
 - `OMNIDOC_PLUGIN_DIR`
@@ -1072,17 +1115,28 @@ Hello, {{ author }}.
 - List built-in types and external templates:
 
 ```bash
-omnidoc list
+omnidoc template list
+omnidoc template list --json
 ```
 
 - Validate external templates (hot-loaded, no restart):
 
 ```bash
-omnidoc template --validate
+omnidoc template validate
+omnidoc template validate simple-md --json
 ```
 
 The validator checks manifest parsing, template file existence, and a minimal Tera render with `title/author/date`.
 
 ### Initialize with external templates
 
-When prompted to choose a document type, you can type the external template `key` (e.g., `simple-md`, `my-tex`), or pick from the list if displayed.
+Select an external template interactively or pass its key directly:
+
+```bash
+omnidoc new notes --type simple-md
+omnidoc init existing-notes --type simple-md
+```
+
+External template language and entry filename metadata now flow into generated
+`.omnidoc.toml`, so custom Markdown and LaTeX templates work through the same
+non-interactive creation path as built-in templates.

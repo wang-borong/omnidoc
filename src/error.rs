@@ -119,7 +119,7 @@ impl OmniDocError {
                 "Run this command inside an OmniDoc project, or pass the project path explicitly.",
             ),
             Self::UnsupportedDocumentType(_) => {
-                Some("Run `omnidoc doctypes` to list the supported document types.")
+                Some("Run `omnidoc template list` to list the available template keys.")
             }
             Self::UnsupportedLanguage(_) => {
                 Some("Choose one of the languages supported by this command.")

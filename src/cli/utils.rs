@@ -1,65 +1,116 @@
 use crate::config::global::GlobalConfig;
-use crate::doc::templates::generator::list_external_templates;
-use crate::doctype::DocumentTypeRegistry;
+use crate::doc::templates::{
+    list_project_templates, resolve_project_template, ProjectTemplateInfo, TemplateSource,
+    DEFAULT_TEMPLATE_KEY,
+};
+use crate::doctype::DocumentFormat;
 use crate::error::{OmniDocError, Result};
-use crate::utils::fs;
 use console::style;
 use inquire::Select;
-use std::env;
+use std::io::{self, IsTerminal};
 use std::path::Path;
 
 /// Print all supported document types
 pub fn print_doctypes() {
-    let all = DocumentTypeRegistry::all();
+    let _ = print_templates(None, false);
+}
+
+pub fn print_templates(format: Option<DocumentFormat>, json: bool) -> Result<()> {
+    let templates = list_project_templates()
+        .into_iter()
+        .filter(|template| format.is_none_or(|format| template.format == format))
+        .collect::<Vec<_>>();
+
+    if json {
+        let content = serde_json::to_string_pretty(&templates)
+            .map_err(|error| OmniDocError::Other(error.to_string()))?;
+        println!("{}", content);
+        return Ok(());
+    }
+
     println!(
-        "{} ({} types)",
-        style("Supported document types:").bold().underlined(),
-        all.len()
+        "{} ({} available)",
+        style("Project templates").bold().underlined(),
+        templates.len()
     );
-    println!("{}", DocumentTypeRegistry::list_display());
-    let externals = list_external_templates();
-    if !externals.is_empty() {
-        println!(
-            "\n{} ({} templates)",
-            style("External templates:").bold().underlined(),
-            externals.len()
-        );
-        for t in externals {
-            let name = t.name.clone().unwrap_or_else(|| t.key.clone());
-            match t.description {
-                Some(desc) if !desc.is_empty() => println!("- {} — {} ({})", t.key, name, desc),
-                _ => println!("- {} — {}", t.key, name),
+    for current_format in [DocumentFormat::Markdown, DocumentFormat::Latex] {
+        let matching = templates
+            .iter()
+            .filter(|template| template.format == current_format)
+            .collect::<Vec<_>>();
+        if matching.is_empty() {
+            continue;
+        }
+        println!("\n{}", style(current_format.as_str()).bold());
+        for template in matching {
+            let source = match template.source {
+                TemplateSource::BuiltIn => "built-in",
+                TemplateSource::External => "external",
+            };
+            let summary = template_summary(template);
+            if summary.is_empty() {
+                println!("  {:<18} [{}]", template.key, source);
+            } else {
+                println!("  {:<18} {} [{}]", template.key, summary, source);
             }
         }
     }
+    Ok(())
 }
 
-/// Get document type from readline with cleanup on error
-pub fn get_doctype_from_readline<O, N>(orig_path: O, path: N) -> Result<String>
-where
-    O: AsRef<Path>,
-    N: AsRef<Path>,
-{
-    let mut items: Vec<String> = DocumentTypeRegistry::all()
-        .into_iter()
-        .map(|dt| format!("{} — {}", dt.as_str(), dt.description()))
-        .collect();
-
-    // Append external templates (dynamic plugins)
-    let externals = list_external_templates();
-    for t in externals {
-        let name = t.name.clone().unwrap_or_else(|| t.key.clone());
-        if let Some(desc) = t.description.clone() {
-            items.push(format!("{} — {}", t.key, desc));
-        } else {
-            items.push(format!("{} — {}", t.key, name));
-        }
+/// Prompt for a project template without mutating the target path.
+pub fn get_doctype_from_readline(format: Option<DocumentFormat>) -> Result<String> {
+    if !io::stdin().is_terminal() {
+        return Err(OmniDocError::Other(
+            "A template must be selected in non-interactive mode. Use `--type <KEY>` or `--defaults`; run `omnidoc template list` to see available keys."
+                .to_string(),
+        ));
     }
+
+    let templates = list_project_templates()
+        .into_iter()
+        .filter(|template| format.is_none_or(|format| template.format == format))
+        .collect::<Vec<_>>();
+    if templates.is_empty() {
+        return Err(OmniDocError::Other(format!(
+            "No {} templates are available",
+            format.map_or("project", DocumentFormat::as_str)
+        )));
+    }
+
+    let mut items = templates
+        .iter()
+        .map(|template| {
+            let source = match template.source {
+                TemplateSource::BuiltIn => "built-in",
+                TemplateSource::External => "external",
+            };
+            let summary = template_summary(template);
+            if summary.is_empty() {
+                format!(
+                    "{:<8} {} [{}]",
+                    template.format.as_str(),
+                    template.key,
+                    source
+                )
+            } else {
+                format!(
+                    "{:<8} {} — {} [{}]",
+                    template.format.as_str(),
+                    template.key,
+                    summary,
+                    source
+                )
+            }
+        })
+        .collect::<Vec<_>>();
     items.push("[Cancel]".to_string());
 
-    let selection = Select::new("Select document type:", items)
+    let selection = Select::new("Select project template:", items.clone())
         .with_page_size(10)
-        .with_help_message("Use arrow keys to navigate, Enter to confirm, Esc/Ctrl+C to cancel")
+        .with_help_message(
+            "Type to filter, use arrow keys to navigate, Enter to confirm, Esc/Ctrl+C to cancel",
+        )
         .prompt();
 
     let selection = match selection {
@@ -67,27 +118,66 @@ where
         Err(
             inquire::InquireError::OperationCanceled | inquire::InquireError::OperationInterrupted,
         ) => {
-            let _ = env::set_current_dir(orig_path.as_ref());
-            let _ = fs::remove_dir_all(path.as_ref());
             return Err(OmniDocError::Other("Operation canceled".to_string()));
         }
         Err(e) => {
-            let _ = env::set_current_dir(orig_path.as_ref());
-            let _ = fs::remove_dir_all(path.as_ref());
             return Err(OmniDocError::Other(format!("Failed to prompt user: {}", e)));
         }
     };
 
     if selection.starts_with("[Cancel]") {
-        let _ = env::set_current_dir(orig_path.as_ref());
-        let _ = fs::remove_dir_all(path.as_ref());
         return Err(OmniDocError::Other("Operation canceled".to_string()));
     }
 
-    // selection is in the form "key — desc"; split to get the key
-    let key = selection.split(' ').next().unwrap_or("").to_string();
+    let selected_index = items
+        .iter()
+        .position(|item| item == &selection)
+        .ok_or_else(|| OmniDocError::Other("Selected template was not found".to_string()))?;
+    Ok(templates[selected_index].key.clone())
+}
 
-    Ok(key)
+fn template_summary(template: &ProjectTemplateInfo) -> String {
+    match (
+        template.name != template.key,
+        template.description.is_empty(),
+    ) {
+        (true, false) => format!("{} — {}", template.name, template.description),
+        (true, true) => template.name.clone(),
+        (false, false) => template.description.clone(),
+        (false, true) => String::new(),
+    }
+}
+
+pub fn resolve_creation_template(
+    requested: Option<String>,
+    format: Option<DocumentFormat>,
+    defaults: bool,
+) -> Result<ProjectTemplateInfo> {
+    let key = match requested {
+        Some(key) => key,
+        None if defaults => DEFAULT_TEMPLATE_KEY.to_string(),
+        None => get_doctype_from_readline(format)?,
+    };
+    let template = resolve_project_template(&key)?;
+    if let Some(format) = format {
+        if template.format != format {
+            return Err(OmniDocError::Other(format!(
+                "Template '{}' uses {}, but --format {} was requested",
+                template.key,
+                template.format.as_str(),
+                format.as_str()
+            )));
+        }
+    }
+    Ok(template)
+}
+
+pub fn infer_title(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(|name| name.replace(['-', '_'], " "))
+        .unwrap_or_else(|| "Untitled Document".to_string())
 }
 
 /// Check if omnidoc library exists

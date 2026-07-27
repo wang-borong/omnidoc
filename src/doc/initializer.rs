@@ -1,12 +1,12 @@
 use super::project::Doc;
 use super::templates::{
-    generate_template, get_gitignore_template, get_latexmkrc_template, TemplateDocType,
+    generate_template, get_gitignore_template, get_latexmkrc_template, resolve_project_template,
+    TemplateDocType,
 };
 use crate::constants::git as git_constants;
 use crate::constants::{dirs, lang, paths, paths_internal};
 use crate::doc::templates::generator::try_generate_dynamic;
-use crate::doctype::DocumentType;
-use crate::doctype::DocumentTypeRegistry;
+use crate::doctype::{DocumentFormat, DocumentType, DocumentTypeRegistry};
 use crate::error::{OmniDocError, Result};
 use crate::git::{git_add, git_commit, git_init, is_git_repo};
 use crate::utils::{error, fs};
@@ -61,7 +61,7 @@ impl<'a> Doc<'a> {
         let md = Path::new(paths::MD_DIR);
         let tex = self.get_tex_input_path();
 
-        let doctype_chk = String::from(&self.doctype);
+        let template = resolve_project_template(&self.doctype)?;
         let dirs_to_create = vec![
             dirs::DAC_DIR,
             dirs::DRAWIO_DIR,
@@ -70,12 +70,12 @@ impl<'a> Doc<'a> {
         ];
 
         // Create markdown directory if needed
-        if !fs::exists(md) && doctype_chk.ends_with(lang::MARKDOWN) {
+        if !fs::exists(md) && template.format == DocumentFormat::Markdown {
             fs::create_dir_all(md)?;
         }
 
         // Create LaTeX directory if needed
-        if !fs::exists(&tex) && doctype_chk.ends_with(lang::LATEX) {
+        if !fs::exists(&tex) && template.format == DocumentFormat::Latex {
             fs::create_dir_all(&tex)?;
         }
 
@@ -83,7 +83,7 @@ impl<'a> Doc<'a> {
         for dir in dirs_to_create {
             let dir_path = Path::new(dir);
             if !fs::exists(dir_path)
-                && (!doctype_chk.contains("resume") || doctype_chk.contains("moderncv"))
+                && (!template.key.contains("resume") || template.key.contains("moderncv"))
             {
                 fs::create_dir_all(dir_path)?;
             }
@@ -163,9 +163,9 @@ impl<'a> Doc<'a> {
         Doc::gen_file(gitignore_content, paths::GITIGNORE)?;
 
         // Write embedded latexmkrc template only for LaTeX document types
-        let doctype = DocumentTypeRegistry::parse(&self.doctype)
+        let template = resolve_project_template(&self.doctype)
             .map_err(|e| OmniDocError::Project(format!("Invalid document type: {}", e)))?;
-        if doctype.file_extension() == lang::LATEX {
+        if template.format == DocumentFormat::Latex {
             let latexmkrc_content = get_latexmkrc_template();
             Doc::gen_file(latexmkrc_content, paths::LATEXMKRC)?;
         }
@@ -210,9 +210,9 @@ impl<'a> Doc<'a> {
         let mut update_files = vec![paths::FIGURE_README, paths::GITIGNORE];
 
         // Only update .latexmkrc for LaTeX document types
-        let doctype = DocumentTypeRegistry::parse(&self.doctype)
+        let template = resolve_project_template(&self.doctype)
             .map_err(|e| OmniDocError::Project(format!("Invalid document type: {}", e)))?;
-        if doctype.file_extension() == lang::LATEX {
+        if template.format == DocumentFormat::Latex {
             update_files.push(paths::LATEXMKRC);
         }
 
@@ -226,34 +226,39 @@ impl<'a> Doc<'a> {
     }
 
     fn create_entry(&self, title: &str, doctype_str: &str) -> Result<()> {
-        // First try dynamic template by key
-        if let Some((content, _is_markdown, file_name)) =
-            try_generate_dynamic(doctype_str, title, &self.author)
-        {
-            if fs::exists(Path::new(&file_name)) {
-                return Ok(());
+        match DocumentTypeRegistry::parse(doctype_str) {
+            Ok(doctype) => {
+                let template_type = map_document_type_to_template(&doctype)?;
+                let is_markdown = doctype.file_extension() == lang::MARKDOWN;
+                let file_name = doctype.file_name();
+                if fs::exists(Path::new(file_name)) {
+                    return Ok(());
+                }
+
+                let title_for_template = if doctype.is_resume_type() { "" } else { title };
+                let content =
+                    generate_template(is_markdown, title_for_template, &self.author, template_type);
+                Doc::gen_file(&content, file_name)
             }
-            Doc::gen_file(&content, &file_name)?;
-            return Ok(());
+            Err(builtin_error) => {
+                let Some((content, _is_markdown, file_name)) =
+                    try_generate_dynamic(doctype_str, title, &self.author)
+                else {
+                    return Err(builtin_error);
+                };
+                let file_path = Path::new(&file_name);
+                if fs::exists(file_path) {
+                    return Ok(());
+                }
+                if let Some(parent) = file_path
+                    .parent()
+                    .filter(|parent| !parent.as_os_str().is_empty())
+                {
+                    fs::create_dir_all(parent)?;
+                }
+                Doc::gen_file(&content, &file_name)
+            }
         }
-
-        let doctype = DocumentTypeRegistry::parse(doctype_str)?;
-
-        let template_type = map_document_type_to_template(&doctype)?;
-        let is_markdown = doctype.file_extension() == lang::MARKDOWN;
-        let file_name = doctype.file_name();
-
-        // Skip if entry file already exists
-        if fs::exists(Path::new(file_name)) {
-            return Ok(());
-        }
-
-        let title_for_template = if doctype.is_resume_type() { "" } else { title };
-        let content =
-            generate_template(is_markdown, title_for_template, &self.author, template_type);
-        Doc::gen_file(&content, file_name)?;
-
-        Ok(())
     }
 }
 

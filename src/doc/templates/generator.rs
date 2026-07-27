@@ -1,5 +1,6 @@
 use super::types::TemplateDocType;
 use crate::config::{CliOverrides, ConfigManager};
+use crate::doctype::DocumentFormat;
 use crate::utils::directories::config_local_dir;
 use crate::utils::fs;
 use chrono::prelude::*;
@@ -65,6 +66,22 @@ struct TemplateManifest {
     file_name: Option<String>,
 }
 
+pub(crate) fn is_safe_template_relative_path(value: &str) -> bool {
+    let path = Path::new(value);
+    if value.trim().is_empty() || path.is_absolute() {
+        return false;
+    }
+    let mut has_normal_component = false;
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(_) => has_normal_component = true,
+            std::path::Component::CurDir => {}
+            _ => return false,
+        }
+    }
+    has_normal_component
+}
+
 fn resolve_template_root() -> Option<PathBuf> {
     if let Ok(dir) = env::var("OMNIDOC_TEMPLATE_DIR") {
         return Some(PathBuf::from(dir));
@@ -126,6 +143,10 @@ pub fn try_generate_dynamic(
     author: &str,
 ) -> Option<(String, bool, String)> {
     let (manifest, base_dir) = load_manifest_for_key(key)?;
+    let format = DocumentFormat::from_template_language(&manifest.language)?;
+    if !is_safe_template_relative_path(&manifest.template_file) {
+        return None;
+    }
     let template_path = base_dir.join(&manifest.template_file);
     let template_str = fs::read_to_string(&template_path).ok()?;
 
@@ -138,7 +159,7 @@ pub fn try_generate_dynamic(
     ctx.insert("date", &date);
 
     let rendered = Tera::one_off(&template_str, &ctx, false).ok()?;
-    let is_markdown = manifest.language.to_lowercase() == "markdown";
+    let is_markdown = format == DocumentFormat::Markdown;
     let file_name = manifest.file_name.unwrap_or_else(|| {
         if is_markdown {
             "main.md".to_string()
@@ -146,6 +167,9 @@ pub fn try_generate_dynamic(
             "main.tex".to_string()
         }
     });
+    if !is_safe_template_relative_path(&file_name) {
+        return None;
+    }
 
     Some((rendered, is_markdown, file_name))
 }
@@ -155,6 +179,9 @@ pub struct ExternalTemplateInfo {
     pub key: String,
     pub name: Option<String>,
     pub description: Option<String>,
+    pub language: String,
+    pub template_file: String,
+    pub file_name: Option<String>,
 }
 
 pub fn list_external_templates() -> Vec<ExternalTemplateInfo> {
@@ -176,6 +203,9 @@ pub fn list_external_templates() -> Vec<ExternalTemplateInfo> {
                                 key: m.key,
                                 name: m.name,
                                 description: m.description,
+                                language: m.language,
+                                template_file: m.template_file,
+                                file_name: m.file_name,
                             });
                         }
                     }
@@ -199,6 +229,9 @@ pub fn list_external_templates() -> Vec<ExternalTemplateInfo> {
                                     key: m.key,
                                     name: m.name,
                                     description: m.description,
+                                    language: m.language,
+                                    template_file: m.template_file,
+                                    file_name: m.file_name,
                                 });
                             }
                         }
@@ -219,33 +252,87 @@ pub fn validate_external_templates() -> Vec<(String, Result<(), String>)> {
     };
 
     let mut try_validate_manifest = |manifest_path: &Path| {
-        if let Ok(s) = fs::read_to_string(manifest_path) {
-            if let Ok(m) = toml::from_str::<TemplateManifest>(&s) {
-                let base_dir = manifest_path.parent().unwrap_or(&root);
-                let template_path = base_dir.join(&m.template_file);
-                if !fs::exists(&template_path) {
-                    results.push((
-                        m.key.clone(),
-                        Err(format!(
-                            "Template file not found: {}",
-                            template_path.display()
-                        )),
-                    ));
-                    return;
-                }
-                // Try render with minimal context
-                let mut ctx = Context::new();
-                ctx.insert("title", "Sample Title");
-                ctx.insert("author", "Sample Author");
-                ctx.insert("date", "1970/01/01");
-                match fs::read_to_string(&template_path)
-                    .ok()
-                    .and_then(|tpl| Tera::one_off(&tpl, &ctx, false).ok())
-                {
-                    Some(_) => results.push((m.key.clone(), Ok(()))),
-                    None => results.push((m.key.clone(), Err("Rendering failed".to_string()))),
-                }
+        let fallback_key = manifest_path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .filter(|name| *name != "manifest")
+            .or_else(|| {
+                manifest_path
+                    .parent()
+                    .and_then(Path::file_name)
+                    .and_then(|name| name.to_str())
+            })
+            .unwrap_or("unknown-template")
+            .to_string();
+        let source = match fs::read_to_string(manifest_path) {
+            Ok(source) => source,
+            Err(error) => {
+                results.push((
+                    fallback_key,
+                    Err(format!("Failed to read manifest: {error}")),
+                ));
+                return;
             }
+        };
+        let m = match toml::from_str::<TemplateManifest>(&source) {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                results.push((
+                    fallback_key,
+                    Err(format!("Failed to parse manifest: {error}")),
+                ));
+                return;
+            }
+        };
+        let base_dir = manifest_path.parent().unwrap_or(&root);
+        if DocumentFormat::from_template_language(&m.language).is_none() {
+            results.push((
+                m.key.clone(),
+                Err(format!(
+                    "Unsupported template language '{}'; expected markdown or latex",
+                    m.language
+                )),
+            ));
+            return;
+        }
+        if !is_safe_template_relative_path(&m.template_file) {
+            results.push((
+                m.key.clone(),
+                Err("template_file must be a safe relative path".to_string()),
+            ));
+            return;
+        }
+        if m.file_name
+            .as_deref()
+            .is_some_and(|file_name| !is_safe_template_relative_path(file_name))
+        {
+            results.push((
+                m.key.clone(),
+                Err("file_name must be a safe relative path".to_string()),
+            ));
+            return;
+        }
+        let template_path = base_dir.join(&m.template_file);
+        if !fs::exists(&template_path) {
+            results.push((
+                m.key.clone(),
+                Err(format!(
+                    "Template file not found: {}",
+                    template_path.display()
+                )),
+            ));
+            return;
+        }
+        let mut ctx = Context::new();
+        ctx.insert("title", "Sample Title");
+        ctx.insert("author", "Sample Author");
+        ctx.insert("date", "1970/01/01");
+        match fs::read_to_string(&template_path)
+            .ok()
+            .and_then(|tpl| Tera::one_off(&tpl, &ctx, false).ok())
+        {
+            Some(_) => results.push((m.key.clone(), Ok(()))),
+            None => results.push((m.key.clone(), Err("Rendering failed".to_string()))),
         }
     };
 

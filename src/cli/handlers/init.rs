@@ -1,65 +1,66 @@
 use crate::cli::handlers::common::{create_config_manager_default, merged_config_to_envs};
-use crate::cli::utils::get_doctype_from_readline;
+use crate::cli::utils::{infer_title, resolve_creation_template};
 use crate::config::ProjectConfig;
-use crate::constants::paths_internal;
+use crate::constants::paths;
 use crate::doc::Doc;
-use crate::doctype::DocumentTypeRegistry;
+use crate::doctype::DocumentFormat;
 use crate::error::{OmniDocError, Result};
-use std::path::Path;
+use crate::utils::fs;
+use std::env;
 
 /// Handle the 'init' command
 pub fn handle_init(
-    orig_path: &std::path::Path,
-    path: Option<String>,
-    title: String,
+    title: Option<String>,
     author: Option<String>,
+    doctype: Option<String>,
+    format: Option<DocumentFormat>,
+    defaults: bool,
 ) -> Result<()> {
-    let path = path.unwrap_or_else(|| paths_internal::CURRENT_DIR.to_string());
-
-    // Load config and get envs
-    let config_manager = create_config_manager_default(None)?;
-    let merged_config = config_manager.get_merged();
-    let envs = merged_config_to_envs(merged_config);
-
-    let author = author
-        .or_else(|| merged_config.author.clone())
-        .unwrap_or_else(|| "Someone".to_string());
-
-    // Get document type from user
-    let doctype_str = get_doctype_from_readline(orig_path, &path)?;
-
-    // Initialize the project
-    let doc = Doc::new(&title, &path, &author, &doctype_str, envs);
-    if Doc::is_omnidoc_project() {
+    let project_path = env::current_dir().map_err(OmniDocError::Io)?;
+    if ProjectConfig::exists(&project_path) {
         return Err(OmniDocError::Project(
             "This is already an OmniDoc project, no action taken".to_string(),
         ));
     }
-    doc.init_project(false)
-        .map_err(|e| OmniDocError::Project(format!("Failed to initialize project: {}", e)))?;
 
-    // 创建项目配置文件（如果不存在）
-    let project_path = Path::new(&path);
-    if !ProjectConfig::exists(project_path) {
-        let doctype = DocumentTypeRegistry::parse(&doctype_str)
-            .map_err(|e| OmniDocError::Project(format!("Invalid document type: {}", e)))?;
+    let config_manager = create_config_manager_default(Some(&project_path))?;
+    let merged_config = config_manager.get_merged();
+    let envs = merged_config_to_envs(merged_config);
+    let author = author
+        .or_else(|| merged_config.author.clone())
+        .unwrap_or_else(|| "Someone".to_string());
+    let template = resolve_creation_template(doctype, format, defaults)?;
+    let title = title.unwrap_or_else(|| infer_title(&project_path));
 
-        let entry = Some(doctype.file_name());
-        let from = if doctype.file_extension() == "md" {
-            Some("markdown")
-        } else {
-            Some("latex")
-        };
-        let to = Some("pdf");
-        let target_name = project_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("document");
-
-        ProjectConfig::create_default(project_path, entry, from, to, Some(target_name))?;
-
-        println!("✓ Created project configuration file: .omnidoc.toml");
+    let path_string = project_path.to_string_lossy().to_string();
+    let doc = Doc::new(&title, &path_string, &author, &template.key, envs);
+    let target_name = project_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("document");
+    ProjectConfig::create_default(
+        &project_path,
+        Some(&template.file_name),
+        Some(template.format.as_str()),
+        Some("pdf"),
+        Some(target_name),
+    )?;
+    if let Err(error) = doc.init_project(false) {
+        let _ = fs::remove_file(project_path.join(paths::PROJECT_CONFIG));
+        return Err(OmniDocError::Project(format!(
+            "Failed to initialize project: {}",
+            error
+        )));
     }
+
+    println!("✓ Created project configuration file: .omnidoc.toml");
+    println!(
+        "✓ Ready: '{}' ({}, {})",
+        project_path.display(),
+        template.key,
+        template.format.as_str()
+    );
+    println!("  Next: omnidoc build");
 
     Ok(())
 }

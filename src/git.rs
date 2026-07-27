@@ -1,6 +1,6 @@
 use crate::constants::git_commits;
 use crate::constants::git_refs;
-use git2::Repository;
+use git2::{Repository, Signature};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::str;
@@ -21,6 +21,11 @@ where
     Ok(())
 }
 
+fn repository_signature(repo: &Repository) -> Result<Signature<'static>, git2::Error> {
+    repo.signature()
+        .or_else(|_| Signature::now("OmniDoc", "omnidoc@example.invalid"))
+}
+
 fn checkout_without_line_ending_conversion(repository: &Repository) -> Result<(), git2::Error> {
     repository.config()?.set_bool("core.autocrlf", false)?;
     repository.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
@@ -30,7 +35,7 @@ fn checkout_without_line_ending_conversion(repository: &Repository) -> Result<()
 /// commit in the repository. This is the helper function that does that.
 fn create_initial_commit(repo: &Repository) -> Result<(), git2::Error> {
     // First use the config to initialize a commit signature for the user.
-    let sig = repo.signature()?;
+    let sig = repository_signature(repo)?;
 
     // Now let's create an empty tree for this commit
     let tree_id = {
@@ -120,7 +125,7 @@ where
 
     let mut index = repo.index()?;
     let oid = index.write_tree()?;
-    let signature = repo.signature()?;
+    let signature = repository_signature(&repo)?;
     let parent_commit = repo.head()?.peel_to_commit()?;
     let tree = repo.find_tree(oid)?;
     repo.commit(

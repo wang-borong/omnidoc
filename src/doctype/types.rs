@@ -1,4 +1,36 @@
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum DocumentFormat {
+    Markdown,
+    Latex,
+}
+
+impl DocumentFormat {
+    pub fn from_template_language(language: &str) -> Option<Self> {
+        match language.trim().to_ascii_lowercase().as_str() {
+            "markdown" | "md" => Some(Self::Markdown),
+            "latex" | "tex" => Some(Self::Latex),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Markdown => "markdown",
+            Self::Latex => "latex",
+        }
+    }
+
+    pub fn file_extension(self) -> &'static str {
+        match self {
+            Self::Markdown => "md",
+            Self::Latex => "tex",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DocumentType {
@@ -55,18 +87,21 @@ impl DocumentType {
     }
 
     pub fn file_extension(&self) -> &'static str {
-        if self.as_str().ends_with("-md") {
-            "md"
-        } else {
-            "tex"
-        }
+        self.format().file_extension()
     }
 
     pub fn file_name(&self) -> &'static str {
+        match self.format() {
+            DocumentFormat::Markdown => "main.md",
+            DocumentFormat::Latex => "main.tex",
+        }
+    }
+
+    pub fn format(&self) -> DocumentFormat {
         if self.as_str().ends_with("-md") {
-            "main.md"
+            DocumentFormat::Markdown
         } else {
-            "main.tex"
+            DocumentFormat::Latex
         }
     }
 
