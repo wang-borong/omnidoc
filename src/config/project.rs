@@ -13,22 +13,11 @@ pub struct ProjectConfig {
 impl ProjectConfig {
     /// 从当前目录或指定路径加载项目配置
     pub fn load_from_path(path: Option<&Path>) -> Result<Option<Self>> {
-        let search_paths = if let Some(p) = path {
-            vec![p.to_path_buf()]
-        } else {
-            // 从当前目录向上查找
-            let mut paths = Vec::new();
-            let mut current = std::env::current_dir().map_err(OmniDocError::Io)?;
-
-            for _ in 0..10 {
-                // 限制搜索深度
-                paths.push(current.clone());
-                if !current.pop() {
-                    break;
-                }
-            }
-            paths
+        let start = match path {
+            Some(path) => path.to_path_buf(),
+            None => std::env::current_dir().map_err(OmniDocError::Io)?,
         };
+        let search_paths = start.ancestors().map(Path::to_path_buf);
 
         for search_path in search_paths {
             let config_path = search_path.join(PROJECT_CONFIG_FILE);
@@ -126,5 +115,29 @@ impl ProjectConfig {
     /// 检查配置是否存在
     pub fn exists(path: &Path) -> bool {
         path.join(PROJECT_CONFIG_FILE).exists()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProjectConfig;
+    use std::fs;
+
+    #[test]
+    fn explicit_nested_paths_inherit_the_nearest_project_config() {
+        let project = tempfile::tempdir().expect("project");
+        let nested = project.path().join("chapters/drafts");
+        fs::create_dir_all(&nested).expect("nested path");
+        fs::write(
+            project.path().join(".omnidoc.toml"),
+            "[project]\nentry = 'main.md'\nto = 'html'\n",
+        )
+        .expect("project config");
+
+        let config = ProjectConfig::load_from_path(Some(&nested))
+            .expect("load config")
+            .expect("project config");
+
+        assert_eq!(config.path(), project.path().join(".omnidoc.toml"));
     }
 }

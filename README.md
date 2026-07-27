@@ -68,6 +68,10 @@ omnidoc template --help    # template discovery and validation
 
 The previous flat forms such as `config-validate`, `md2pdf`, `md2html`,
 `list`, and `template --validate` remain available for script compatibility.
+Project-aware commands discover the nearest `.omnidoc.toml` automatically, so
+they can be run from the project root or nested directories such as
+`chapters/drafts/`. An explicit `PATH` may likewise point anywhere inside the
+project.
 
 Commands with `--json` write only JSON to stdout and use a non-zero exit code
 on failure. The new `status` and `clean` responses include a

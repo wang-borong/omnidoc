@@ -146,7 +146,7 @@ pub fn handle_publish(
     strict: bool,
     verbose: bool,
 ) -> Result<()> {
-    let project_path = path::determine_project_path(path)?.canonicalize()?;
+    let project_path = path::determine_project_root(path)?;
     if verify {
         let tag = tag.expect("clap requires --tag with --verify");
         return verify_published_release(&project_path, &dist_dir, &tag, json);

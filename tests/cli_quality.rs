@@ -401,6 +401,57 @@ fn quality_commands_work_on_minimal_project() {
 }
 
 #[test]
+fn project_quality_and_publish_commands_resolve_nested_invocations() {
+    let fixture = Fixture::new("nested-project-commands");
+    let nested = fixture.project.join("chapters/drafts");
+    fs::create_dir_all(&nested).expect("nested directory");
+
+    assert_success(fixture.command_in(&nested, &["check", "config"]));
+    assert_success(fixture.command_in(&nested, &["check", "lint", "--strict"]));
+
+    let deps = assert_success(fixture.command_in(&nested, &["check", "deps", "--json"]));
+    assert!(deps.contains("main.md"));
+    assert!(deps.contains(".omnidoc.toml"));
+
+    assert_success(fixture.command_in(&nested, &["check", "lock", "--update"]));
+    assert!(fixture.project.join("omnidoc.lock").is_file());
+    assert!(!nested.join("omnidoc.lock").exists());
+
+    let plugins = assert_success(fixture.command_in(&nested, &["plugin", "--json", "--validate"]));
+    assert!(plugins.contains("sample"));
+
+    assert_success(fixture.command_in(
+        &nested,
+        &[
+            "publish",
+            "--to",
+            "html",
+            "--no-build",
+            "--tag",
+            "nested-release",
+        ],
+    ));
+    assert!(fixture
+        .project
+        .join("dist/nested-release/smoke.html")
+        .is_file());
+    assert!(!nested.join("dist").exists());
+}
+
+#[test]
+fn update_runs_at_the_project_root_when_invoked_from_a_nested_directory() {
+    let fixture = Fixture::new("nested-update");
+    let nested = fixture.project.join("chapters/drafts");
+    fs::create_dir_all(&nested).expect("nested directory");
+
+    assert_success(fixture.command_in(&nested, &["update"]));
+
+    assert!(fixture.project.join(".gitignore").is_file());
+    assert!(!nested.join(".gitignore").exists());
+    assert!(git2::Repository::open(&fixture.project).is_ok());
+}
+
+#[test]
 fn status_and_open_resolve_the_configured_artifact_contract() {
     let fixture = Fixture::new("project-status");
     let project = fixture.project_arg();

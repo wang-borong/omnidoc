@@ -35,8 +35,7 @@ pub fn handle_build(
     strict: bool,
     verbose: bool,
 ) -> Result<()> {
-    let project_path = path::determine_project_path(path)?;
-    let project_path = project_path.canonicalize()?;
+    let project_path = path::determine_project_root(path)?;
     let cli_overrides = build_cli_overrides(
         to,
         outputs,

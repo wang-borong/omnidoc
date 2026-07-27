@@ -23,6 +23,9 @@
   behavior with the documented build-directory contract, preserved unrelated
   project PDFs, and rejected absolute or project-escaping output directories
   before deletion.
+- Unified project-root discovery across build, watch, publish, validation,
+  dependency, lock, plugin, status, open, clean, and update workflows, so the
+  same commands and explicit paths work consistently from nested directories.
 
 ## 1.7.0 - 2026-07-26
 

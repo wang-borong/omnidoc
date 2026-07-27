@@ -25,7 +25,7 @@ pub fn handle_watch(
     strict: bool,
     verbose: bool,
 ) -> Result<()> {
-    let project_path = path::determine_project_path(path)?.canonicalize()?;
+    let project_path = path::determine_project_root(path)?;
     check_omnidoc_project(&project_path)?;
 
     let cli_overrides = build_cli_overrides(

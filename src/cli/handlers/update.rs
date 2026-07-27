@@ -6,7 +6,8 @@ use crate::utils::path;
 
 /// Handle the 'update' command
 pub fn handle_update(path: Option<String>) -> Result<()> {
-    let project_path = path::determine_project_path(path)?;
+    let project_path = path::determine_project_root(path)?;
+    let _working_directory = path::WorkingDirectoryGuard::enter(&project_path)?;
 
     let config_manager = create_config_manager_default(Some(project_path.as_path()))?;
     let merged_config = config_manager.get_merged();

@@ -278,6 +278,23 @@ pub mod path {
     /// Resolve a project path to its root, preferring an explicit OmniDoc
     /// configuration before falling back to conventional entry filenames.
     pub fn determine_project_root(path: Option<String>) -> Result<PathBuf> {
+        let start = canonical_project_start(path)?;
+        locate_project_root(&start).ok_or_else(|| {
+            OmniDocError::NotOmniDocProject(format!(
+                "No .omnidoc.toml, main.md, or main.tex was found from '{}' upward",
+                start.display()
+            ))
+        })
+    }
+
+    /// Prefer the containing project root, while still allowing commands such
+    /// as `doctor` and `plugin` to operate in a non-project directory.
+    pub fn determine_project_context(path: Option<String>) -> Result<PathBuf> {
+        let start = canonical_project_start(path)?;
+        Ok(locate_project_root(&start).unwrap_or(start))
+    }
+
+    fn canonical_project_start(path: Option<String>) -> Result<PathBuf> {
         let start = determine_project_path(path)?.canonicalize()?;
         if !start.is_dir() {
             return Err(OmniDocError::Project(format!(
@@ -285,12 +302,7 @@ pub mod path {
                 start.display()
             )));
         }
-        locate_project_root(&start).ok_or_else(|| {
-            OmniDocError::NotOmniDocProject(format!(
-                "No .omnidoc.toml, main.md, or main.tex was found from '{}' upward",
-                start.display()
-            ))
-        })
+        Ok(start)
     }
 
     pub fn locate_project_root(start: &Path) -> Option<PathBuf> {
@@ -371,9 +383,28 @@ pub mod path {
         Ok(())
     }
 
+    /// Restore the previous working directory when the guard leaves scope.
+    pub struct WorkingDirectoryGuard {
+        original: PathBuf,
+    }
+
+    impl WorkingDirectoryGuard {
+        pub fn enter(directory: &Path) -> Result<Self> {
+            let original = current_dir()?;
+            set_current_dir(directory)?;
+            Ok(Self { original })
+        }
+    }
+
+    impl Drop for WorkingDirectoryGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.original);
+        }
+    }
+
     #[cfg(test)]
     mod tests {
-        use super::{determine_project_root, locate_project_root};
+        use super::{determine_project_context, determine_project_root, locate_project_root};
         use std::fs;
 
         #[test]
@@ -391,6 +422,11 @@ pub mod path {
             assert_eq!(
                 determine_project_root(Some(nested.to_string_lossy().to_string()))
                     .expect("project root"),
+                project.path().canonicalize().expect("canonical root")
+            );
+            assert_eq!(
+                determine_project_context(Some(nested.to_string_lossy().to_string()))
+                    .expect("project context"),
                 project.path().canonicalize().expect("canonical root")
             );
         }

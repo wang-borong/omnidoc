@@ -34,10 +34,7 @@ fn command_needs_library(command: &Commands) -> bool {
 
 fn prepare_working_directory(command: &mut Commands) -> Result<()> {
     let path = match command {
-        Commands::Init { path, .. }
-        | Commands::Open { path, .. }
-        | Commands::Clean { path, .. }
-        | Commands::Update { path } => path,
+        Commands::Init { path, .. } => path,
         _ => return Ok(()),
     };
 

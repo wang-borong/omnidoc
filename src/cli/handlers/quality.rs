@@ -25,7 +25,7 @@ pub fn handle_doctor(
     strict: bool,
     requested_outputs: Vec<String>,
 ) -> Result<()> {
-    let project_path = path::determine_project_path(path)?.canonicalize()?;
+    let project_path = path::determine_project_context(path)?;
     let config_manager = create_config_manager_default(Some(&project_path))?;
     let config = config_manager.get_merged().clone();
     let mut checks = Vec::new();
@@ -230,7 +230,7 @@ fn doctor_tool(executor: &BuildExecutor, key: &str, name: &str) -> DoctorCheck {
 }
 
 pub fn handle_config_validate(path: Option<String>) -> Result<()> {
-    let project_path = path::determine_project_path(path)?.canonicalize()?;
+    let project_path = path::determine_project_root(path)?;
     let config_manager = create_config_manager_default(Some(&project_path))?;
     let issues = project_tools::validate_config(&project_path, config_manager.get_merged());
     project_tools::print_issues(&issues);
@@ -243,7 +243,7 @@ pub fn handle_config_validate(path: Option<String>) -> Result<()> {
 }
 
 pub fn handle_lint(path: Option<String>, strict: bool) -> Result<()> {
-    let project_path = path::determine_project_path(path)?.canonicalize()?;
+    let project_path = path::determine_project_root(path)?;
     let config_manager = create_config_manager_default(Some(&project_path))?;
     let mut issues = project_tools::validate_config(&project_path, config_manager.get_merged());
     issues.extend(project_tools::lint_project(&project_path));
@@ -261,7 +261,7 @@ pub fn handle_lint(path: Option<String>, strict: bool) -> Result<()> {
 }
 
 pub fn handle_deps(path: Option<String>, json: bool) -> Result<()> {
-    let project_path = path::determine_project_path(path)?.canonicalize()?;
+    let project_path = path::determine_project_root(path)?;
     let config_manager = create_config_manager_default(Some(&project_path))?;
     let graph = project_tools::dependency_graph(&project_path, config_manager.get_merged());
 
@@ -285,7 +285,7 @@ pub fn handle_deps(path: Option<String>, json: bool) -> Result<()> {
 }
 
 pub fn handle_ci(path: Option<String>, outputs: Vec<String>) -> Result<()> {
-    let project_path = path::determine_project_path(path)?.canonicalize()?;
+    let project_path = path::determine_project_root(path)?;
     let cli_overrides = CliOverrides::new()
         .with_outputs(outputs)
         .with_latex_backend(Some("latexmk".to_string()));
@@ -304,7 +304,7 @@ pub fn handle_ci(path: Option<String>, outputs: Vec<String>) -> Result<()> {
 }
 
 pub fn handle_lock(path: Option<String>, check: bool, update: bool) -> Result<()> {
-    let project_path = path::determine_project_path(path)?.canonicalize()?;
+    let project_path = path::determine_project_root(path)?;
     let base_manager = create_config_manager_default(Some(&project_path))?;
     let base_config = base_manager.get_merged();
     let outputs = if base_config.outputs.is_empty() {
@@ -357,7 +357,7 @@ pub fn handle_lock(path: Option<String>, check: bool, update: bool) -> Result<()
 }
 
 pub fn handle_plugin(path: Option<String>, json: bool, validate: bool) -> Result<()> {
-    let project_path = path::determine_project_path(path)?.canonicalize()?;
+    let project_path = path::determine_project_context(path)?;
     let config_manager = create_config_manager(Some(&project_path), CliOverrides::new())?;
     let plugins = project_tools::discovered_plugins(&project_path, config_manager.get_merged());
     if json {
