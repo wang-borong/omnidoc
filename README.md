@@ -76,8 +76,9 @@ they can be run from the project root or nested directories such as
 project.
 
 Commands with `--json` write only JSON to stdout and use a non-zero exit code
-on failure. The `new`, `init`, `status`, `clean`, `update`, `config show`, and
-`config get` responses include a `schema_version` field set to `1`. Their
+on failure. The `new`, `init`, `status`, `clean`, `update`, `config show`,
+`config get`, `config set`, and `config unset` responses include a
+`schema_version` field set to `1`. Their
 command-specific success objects can be consumed directly, while failures return
 `{"schema_version":1,"error":{"category":"...","message":"..."}}` and write
 the human-readable diagnostic to stderr. Update reports additionally expose
@@ -472,10 +473,10 @@ template selector; pass `--type <KEY>` or `--defaults` explicitly.
 
 ### Configuration Commands
 
-11. **Inspect or create configuration**
+11. **Inspect, create, or update configuration**
 
-   Inspect the effective configuration, read one value, or explicitly create
-   the user-level configuration file:
+   Inspect the effective configuration, read or safely update one value, or
+   explicitly create the user-level configuration file:
 
    ```bash
    omnidoc config show [PATH]
@@ -483,6 +484,13 @@ template selector; pass `--type <KEY>` or `--defaults` explicitly.
    omnidoc config show --scope global --json
    omnidoc config get target [PATH]
    omnidoc config get project.target [PATH] --scope project --json
+   omnidoc config set project.target guide [PATH]
+   omnidoc config set build.outputs '["pdf", "html"]' [PATH]
+   omnidoc config set author.name "Docs Team" --scope global
+   omnidoc config set project.to html [PATH] --dry-run --json
+   omnidoc config set project.to html [PATH] --diff
+   omnidoc config unset theme.name [PATH]
+   omnidoc config unset tools.pandoc --scope global --dry-run
    omnidoc config init --author "Author Name" [OPTIONS]
    ```
 
@@ -491,6 +499,35 @@ template selector; pass `--type <KEY>` or `--defaults` explicitly.
    scope combines user and project configuration and reports every source path;
    `global` and `project` expose the original schema for that file. Dot-separated
    keys let scripts read exact values without parsing the whole configuration.
+
+   `set` and `unset` default to the nearest project configuration; pass
+   `--scope global` to update the user configuration. The merged scope is
+   deliberately read-only so every write has one unambiguous destination.
+   OmniDoc also rejects keys that the selected scope would ignore—for example,
+   `build.outputs` is project-only while `lib.path` is global-only. A `PATH`
+   may point at the project root or any nested project directory and is not
+   accepted with global writes.
+
+   Values follow the configuration schema. Boolean and integer keys use TOML
+   literals, arrays use syntax such as `'["pdf", "html"]'`, and string keys
+   accept natural unquoted text—even values such as `1`, `true`, or
+   `2026-07-27`. Schema/type errors, unknown keys, unsupported output names,
+   and invalid backend values fail before any file is changed.
+
+   Both write commands preserve existing TOML comments, blank lines, key
+   order, and surrounding formatting. Writes use atomic replacement and are
+   parsed again after saving. `--dry-run` reports `previous`, `value`,
+   `changed`, `created`, and `applied` without creating files, directories, or
+   project locks; `--diff` implies dry-run and adds a unified diff. `--json`
+   emits the same fields in a stable machine-readable envelope. Repeating a
+   `set` with the same semantic value and unsetting a missing key are successful
+   no-ops. `unset` also accepts a section such as `theme` when the entire
+   section should be removed.
+
+   If the global file does not exist, its first `set` starts from OmniDoc's
+   complete first-run defaults before applying the requested value. This keeps
+   the managed library and environment defaults intact instead of creating an
+   unexpectedly sparse global configuration.
 
    `config init` starts from the same complete first-run defaults used in
    memory, then overrides only explicitly supplied values. Its options are:

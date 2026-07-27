@@ -309,6 +309,27 @@ pub fn cli() -> Result<()> {
             }) => {
                 handle_config_get(key, path, scope, json)?;
             }
+            Some(ConfigSubcommand::Set {
+                key,
+                value,
+                path,
+                scope,
+                dry_run,
+                diff,
+                json,
+            }) => {
+                handle_config_set(key, value, path, scope, dry_run, diff, json)?;
+            }
+            Some(ConfigSubcommand::Unset {
+                key,
+                path,
+                scope,
+                dry_run,
+                diff,
+                json,
+            }) => {
+                handle_config_unset(key, path, scope, dry_run, diff, json)?;
+            }
             None => {
                 let author = authors.ok_or_else(|| {
                         OmniDocError::Config(

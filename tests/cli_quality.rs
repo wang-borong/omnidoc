@@ -183,6 +183,8 @@ fn help_prioritizes_workflows_and_keeps_legacy_commands_out_of_the_main_list() {
     assert!(config_help.contains("  init  "));
     assert!(config_help.contains("  show  "));
     assert!(config_help.contains("  get   "));
+    assert!(config_help.contains("  set   "));
+    assert!(config_help.contains("  unset "));
     assert!(!config_help.contains("-l, --lib <LIB>"));
     assert!(!config_help.contains("-o, --outdir <OUTDIR>"));
 
@@ -1585,6 +1587,247 @@ fn config_init_and_legacy_generation_forms_remain_supported() {
     let legacy_config =
         fs::read_to_string(legacy.env_root.join("config/omnidoc.toml")).expect("legacy config");
     assert!(legacy_config.contains("name = \"Legacy User\""));
+}
+
+#[test]
+fn config_set_previews_and_applies_typed_comment_preserving_edits() {
+    let fixture = Fixture::new("config-set");
+    let project = fixture.project_arg();
+    let config_path = fixture.project.join(".omnidoc.toml");
+    fs::write(
+        &config_path,
+        concat!(
+            "# Keep project guidance\n",
+            "[project]\n",
+            "entry = \"main.md\"\n",
+            "from = \"markdown\"\n",
+            "to = \"html\"\n",
+            "target = 'smoke' # artifact basename\n",
+            "\n",
+            "[build]\n",
+            "outdir = \"build\"\n",
+            "outputs = [\"html\"]\n",
+        ),
+    )
+    .expect("commented config");
+    let before = fs::read_to_string(&config_path).expect("before config");
+
+    let preview = assert_success(fixture.command(&[
+        "config",
+        "set",
+        "project.target",
+        "guide",
+        &project,
+        "--diff",
+        "--json",
+    ]));
+    let preview: serde_json::Value = serde_json::from_str(&preview).expect("set preview JSON");
+    assert_eq!(preview["schema_version"], 1);
+    assert_eq!(preview["operation"], "set");
+    assert_eq!(preview["scope"], "project");
+    assert_eq!(preview["previous"], "smoke");
+    assert_eq!(preview["value"], "guide");
+    assert_eq!(preview["changed"], true);
+    assert_eq!(preview["dry_run"], true);
+    assert_eq!(preview["applied"], false);
+    assert!(preview["diff"]
+        .as_str()
+        .is_some_and(|diff| diff.contains("target = \"guide\"")));
+    assert_eq!(
+        fs::read_to_string(&config_path).expect("preview config"),
+        before
+    );
+    assert!(!fixture.project.join(".omnidoc-cache").exists());
+
+    let applied = assert_success(fixture.command(&[
+        "config",
+        "set",
+        "project.target",
+        "guide",
+        &project,
+        "--json",
+    ]));
+    let applied: serde_json::Value = serde_json::from_str(&applied).expect("set JSON");
+    assert_eq!(applied["changed"], true);
+    assert_eq!(applied["applied"], true);
+    let edited = fs::read_to_string(&config_path).expect("edited config");
+    assert!(edited.contains("# Keep project guidance"));
+    assert!(edited.contains("target = \"guide\" # artifact basename"));
+
+    assert_success(fixture.command(&[
+        "config",
+        "set",
+        "build.outputs",
+        "[\"pdf\", \"html\"]",
+        &project,
+    ]));
+    assert_success(fixture.command(&["config", "set", "build.verbose", "true", &project]));
+    let shown = assert_success(
+        fixture.command(&["config", "show", &project, "--scope", "project", "--json"]),
+    );
+    let shown: serde_json::Value = serde_json::from_str(&shown).expect("project config JSON");
+    assert_eq!(shown["config"]["project"]["target"], "guide");
+    assert_eq!(
+        shown["config"]["build"]["outputs"],
+        serde_json::json!(["pdf", "html"])
+    );
+    assert_eq!(shown["config"]["build"]["verbose"], true);
+
+    let no_op = assert_success(fixture.command(&[
+        "config",
+        "set",
+        "project.target",
+        "guide",
+        &project,
+        "--json",
+    ]));
+    let no_op: serde_json::Value = serde_json::from_str(&no_op).expect("no-op JSON");
+    assert_eq!(no_op["changed"], false);
+    assert_eq!(no_op["applied"], false);
+
+    let string_like = assert_success(fixture.command(&[
+        "config",
+        "set",
+        "project.target",
+        "2026-07-27",
+        &project,
+        "--json",
+    ]));
+    let string_like: serde_json::Value =
+        serde_json::from_str(&string_like).expect("schema-aware string JSON");
+    assert_eq!(string_like["value"], "2026-07-27");
+}
+
+#[test]
+fn config_unset_is_safe_and_global_set_bootstraps_complete_defaults() {
+    let fixture = Fixture::new("config-unset-global");
+    let project = fixture.project_arg();
+    let project_before =
+        fs::read_to_string(fixture.project.join(".omnidoc.toml")).expect("project config");
+    let global_path = fixture.env_root.join("config/omnidoc.toml");
+    fs::remove_file(&global_path).ok();
+
+    let global = assert_success(fixture.command(&[
+        "config",
+        "set",
+        "author.name",
+        "Docs Team",
+        "--scope",
+        "global",
+        "--json",
+    ]));
+    let global: serde_json::Value = serde_json::from_str(&global).expect("global set JSON");
+    assert_eq!(global["created"], true);
+    assert_eq!(global["applied"], true);
+    assert_eq!(global["value"], "Docs Team");
+    let global_config = fs::read_to_string(&global_path).expect("global config");
+    assert!(global_config.contains("name = \"Docs Team\""));
+    assert!(global_config.contains("[lib]"));
+    assert!(global_config.contains("[env]"));
+    assert_eq!(
+        fs::read_to_string(fixture.project.join(".omnidoc.toml"))
+            .expect("unchanged project config"),
+        project_before
+    );
+
+    let preview = assert_success(fixture.command(&[
+        "config",
+        "unset",
+        "env.texinputs",
+        "--scope",
+        "global",
+        "--dry-run",
+        "--json",
+    ]));
+    let preview: serde_json::Value = serde_json::from_str(&preview).expect("unset preview JSON");
+    assert_eq!(preview["previous"], "./tex//:");
+    assert_eq!(preview["value"], serde_json::Value::Null);
+    assert_eq!(preview["changed"], true);
+    assert_eq!(preview["applied"], false);
+    assert_eq!(
+        fs::read_to_string(&global_path).expect("preview global config"),
+        global_config
+    );
+
+    assert_success(fixture.command(&["config", "unset", "env.texinputs", "--scope", "global"]));
+    let updated = fs::read_to_string(&global_path).expect("updated global config");
+    assert!(!updated.contains("texinputs"));
+
+    assert_success(fixture.command(&[
+        "config",
+        "set",
+        "paths.build_dir",
+        "global-build",
+        "--scope",
+        "global",
+    ]));
+    assert_success(fixture.command(&[
+        "config",
+        "set",
+        "paths.build_dir",
+        "project-build",
+        &project,
+    ]));
+    let merged = assert_success(fixture.command(&["config", "show", &project, "--json"]));
+    let merged: serde_json::Value = serde_json::from_str(&merged).expect("merged config JSON");
+    assert_eq!(merged["config"]["paths"]["build_dir"], "project-build");
+
+    let no_op =
+        assert_success(fixture.command(&["config", "unset", "theme.name", &project, "--json"]));
+    let no_op: serde_json::Value = serde_json::from_str(&no_op).expect("unset no-op JSON");
+    assert_eq!(no_op["changed"], false);
+    assert_eq!(no_op["applied"], false);
+}
+
+#[test]
+fn config_writes_reject_invalid_types_keys_and_ignored_scopes_without_changes() {
+    let fixture = Fixture::new("config-write-errors");
+    let project = fixture.project_arg();
+    let config_path = fixture.project.join(".omnidoc.toml");
+    let before = fs::read_to_string(&config_path).expect("before config");
+
+    for args in [
+        vec![
+            "config",
+            "set",
+            "build.outputs",
+            "not-an-array",
+            &project,
+            "--json",
+        ],
+        vec![
+            "config",
+            "set",
+            "build.outputs",
+            "[\"pdf\", \"exe\"]",
+            &project,
+            "--json",
+        ],
+        vec!["config", "set", "build.outptuz", "html", &project, "--json"],
+        vec!["config", "set", "theme.version", "1", &project, "--json"],
+        vec![
+            "config",
+            "set",
+            "build.outputs",
+            "[\"html\"]",
+            "--scope",
+            "global",
+            "--json",
+        ],
+    ] {
+        let output = fixture.command(&args);
+        assert!(!output.status.success());
+        let error: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("configuration error JSON");
+        assert_eq!(error["error"]["category"], "configuration");
+        assert_eq!(
+            fs::read_to_string(&config_path).expect("unchanged config"),
+            before
+        );
+    }
+
+    assert!(!fixture.env_root.join("config/omnidoc.toml").exists());
+    assert!(!fixture.project.join(".omnidoc-cache").exists());
 }
 
 #[test]

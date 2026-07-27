@@ -475,9 +475,9 @@ pub enum Commands {
         json: bool,
     },
 
-    /// inspect or create OmniDoc configuration
+    /// inspect, create, or safely update OmniDoc configuration
     #[command(
-        after_help = "Examples:\n  omnidoc config show --json\n  omnidoc config get target\n  omnidoc config init --author 'Docs Team'\n\nThe legacy `omnidoc config --authors NAME` form remains supported."
+        after_help = "Examples:\n  omnidoc config show --json\n  omnidoc config get target\n  omnidoc config set project.target guide\n  omnidoc config set build.outputs '[\"pdf\", \"html\"]' --dry-run\n  omnidoc config unset theme.name\n  omnidoc config init --author 'Docs Team'\n\nThe legacy `omnidoc config --authors NAME` form remains supported."
     )]
     Config {
         #[command(subcommand)]
@@ -668,6 +668,14 @@ pub enum ConfigScope {
     Project,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ConfigWriteScope {
+    /// user-level configuration
+    Global,
+    /// nearest .omnidoc.toml project configuration
+    Project,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum ConfigSubcommand {
     /// create the user-level configuration file explicitly
@@ -730,6 +738,67 @@ pub enum ConfigSubcommand {
         scope: ConfigScope,
 
         /// emit a stable JSON envelope
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// set one dot-separated configuration key
+    #[command(
+        after_help = "Examples:\n  omnidoc config set project.target guide\n  omnidoc config set build.outputs '[\"pdf\", \"html\"]'\n  omnidoc config set author.name 'Docs Team' --scope global\n  omnidoc config set project.to html --diff\n\nValues follow the configuration schema: booleans, integers, and arrays use TOML syntax, while string keys accept natural unquoted text."
+    )]
+    Set {
+        /// key such as project.target, build.outputs, or tools.pandoc
+        key: String,
+
+        /// value to store; the schema determines string, boolean, integer, or array parsing
+        value: String,
+
+        /// project path used to resolve project configuration
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// configuration file to update
+        #[arg(long, value_enum, default_value = "project")]
+        scope: ConfigWriteScope,
+
+        /// report the change without writing the configuration file
+        #[arg(long)]
+        dry_run: bool,
+
+        /// show a unified diff and imply --dry-run
+        #[arg(long)]
+        diff: bool,
+
+        /// emit a stable JSON change report
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// remove one dot-separated configuration key or section
+    #[command(
+        after_help = "Examples:\n  omnidoc config unset theme.name\n  omnidoc config unset pandoc.format_options.html\n  omnidoc config unset tools.pandoc --scope global --dry-run\n  omnidoc config unset theme --diff"
+    )]
+    Unset {
+        /// key or section such as theme.name, tools.pandoc, or pandoc
+        key: String,
+
+        /// project path used to resolve project configuration
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// configuration file to update
+        #[arg(long, value_enum, default_value = "project")]
+        scope: ConfigWriteScope,
+
+        /// report the change without writing the configuration file
+        #[arg(long)]
+        dry_run: bool,
+
+        /// show a unified diff and imply --dry-run
+        #[arg(long)]
+        diff: bool,
+
+        /// emit a stable JSON change report
         #[arg(long)]
         json: bool,
     },
@@ -1188,8 +1257,8 @@ pub enum FigureSubcommand {
 #[cfg(test)]
 mod tests {
     use super::{
-        CheckSubcommand, Commands, ConfigScope, ConfigSubcommand, ConvertSubcommand, LibSubcommand,
-        OmniCli, PluginSubcommand,
+        CheckSubcommand, Commands, ConfigScope, ConfigSubcommand, ConfigWriteScope,
+        ConvertSubcommand, LibSubcommand, OmniCli, PluginSubcommand,
     };
     use crate::doctype::DocumentFormat;
     use clap::Parser;
@@ -1435,6 +1504,57 @@ mod tests {
                 subcommand: Some(ConfigSubcommand::Get { key, .. }),
                 ..
             } if key == "target"
+        ));
+
+        let set = OmniCli::try_parse_from([
+            "omnidoc",
+            "config",
+            "set",
+            "build.outputs",
+            "[\"pdf\", \"html\"]",
+            "docs",
+            "--scope",
+            "project",
+            "--dry-run",
+            "--diff",
+            "--json",
+        ])
+        .expect("config set");
+        assert!(matches!(
+            set.command,
+            Commands::Config {
+                subcommand: Some(ConfigSubcommand::Set {
+                    key,
+                    path: Some(path),
+                    scope: ConfigWriteScope::Project,
+                    dry_run: true,
+                    diff: true,
+                    json: true,
+                    ..
+                }),
+                ..
+            } if key == "build.outputs" && path == "docs"
+        ));
+
+        let unset = OmniCli::try_parse_from([
+            "omnidoc",
+            "config",
+            "unset",
+            "tools.pandoc",
+            "--scope",
+            "global",
+        ])
+        .expect("config unset");
+        assert!(matches!(
+            unset.command,
+            Commands::Config {
+                subcommand: Some(ConfigSubcommand::Unset {
+                    key,
+                    scope: ConfigWriteScope::Global,
+                    ..
+                }),
+                ..
+            } if key == "tools.pandoc"
         ));
 
         let legacy = OmniCli::try_parse_from(["omnidoc", "config", "--authors", "Docs Team"])

@@ -38,6 +38,12 @@
   selectable merged/global/project scopes, stable JSON, source provenance, and
   no implicit config-file creation from read-only commands; legacy flat config
   options remain accepted but are hidden from primary help.
+- Added typed `config set` and `config unset` workflows for project/global
+  files with scope-aware key validation, dry-run/diff previews, stable JSON,
+  semantic no-op detection, comment-preserving TOML edits, atomic writes, and
+  complete first-run defaults when bootstrapping global configuration.
+- Fixed `paths.*` precedence so project configuration now overrides global
+  values as documented while continuing to inherit unspecified global paths.
 - Added `update --dry-run`, `--diff`, `--no-commit`, and stable JSON action and
   repository-status reports; previews now contain only real changes and can
   include unified managed-file diffs.

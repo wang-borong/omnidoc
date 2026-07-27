@@ -22,7 +22,9 @@ pub mod watch;
 pub use build::handle_build;
 pub use clean::handle_clean;
 pub(crate) use common::print_json_error;
-pub use config::{handle_config, handle_config_get, handle_config_show};
+pub use config::{
+    handle_config, handle_config_get, handle_config_set, handle_config_show, handle_config_unset,
+};
 pub use figure::{handle_figure, BitfieldOptions};
 pub use fmt::handle_fmt;
 pub use init::handle_init;

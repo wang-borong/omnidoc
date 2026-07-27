@@ -322,22 +322,9 @@ impl ConfigManager {
         // 模板目录
         let template_dir = global_config.and_then(|c| c.template_dir.clone());
 
-        // 合并路径配置
-        let mut paths = PathConfig::new();
-        // 项目配置优先
-        if let Some(project_paths) = project_config
-            .and_then(|c| c.paths.as_ref())
-            .and_then(|p| p.paths.as_ref())
-        {
-            paths.merge_from_config(Some(project_paths));
-        }
-        // 全局配置作为后备
-        if let Some(global_paths) = global_config
-            .and_then(|c| c.paths.as_ref())
-            .and_then(|p| p.paths.as_ref())
-        {
-            paths.merge_from_config(Some(global_paths));
-        }
+        // Merge lower-precedence global paths first so project values override
+        // them while still inheriting global fields the project omits.
+        let paths = merge_path_config(global_config, project_config);
 
         Ok(MergedConfig {
             author,
@@ -528,9 +515,23 @@ fn merge_tool_paths(target: &mut HashMap<String, Option<String>>, config: Option
     }
 }
 
+fn merge_path_config(
+    global_config: Option<&ConfigSchema>,
+    project_config: Option<&ConfigSchema>,
+) -> PathConfig {
+    let mut paths = PathConfig::new();
+    for config in [global_config, project_config] {
+        let configured_paths = config
+            .and_then(|config| config.paths.as_ref())
+            .and_then(|config| config.paths.as_ref());
+        paths.merge_from_config(configured_paths);
+    }
+    paths
+}
+
 #[cfg(test)]
 mod tests {
-    use super::merge_tool_paths;
+    use super::{merge_path_config, merge_tool_paths};
     use crate::config::schema::ConfigSchema;
     use std::collections::HashMap;
 
@@ -554,5 +555,21 @@ mod tests {
             paths.get("tectonic").and_then(|value| value.as_deref()),
             Some("project-tectonic")
         );
+    }
+
+    #[test]
+    fn project_paths_override_global_paths_and_inherit_unset_values() {
+        let global: ConfigSchema =
+            toml::from_str("[paths]\nbuild_dir = 'global-build'\nbiblio_dir = 'shared-biblio'\n")
+                .expect("global config");
+        let project: ConfigSchema =
+            toml::from_str("[paths]\nbuild_dir = 'project-build'\nmain_md = 'content/main.md'\n")
+                .expect("project config");
+
+        let paths = merge_path_config(Some(&global), Some(&project));
+
+        assert_eq!(paths.build_dir, "project-build");
+        assert_eq!(paths.main_md, "content/main.md");
+        assert_eq!(paths.biblio_dir, "shared-biblio");
     }
 }
