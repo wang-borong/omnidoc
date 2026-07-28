@@ -13,6 +13,7 @@ pub(crate) enum PandocOutputKind {
 
 impl PandocOutputKind {
     const METADATA_DEFAULTS_FILTER: &'static str = "metadata-defaults.lua";
+    const LATEX_HEADERS_FILTER: &'static str = "latex-headers.lua";
 
     pub(crate) fn from_config(config: &MergedConfig) -> Result<Self> {
         let requested = config.to.as_deref().or(config.pandoc_to_format.as_deref());
@@ -127,6 +128,9 @@ impl PandocOutputKind {
                 .collect()
         };
         let mut filters = vec![Self::METADATA_DEFAULTS_FILTER];
+        if self.uses_latex_defaults() {
+            filters.push(Self::LATEX_HEADERS_FILTER);
+        }
         for filter in configured {
             if !filters.contains(&filter) {
                 filters.push(filter);
@@ -228,6 +232,13 @@ mod tests {
             PandocOutputKind::Pdf.filters(&config).first().copied(),
             Some("metadata-defaults.lua")
         );
+        assert_eq!(
+            PandocOutputKind::Pdf.filters(&config).get(1).copied(),
+            Some("latex-headers.lua")
+        );
+        assert!(!PandocOutputKind::Html
+            .filters(&config)
+            .contains(&"latex-headers.lua"));
         assert!(is_supported_format_key("docx"));
         assert!(is_supported_format_key("pptx"));
         assert!(!is_supported_format_key("html5"));

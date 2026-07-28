@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Preserved project `header-includes` from Pandoc metadata files and configured
+  `--include-in-header` options when adding OmniDoc-managed emoji,
+  semantic-block, and theme headers, preventing themed link colors and other
+  project LaTeX definitions from disappearing in PDF builds.
+
 ## 1.8.0 - 2026-07-28
 
 - Added `corporate-docs`, `classic-book`, `clean-document`, and

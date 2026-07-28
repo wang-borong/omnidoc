@@ -1,4 +1,9 @@
 --- Append OmniDoc-managed LaTeX header files without replacing project metadata.
+---
+--- Pandoc's `--include-in-header` option replaces `header-includes` loaded from
+--- a metadata file. OmniDoc transports its own header paths through private
+--- metadata keys instead, then this filter appends their contents to the final
+--- metadata assembled by Pandoc.
 
 if not FORMAT:match('latex') and not FORMAT:match('beamer') then
   return {}
@@ -28,7 +33,9 @@ local function Meta(meta)
   local headers = {}
   for key, value in pairs(meta) do
     if key == 'omnidoc-default-latex-header' or
-       key:match('^omnidoc%-theme%-latex%-header%-%d+$') then
+       key:match('^omnidoc%-latex%-header%-%d+$') or
+       key:match('^omnidoc%-theme%-latex%-header%-%d+$') or
+       key:match('^omnidoc%-user%-latex%-header%-%d+$') then
       table.insert(headers, {key, utils.stringify(value)})
     end
   end

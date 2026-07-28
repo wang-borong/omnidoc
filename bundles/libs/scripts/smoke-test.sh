@@ -170,25 +170,31 @@ EOF
   rg -q "$work/divider.cir" "$work/diagram-generator.d"
 fi
 
-# OmniDoc-managed theme headers must be appended to, rather than replace, a
-# project's own header-includes metadata.
+# OmniDoc-managed headers must be appended to, rather than replace, a
+# project's own header-includes loaded from a metadata file.
 cat >"$work/managed-header.tex" <<'EOF'
 \newcommand{\OmniManagedHeaderMarker}{managed}
 EOF
-cat >"$work/header-smoke.md" <<'EOF'
----
+cat >"$work/user-header.tex" <<'EOF'
+\newcommand{\OmniUserHeaderMarker}{user}
+EOF
+cat >"$work/header-metadata.yaml" <<'EOF'
 header-includes:
   - \newcommand{\ProjectHeaderMarker}{project}
----
-
+EOF
+cat >"$work/header-smoke.md" <<'EOF'
 Header smoke.
 EOF
 pandoc "$work/header-smoke.md" \
-  --metadata omnidoc-default-latex-header="$work/managed-header.tex" \
+  --metadata-file="$work/header-metadata.yaml" \
+  --metadata omnidoc-latex-header-0001="$work/managed-header.tex" \
+  --metadata omnidoc-user-latex-header-0001="$work/user-header.tex" \
+  --lua-filter="$root/pandoc/data/filters/metadata-defaults.lua" \
   --lua-filter="$root/pandoc/data/filters/latex-headers.lua" \
   --standalone -t latex -o "$work/header-smoke.tex"
 rg -Fq '\newcommand{\ProjectHeaderMarker}{project}' "$work/header-smoke.tex"
 rg -Fq '\newcommand{\OmniManagedHeaderMarker}{managed}' "$work/header-smoke.tex"
+rg -Fq '\newcommand{\OmniUserHeaderMarker}{user}' "$work/header-smoke.tex"
 
 # Theme/global values are defaults, not command-line overrides of publication
 # metadata. The same filter also selects Chinese cross-reference labels only
