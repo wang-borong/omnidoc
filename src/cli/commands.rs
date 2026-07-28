@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand, ValueEnum, ValueHint};
 /// The OmniDoc management CLI
 #[derive(Debug, Parser)]
 #[command(name = "omnidoc")]
+#[command(bin_name = "omnidoc")]
 #[command(
     version,
     about = "Create, build, validate, and publish document projects"

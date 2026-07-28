@@ -87,6 +87,10 @@ export XDG_CONFIG_HOME="$work/config"
 export HOME="$work/home"
 export TEXINPUTS="$work/texmf//:"
 
+# Read-only commands intentionally do not create global configuration. Create
+# the isolated defaults explicitly before customizing TEXINPUTS below.
+"$bin" config init --author "OmniDoc CI"
+
 pdf="$work/book/build/golden-book.pdf"
 report="$work/book/build/omnidoc-report.json"
 lock="$work/book/omnidoc.lock"

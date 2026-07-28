@@ -150,6 +150,48 @@ fn assert_failure(output: Output) -> String {
     stdout
 }
 
+fn serialized_path_ends_with(value: &serde_json::Value, suffix: &[&str]) -> bool {
+    let Some(path) = value.as_str() else {
+        return false;
+    };
+    let components = path
+        .split(['/', '\\'])
+        .filter(|component| !component.is_empty())
+        .collect::<Vec<_>>();
+    components.ends_with(suffix)
+}
+
+fn serialized_path_has_curdir(value: &serde_json::Value) -> bool {
+    value
+        .as_str()
+        .is_some_and(|path| path.split(['/', '\\']).any(|component| component == "."))
+}
+
+fn assert_same_existing_path(actual: impl AsRef<Path>, expected: impl AsRef<Path>) {
+    let actual = actual.as_ref();
+    let expected = expected.as_ref();
+    let actual = fs::canonicalize(actual)
+        .unwrap_or_else(|error| panic!("canonicalize {}: {error}", actual.display()));
+    let expected = fs::canonicalize(expected)
+        .unwrap_or_else(|error| panic!("canonicalize {}: {error}", expected.display()));
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn serialized_path_assertions_are_separator_agnostic() {
+    let windows = serde_json::json!(r"\\?\C:\work\project\tex\appendix.tex");
+    let unix = serde_json::json!("/private/tmp/project/tex/appendix.tex");
+    let dotted = serde_json::json!(r"C:\work\project\.\main.md");
+
+    assert!(serialized_path_ends_with(
+        &windows,
+        &["tex", "appendix.tex"]
+    ));
+    assert!(serialized_path_ends_with(&unix, &["tex", "appendix.tex"]));
+    assert!(!serialized_path_has_curdir(&windows));
+    assert!(serialized_path_has_curdir(&dotted));
+}
+
 #[test]
 fn help_prioritizes_workflows_and_keeps_legacy_commands_out_of_the_main_list() {
     let fixture = Fixture::new("help-groups");
@@ -298,16 +340,12 @@ fn new_preview_and_json_creation_are_safe_and_composable() {
     assert_eq!(preview["template"]["key"], "ctexart-tex");
     assert!(preview["actions"].as_array().is_some_and(|actions| {
         actions.iter().any(|action| action["operation"] == "commit")
-            && actions.iter().any(|action| {
-                action["path"]
-                    .as_str()
-                    .is_some_and(|path| path.ends_with("/.latexmkrc"))
-            })
-            && actions.iter().all(|action| {
-                action["path"]
-                    .as_str()
-                    .is_none_or(|path| !path.contains("/./"))
-            })
+            && actions
+                .iter()
+                .any(|action| serialized_path_ends_with(&action["path"], &[".latexmkrc"]))
+            && actions
+                .iter()
+                .all(|action| !serialized_path_has_curdir(&action["path"]))
     }));
     assert!(!preview_target.exists());
     assert!(!fixture.env_root.join("config/omnidoc.toml").exists());
@@ -463,21 +501,15 @@ fn init_preview_diff_and_json_application_are_safe_and_composable() {
     let actions = preview["actions"].as_array().expect("init actions");
     assert!(actions.iter().any(|action| {
         action["operation"] == "create_file"
-            && action["path"]
-                .as_str()
-                .is_some_and(|path| path.ends_with("/.omnidoc.toml"))
+            && serialized_path_ends_with(&action["path"], &[".omnidoc.toml"])
     }));
     assert!(actions.iter().any(|action| {
         action["operation"] == "move_file"
-            && action["path"]
-                .as_str()
-                .is_some_and(|path| path.ends_with("/notes.md"))
+            && serialized_path_ends_with(&action["path"], &["notes.md"])
     }));
     assert!(actions.iter().any(|action| {
         action["operation"] == "refresh_file"
-            && action["path"]
-                .as_str()
-                .is_some_and(|path| path.ends_with("/.gitignore"))
+            && serialized_path_ends_with(&action["path"], &[".gitignore"])
             && action["diff"]
                 .as_str()
                 .is_some_and(|diff| diff.contains("custom-output/"))
@@ -666,12 +698,8 @@ fn update_preview_is_json_and_does_not_modify_the_project() {
         report["actions"].as_array().is_some_and(|actions| {
             actions.iter().any(|action| {
                 action["operation"] == "move_file"
-                    && action["path"]
-                        .as_str()
-                        .is_some_and(|path| path.ends_with("/appendix.tex"))
-                    && action["destination"]
-                        .as_str()
-                        .is_some_and(|path| path.ends_with("/tex/appendix.tex"))
+                    && serialized_path_ends_with(&action["path"], &["appendix.tex"])
+                    && serialized_path_ends_with(&action["destination"], &["tex", "appendix.tex"])
             })
         }),
         "report: {report}"
@@ -861,11 +889,7 @@ fn update_diff_is_a_read_only_managed_file_preview() {
         .as_array()
         .expect("diff actions")
         .iter()
-        .find(|action| {
-            action["path"]
-                .as_str()
-                .is_some_and(|path| path.ends_with("/.gitignore"))
-        })
+        .find(|action| serialized_path_ends_with(&action["path"], &[".gitignore"]))
         .expect("gitignore action");
     assert_eq!(action["operation"], "refresh_file");
     assert_eq!(action["change"], "update");
@@ -1158,9 +1182,9 @@ fn status_and_open_resolve_the_configured_artifact_contract() {
     let output = assert_success(fixture.command_in(&nested, &["status", "--json"]));
     let status: serde_json::Value = serde_json::from_str(&output).expect("project status JSON");
     assert_eq!(status["schema_version"], 1);
-    assert_eq!(
-        Path::new(status["project_root"].as_str().expect("project root")),
-        fixture.project
+    assert_same_existing_path(
+        status["project_root"].as_str().expect("project root"),
+        &fixture.project,
     );
     assert_eq!(status["source_format"], "markdown");
     assert_eq!(status["target"], "smoke");
@@ -1169,16 +1193,14 @@ fn status_and_open_resolve_the_configured_artifact_contract() {
     assert_eq!(status["entry"]["exists"], true);
     assert_eq!(status["artifacts"][0]["format"], "html");
     assert_eq!(status["artifacts"][0]["exists"], true);
-    assert!(status["artifacts"][0]["path"]
-        .as_str()
-        .is_some_and(|path| path.ends_with("/build/smoke.html")));
+    assert!(serialized_path_ends_with(
+        &status["artifacts"][0]["path"],
+        &["build", "smoke.html"],
+    ));
 
     let artifact =
         assert_success(fixture.command_in(&nested, &["open", "--to", "html", "--print-path"]));
-    assert_eq!(
-        Path::new(artifact.trim()),
-        fixture.project.join("build/smoke.html")
-    );
+    assert_same_existing_path(artifact.trim(), fixture.project.join("build/smoke.html"));
 
     let missing = fixture.command(&["open", "--to", "pdf", "--print-path", &project]);
     assert!(!missing.status.success());
@@ -1721,13 +1743,12 @@ fn config_init_and_legacy_generation_forms_remain_supported() {
     assert!(grouped_config.contains("outdir = \"output\""));
     assert!(grouped_config.contains("texinputs = \"./tex//:\""));
     assert!(grouped_config.contains("bibinputs = \"./biblio//:\""));
-    assert!(grouped_config.contains(
-        grouped
-            .env_root
-            .join("data/omnidoc")
-            .to_string_lossy()
-            .as_ref()
-    ));
+    let grouped_document: toml::Value =
+        toml::from_str(&grouped_config).expect("parse grouped config");
+    let configured_library = grouped_document["lib"]["path"]
+        .as_str()
+        .expect("configured library path");
+    assert_same_existing_path(configured_library, grouped.env_root.join("data/omnidoc"));
 
     let legacy = Fixture::new("config-legacy");
     assert_success(legacy.command(&["config", "--authors", "Legacy User"]));
