@@ -6,11 +6,12 @@ The release publishes platform-specific binaries plus the verified
 
 ## 1. Prepare the release
 
-1. Set the version once; the command updates `Cargo.toml`, `Cargo.lock`, the
-   bundle manifest/compatibility, and the embedded release contract:
+1. Set the version once; the command updates `Cargo.toml`, `Cargo.lock`,
+   `PKGBUILD`, the bundle manifest/compatibility, and the embedded release
+   contract:
 
    ```bash
-   python3 scripts/set-version.py 1.7.0
+   python3 scripts/set-version.py 1.8.0
    ```
 
 2. Regenerate and verify the payload checksums:
@@ -50,8 +51,8 @@ OMNIDOC_TECTONIC_BIN=/tmp/omnidoc-engines/tectonic \
 Build the deterministic sidecar twice and compare it:
 
 ```bash
-OMNIDOC_RELEASE_TAG=v1.7.0 bundles/libs/scripts/package-release.sh /tmp/omnidoc-libs-a
-OMNIDOC_RELEASE_TAG=v1.7.0 bundles/libs/scripts/package-release.sh /tmp/omnidoc-libs-b
+OMNIDOC_RELEASE_TAG=v1.8.0 bundles/libs/scripts/package-release.sh /tmp/omnidoc-libs-a
+OMNIDOC_RELEASE_TAG=v1.8.0 bundles/libs/scripts/package-release.sh /tmp/omnidoc-libs-b
 cmp /tmp/omnidoc-libs-a/*.tar.gz /tmp/omnidoc-libs-b/*.tar.gz
 cmp /tmp/omnidoc-libs-a/*.sha256 /tmp/omnidoc-libs-b/*.sha256
 ```
@@ -75,11 +76,11 @@ profile or documented release note rather than an untracked CSS patch.
 
 ## 4. Publish
 
-1. Commit, create, and push the single product tag, for example `v1.7.0`.
+1. Commit, create, and push the single product tag, for example `v1.8.0`.
 2. Require quality, library bundle, Golden Book, Golden PDF, portable document
    smoke, package, and installed-release smoke jobs to pass.
 3. Confirm the GitHub release contains every binary package plus
-   `omnidoc-libs-v1.7.0.tar.gz` and its `.sha256` file. Each platform binary
+   `omnidoc-libs-v1.8.0.tar.gz` and its `.sha256` file. Each platform binary
    archive must also contain `engines/tectonic` (or `tectonic.exe`) and
    `THIRD_PARTY_LICENSES.md`, plus the Tectonic engine policy ADR.
 4. Download every archive and run its packaged-binary smoke test.

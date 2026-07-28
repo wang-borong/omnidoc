@@ -1,6 +1,6 @@
 # Maintainer: Jason Wang <wang_borong@163.com>
 pkgname=omnidoc
-pkgver=1.7.0
+pkgver=1.8.0
 pkgrel=1
 pkgdesc="OmniDoc - A documentation tool"
 arch=('x86_64')

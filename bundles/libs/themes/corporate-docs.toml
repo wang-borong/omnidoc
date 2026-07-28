@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "Structured company manuals, product guides, API documentation, and internal standards"
 category = "corporate"
 recommended_for = ["user manuals", "developer guides", "API documentation", "internal standards"]
-compatible_omnidoc = ">=1.7.0,<2.0.0"
+compatible_omnidoc = ">=1.8.0,<2.0.0"
 compatibility = "readium"
 
 [resources]

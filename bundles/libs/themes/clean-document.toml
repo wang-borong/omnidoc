@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "A neutral, compact theme for reports, specifications, proposals, and everyday documents"
 category = "document"
 recommended_for = ["reports", "specifications", "proposals", "meeting notes"]
-compatible_omnidoc = ">=1.7.0,<2.0.0"
+compatible_omnidoc = ">=1.8.0,<2.0.0"
 compatibility = "readium"
 
 [resources]

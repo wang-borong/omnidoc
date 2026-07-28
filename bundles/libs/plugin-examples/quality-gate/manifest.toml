@@ -2,7 +2,7 @@ manifest_version = 1
 key = "quality-gate"
 name = "Documentation Quality Gate"
 version = "1.0.0"
-compatible_omnidoc = ">=1.7.0,<2.0.0"
+compatible_omnidoc = ">=1.8.0,<2.0.0"
 description = "Flags TODO/FIXME markers and Markdown files without a level-one heading"
 kind = "plugin"
 

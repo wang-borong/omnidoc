@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "A high-contrast presentation theme for product briefings, reviews, training, and technical talks"
 category = "presentation"
 recommended_for = ["product briefings", "technical talks", "training decks", "project reviews"]
-compatible_omnidoc = ">=1.7.0,<2.0.0"
+compatible_omnidoc = ">=1.8.0,<2.0.0"
 compatibility = "readium"
 
 [resources]

@@ -50,6 +50,11 @@ def main() -> int:
         r'(\[\[package\]\]\nname = "omnidoc"\nversion = ")[^"]+("\s*)',
         rf"\g<1>{version}\g<2>",
     )
+    replace_once(
+        ROOT / "PKGBUILD",
+        r"^pkgver=[^\s]+$",
+        f"pkgver={version}",
+    )
     manifest = ROOT / "bundles" / "libs" / "manifest.toml"
     replace_once(manifest, r'^version = "[^"]+"$', f'version = "{version}"')
     replace_once(

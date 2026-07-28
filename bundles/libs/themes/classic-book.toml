@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "A restrained serif theme for books, essays, histories, and long-form reading"
 category = "book"
 recommended_for = ["general books", "essays", "history", "long-form reading"]
-compatible_omnidoc = ">=1.7.0,<2.0.0"
+compatible_omnidoc = ">=1.8.0,<2.0.0"
 compatibility = "readium"
 
 [resources]

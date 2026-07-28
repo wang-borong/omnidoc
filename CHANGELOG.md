@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.8.0 - 2026-07-28
+
 - Added `corporate-docs`, `classic-book`, `clean-document`, and
   `modern-slides` theme bundles with distinct HTML/EPUB/PDF styling, themed
   DOCX reference documents, a modern PPTX reference deck, categorized theme
@@ -69,6 +71,9 @@
   `dist`, generated figure directories, caches, and exact root-level generated
   artifacts while continuing to watch unrelated source assets; `watch --once`
   now returns a failing build's non-zero status instead of reporting success.
+- Made package and CLI integration tests path-semantic across macOS and Windows,
+  stabilized Windows help usage as `omnidoc`, and made Golden PDF checks create
+  their isolated global configuration explicitly.
 
 ## 1.7.0 - 2026-07-26
 
