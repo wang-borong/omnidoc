@@ -1,5 +1,4 @@
 use crate::build::executor::{BuildExecutor, LatexEnginePreference};
-use crate::build::pandoc::load_selected_theme;
 use crate::build::pandoc_policy::{is_supported_format_key, PandocOutputKind};
 use crate::build::pipeline::{detect_project_type, ProjectType};
 use crate::build::tectonic;
@@ -8,6 +7,10 @@ use crate::config::MergedConfig;
 use crate::constants::pandoc;
 use crate::epub::{is_supported_epub_profile, EpubCompatibilityReport};
 use crate::error::{OmniDocError, Result};
+use crate::extensions::{
+    enabled_plugin_resources, enabled_plugins, materialize_theme_tokens, plugin_filters_for_output,
+    resolve_selected_theme, PackageKind, ResolvedTheme,
+};
 use crate::utils;
 use crate::utils::directories::data_local_dir;
 use blake3::Hasher;
@@ -28,8 +31,8 @@ pub(crate) const LATEX_INPUT_DEPFILE: &str = "latex-inputs.d";
 const LOCK_FILE: &str = "omnidoc.lock";
 const REPORT_FILE: &str = "omnidoc-report.json";
 const PROJECT_LOCK_FILE: &str = "project.lock";
-const CACHE_VERSION: u32 = 6;
-const LOCK_VERSION: u32 = 4;
+const CACHE_VERSION: u32 = 7;
+const LOCK_VERSION: u32 = 5;
 
 pub struct ProjectWriteLock {
     file: fs::File,
@@ -157,8 +160,19 @@ pub struct LockFile {
     pub lock_version: u32,
     pub omnidoc_version: String,
     pub library: Option<LockedLibrary>,
+    #[serde(default)]
+    pub packages: Vec<LockedPackage>,
     pub toolchain: BTreeMap<String, String>,
     pub targets: BTreeMap<String, LockedTarget>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct LockedPackage {
+    pub kind: PackageKind,
+    pub id: String,
+    pub version: String,
+    pub source: String,
+    pub digest: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -195,7 +209,10 @@ pub struct LockStatus {
     pub exists: bool,
     pub up_to_date: bool,
     pub library_up_to_date: bool,
+    pub packages_up_to_date: bool,
     pub toolchain_up_to_date: bool,
+    pub missing_packages: Vec<LockedPackage>,
+    pub extra_packages: Vec<LockedPackage>,
     pub missing_targets: Vec<String>,
     pub extra_targets: Vec<String>,
     pub targets: BTreeMap<String, LockTargetStatus>,
@@ -208,71 +225,6 @@ pub struct LockTargetStatus {
     pub actual_digest: Option<String>,
     pub missing_dependencies: Vec<String>,
     pub extra_dependencies: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginInfo {
-    pub path: String,
-    pub key: String,
-    pub manifest_version: u32,
-    pub name: Option<String>,
-    pub version: Option<String>,
-    pub compatible_omnidoc: Option<String>,
-    pub description: Option<String>,
-    pub kind: String,
-    pub hooks: Vec<String>,
-    pub valid: bool,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct PluginManifest {
-    manifest_version: Option<u32>,
-    key: Option<String>,
-    name: Option<String>,
-    version: Option<String>,
-    compatible_omnidoc: Option<String>,
-    description: Option<String>,
-    kind: Option<String>,
-    language: Option<String>,
-    template_file: Option<String>,
-    hooks: Option<PluginHooks>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct PluginHooks {
-    pre_build: Option<HookCommand>,
-    post_build: Option<HookCommand>,
-    lint_rule: Option<HookCommand>,
-    asset_provider: Option<HookCommand>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum HookCommand {
-    String(String),
-    Args(Vec<String>),
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum PluginHook {
-    PreBuild,
-    PostBuild,
-    LintRule,
-    AssetProvider,
-}
-
-struct LoadedPlugin {
-    info: PluginInfo,
-    manifest: PluginManifest,
-    base_dir: PathBuf,
-}
-
-pub struct PluginContext<'a> {
-    pub project_path: &'a Path,
-    pub config: &'a MergedConfig,
-    pub output: Option<&'a str>,
-    pub target: Option<&'a str>,
 }
 
 pub fn supported_outputs() -> &'static [&'static str] {
@@ -415,7 +367,7 @@ pub fn validate_config(project_path: &Path, config: &MergedConfig) -> Vec<Projec
     }
 
     if config.theme_name.is_some() {
-        if let Err(theme_error) = load_selected_theme(config) {
+        if let Err(theme_error) = resolve_selected_theme(Some(project_path), config) {
             issues.push(error(
                 format!("Invalid theme configuration: {}", theme_error),
                 Some(".omnidoc.toml".to_string()),
@@ -436,6 +388,16 @@ pub fn validate_config(project_path: &Path, config: &MergedConfig) -> Vec<Projec
                     "Unsupported EPUB compatibility profile '{}'. Supported profiles: readium",
                     profile
                 ),
+                Some(".omnidoc.toml".to_string()),
+                None,
+            ));
+        }
+    }
+
+    if !config.plugins_enabled.is_empty() {
+        if let Err(plugin_error) = enabled_plugins(project_path, config) {
+            issues.push(error(
+                format!("Invalid plugin configuration: {plugin_error}"),
                 Some(".omnidoc.toml".to_string()),
                 None,
             ));
@@ -808,11 +770,20 @@ pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> Dependenc
             );
         }
     }
-    let active_filters = output_kind.filters(config);
-    let depfiles = active_filters
-        .iter()
-        .filter_map(|filter| filter_depfile_name(filter))
+    let mut depfiles = output_kind
+        .filters(config)
+        .into_iter()
+        .filter_map(filter_depfile_name)
         .collect::<BTreeSet<_>>();
+    if let Ok(plugin_filters) =
+        plugin_filters_for_output(project_path, config, output_kind.config_key())
+    {
+        depfiles.extend(
+            plugin_filters
+                .into_iter()
+                .filter_map(|filter| filter.depfile_name()),
+        );
+    }
     for depfile in depfiles {
         load_depfile_dependencies(
             project_path,
@@ -1044,7 +1015,10 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
     let library_root = omnidoc_library_root(config);
     let mut resources = BTreeMap::<String, ResolvedResource>::new();
     let output_kind = PandocOutputKind::from_config(config).unwrap_or(PandocOutputKind::Pdf);
-    let theme = load_selected_theme(config).ok().flatten();
+    let theme = resolve_selected_theme(Some(project_path), config)
+        .ok()
+        .flatten()
+        .filter(|theme| theme.supports_output(output_kind.config_key()));
 
     let manifest_path = library_root.join("manifest.toml");
     if let Some(path) = existing_path(manifest_path.clone()) {
@@ -1077,30 +1051,65 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
         );
     }
 
-    if let (Some(name), Some(_)) = (config.theme_name.as_deref(), theme.as_ref()) {
-        if let Some(path) =
-            existing_path(library_root.join("themes").join(format!("{}.toml", name)))
-        {
-            add_resolved_resource(
+    if let Some(theme) = &theme {
+        for package in &theme.packages {
+            for path in &package.tracked_files {
+                let relative = path
+                    .strip_prefix(&package.root)
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                add_resolved_resource(
+                    &mut resources,
+                    project_path,
+                    &library_root,
+                    format!(
+                        "theme-package:{}@{}:{}",
+                        package.id, package.version, relative
+                    ),
+                    path.clone(),
+                );
+            }
+        }
+        if let Ok(generated) = materialize_theme_tokens(theme, project_path) {
+            if let Some(path) = generated.css {
+                add_resolved_resource(
+                    &mut resources,
+                    project_path,
+                    &library_root,
+                    format!("theme-generated-css:{}@{}", theme.id, theme.version),
+                    path,
+                );
+            }
+            if let Some(path) = generated.latex_header {
+                add_resolved_resource(
+                    &mut resources,
+                    project_path,
+                    &library_root,
+                    format!("theme-generated-latex:{}@{}", theme.id, theme.version),
+                    path,
+                );
+            }
+        }
+    }
+
+    if let Ok(plugin_resources) = enabled_plugin_resources(project_path, config) {
+        for resource in plugin_resources {
+            insert_resolved_resource(
                 &mut resources,
-                project_path,
-                &library_root,
-                format!("theme-manifest:{}", name),
-                path,
+                resource.logical_name,
+                resource.resolved_from,
+                resource.path,
             );
         }
     }
 
-    add_active_plugin_resources(&mut resources, project_path, &library_root, config);
-
-    let mut resolved_filter_paths = BTreeSet::new();
     for filter in output_kind.filters(config) {
         // Keep this resolution identical to PandocBuilder::push_lua_filters:
         // filter names are relative to the shared filter directory.
         if let Some(path) =
             existing_path(library_root.join(pandoc::LIB_PANDOC_FILTERS).join(filter))
         {
-            resolved_filter_paths.insert(path.clone());
             add_resolved_resource(
                 &mut resources,
                 project_path,
@@ -1110,23 +1119,6 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
             );
         }
     }
-    if let Some(theme) = &theme {
-        for relative in &theme.resources.lua_filters {
-            if let Some(path) = existing_path(library_root.join(relative)) {
-                if !resolved_filter_paths.insert(path.clone()) {
-                    continue;
-                }
-                add_resolved_resource(
-                    &mut resources,
-                    project_path,
-                    &library_root,
-                    format!("theme-lua-filter:{}", relative),
-                    path,
-                );
-            }
-        }
-    }
-
     if output_kind.uses_latex_defaults() {
         for (filter, relative) in [
             ("emoji.lua", pandoc::LIB_PANDOC_HEADER_EMOJI),
@@ -1145,24 +1137,28 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
             }
         }
         if let Some(theme) = &theme {
-            for relative in &theme.resources.latex_headers {
-                if let Some(path) = existing_path(library_root.join(relative)) {
+            for header in &theme.resources.latex_headers {
+                if let Some(path) = existing_path(header.clone()) {
+                    let logical_name =
+                        theme_resource_logical_name(theme, "theme-latex-header", &path);
                     add_resolved_resource(
                         &mut resources,
                         project_path,
                         &library_root,
-                        format!("theme-latex-header:{}", relative),
+                        logical_name,
                         path,
                     );
                 }
             }
-            for relative in &theme.resources.latex_packages {
-                if let Some(path) = existing_path(library_root.join(relative)) {
+            for package in &theme.resources.latex_packages {
+                if let Some(path) = existing_path(package.clone()) {
+                    let logical_name =
+                        theme_resource_logical_name(theme, "theme-latex-package", &path);
                     add_resolved_resource(
                         &mut resources,
                         project_path,
                         &library_root,
-                        format!("theme-latex-package:{}", relative),
+                        logical_name,
                         path,
                     );
                 }
@@ -1235,8 +1231,8 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
             );
         }
     } else if let Some(theme_css) = theme_css.filter(|resources| !resources.is_empty()) {
-        for (index, relative) in theme_css.iter().enumerate() {
-            if let Some(path) = existing_path(library_root.join(relative)) {
+        for (index, css) in theme_css.iter().enumerate() {
+            if let Some(path) = existing_path(css.clone()) {
                 add_resolved_resource(
                     &mut resources,
                     project_path,
@@ -1264,78 +1260,72 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
             config
                 .pandoc_latex_template
                 .as_deref()
-                .or(config.pandoc_template.as_deref())
-                .or_else(|| {
-                    theme
-                        .as_ref()
-                        .and_then(|theme| theme.resources.latex_template.as_deref())
-                }),
-            None,
+                .or(config.pandoc_template.as_deref()),
+            theme
+                .as_ref()
+                .and_then(|theme| theme.resources.latex_template.as_deref()),
         )),
         PandocOutputKind::Html => Some((
             "html-template",
             config
                 .pandoc_html_template
                 .as_deref()
-                .or(config.pandoc_template.as_deref())
-                .or_else(|| {
-                    theme
-                        .as_ref()
-                        .and_then(|theme| theme.resources.html_template.as_deref())
-                }),
-            None,
+                .or(config.pandoc_template.as_deref()),
+            theme
+                .as_ref()
+                .and_then(|theme| theme.resources.html_template.as_deref()),
         )),
         PandocOutputKind::Epub => Some((
             "epub-template",
             config
                 .pandoc_epub_template
                 .as_deref()
-                .or(config.pandoc_template.as_deref())
-                .or_else(|| {
-                    theme
-                        .as_ref()
-                        .and_then(|theme| theme.resources.epub_template.as_deref())
-                }),
-            None,
+                .or(config.pandoc_template.as_deref()),
+            theme
+                .as_ref()
+                .and_then(|theme| theme.resources.epub_template.as_deref()),
         )),
         PandocOutputKind::Docx | PandocOutputKind::Pptx => None,
     };
-    if let Some((logical_name, configured, fallback)) = template {
-        let selected = configured.or(fallback);
-        if let Some(selected) = selected {
-            if let Some(path) = resolve_resource_path(
+    if let Some((logical_name, configured, themed)) = template {
+        let selected = if let Some(configured) = configured {
+            resolve_resource_path(
                 project_path,
                 &library_root,
-                selected,
+                configured,
                 Some("pandoc/data/templates"),
-            ) {
-                add_resolved_resource(
-                    &mut resources,
-                    project_path,
-                    &library_root,
-                    logical_name.to_string(),
-                    path,
-                );
-            }
+            )
+        } else {
+            themed.and_then(|path| existing_path(path.to_path_buf()))
+        };
+        if let Some(path) = selected {
+            add_resolved_resource(
+                &mut resources,
+                project_path,
+                &library_root,
+                logical_name.to_string(),
+                path,
+            );
         }
     }
 
     if output_kind == PandocOutputKind::Docx {
-        let themed = theme
-            .as_ref()
-            .and_then(|theme| theme.resources.docx_reference_doc.as_deref());
-        if let Some(reference_doc) = config.pandoc_reference_doc.as_deref().or(themed) {
-            if let Some(path) =
-                resolve_resource_path(project_path, &library_root, reference_doc, None)
-            {
-                add_resolved_resource(
-                    &mut resources,
-                    project_path,
-                    &library_root,
-                    "reference-doc".to_string(),
-                    path,
-                );
-            }
+        let reference_doc = if let Some(configured) = config.pandoc_reference_doc.as_deref() {
+            resolve_resource_path(project_path, &library_root, configured, None)
+        } else {
+            theme
+                .as_ref()
+                .and_then(|theme| theme.resources.docx_reference_doc.clone())
+                .and_then(existing_path)
+        };
+        if let Some(path) = reference_doc {
+            add_resolved_resource(
+                &mut resources,
+                project_path,
+                &library_root,
+                "reference-doc".to_string(),
+                path,
+            );
         }
     }
 
@@ -1344,21 +1334,22 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
             .pandoc_pptx_reference_doc
             .as_deref()
             .or(config.pandoc_reference_doc.as_deref());
-        let themed = theme
-            .as_ref()
-            .and_then(|theme| theme.resources.pptx_reference_doc.as_deref());
-        if let Some(reference_doc) = configured.or(themed) {
-            if let Some(path) =
-                resolve_resource_path(project_path, &library_root, reference_doc, None)
-            {
-                add_resolved_resource(
-                    &mut resources,
-                    project_path,
-                    &library_root,
-                    "pptx-reference-doc".to_string(),
-                    path,
-                );
-            }
+        let reference_doc = if let Some(configured) = configured {
+            resolve_resource_path(project_path, &library_root, configured, None)
+        } else {
+            theme
+                .as_ref()
+                .and_then(|theme| theme.resources.pptx_reference_doc.clone())
+                .and_then(existing_path)
+        };
+        if let Some(path) = reference_doc {
+            add_resolved_resource(
+                &mut resources,
+                project_path,
+                &library_root,
+                "pptx-reference-doc".to_string(),
+                path,
+            );
         }
     }
 
@@ -1423,52 +1414,41 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
     resources.into_values().collect()
 }
 
-fn add_active_plugin_resources(
+fn insert_resolved_resource(
     resources: &mut BTreeMap<String, ResolvedResource>,
-    project_path: &Path,
-    library_root: &Path,
-    config: &MergedConfig,
+    logical_name: String,
+    resolved_from: String,
+    path: PathBuf,
 ) {
-    for plugin in loaded_plugins(project_path, config)
-        .into_iter()
-        .filter(|plugin| plugin.info.valid && !plugin.info.hooks.is_empty())
-    {
-        for entry in WalkDir::new(&plugin.base_dir)
-            .follow_links(false)
-            .into_iter()
-            .filter_entry(|entry| {
-                entry.depth() == 0
-                    || !matches!(
-                        entry.file_name().to_str().unwrap_or(""),
-                        ".git"
-                            | ".omnidoc-cache"
-                            | ".venv"
-                            | "__pycache__"
-                            | "node_modules"
-                            | "target"
-                            | "venv"
-                    )
-            })
-            .flatten()
-        {
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            let relative = entry
-                .path()
-                .strip_prefix(&plugin.base_dir)
-                .unwrap_or(entry.path())
-                .to_string_lossy()
-                .replace('\\', "/");
-            add_resolved_resource(
-                resources,
-                project_path,
-                library_root,
-                format!("plugin:{}:{}", plugin.info.key, relative),
-                entry.path().to_path_buf(),
+    let path = path.canonicalize().unwrap_or(path);
+    let key = format!("{logical_name}:{}", path.display());
+    resources.insert(
+        key,
+        ResolvedResource {
+            logical_name,
+            resolved_from,
+            path: path.to_string_lossy().to_string(),
+        },
+    );
+}
+
+fn theme_resource_logical_name(theme: &ResolvedTheme, kind: &str, path: &Path) -> String {
+    for package in theme.packages.iter().rev() {
+        if let Ok(relative) = path.strip_prefix(&package.root) {
+            return format!(
+                "{kind}:{}@{}:{}",
+                package.id,
+                package.version,
+                relative.to_string_lossy().replace('\\', "/")
             );
         }
     }
+    format!(
+        "{kind}:{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("resource")
+    )
 }
 
 fn omnidoc_library_root(config: &MergedConfig) -> PathBuf {
@@ -1694,6 +1674,8 @@ pub fn build_input_state(
             "theme_compatibility",
             format!("{:?}", config.theme_compatibility),
         ),
+        ("extension_path", format!("{:?}", config.extension_path)),
+        ("plugins_enabled", format!("{:?}", config.plugins_enabled)),
         ("pandoc_options", format!("{:?}", config.pandoc_options)),
         (
             "pandoc_format_options",
@@ -2065,6 +2047,7 @@ pub fn write_lock_targets(project_path: &Path, inputs: &[LockTargetInput<'_>]) -
         lock_version: LOCK_VERSION,
         omnidoc_version: env!("CARGO_PKG_VERSION").to_string(),
         library: locked_library(first.config, &resources),
+        packages: combined_locked_packages(project_path, inputs)?,
         toolchain: combined_toolchain_versions(project_path, inputs),
         targets,
     };
@@ -2118,7 +2101,10 @@ pub fn check_lock_targets(
             exists: false,
             up_to_date: false,
             library_up_to_date: false,
+            packages_up_to_date: false,
             toolchain_up_to_date: false,
+            missing_packages: combined_locked_packages(project_path, inputs)?,
+            extra_packages: Vec::new(),
             missing_targets: inputs
                 .iter()
                 .map(|input| input.output.to_ascii_lowercase())
@@ -2196,11 +2182,24 @@ pub fn check_lock_targets(
     let first_config = inputs.first().map(|input| input.config);
     let library_up_to_date =
         first_config.is_some_and(|config| lock.library == locked_library(config, &resources));
+    let expected_packages = combined_locked_packages(project_path, inputs)?;
+    let expected_package_set = expected_packages.iter().cloned().collect::<BTreeSet<_>>();
+    let actual_package_set = lock.packages.iter().cloned().collect::<BTreeSet<_>>();
+    let missing_packages = expected_package_set
+        .difference(&actual_package_set)
+        .cloned()
+        .collect::<Vec<_>>();
+    let extra_packages = actual_package_set
+        .difference(&expected_package_set)
+        .cloned()
+        .collect::<Vec<_>>();
+    let packages_up_to_date = missing_packages.is_empty() && extra_packages.is_empty();
     let toolchain_up_to_date = lock.toolchain == combined_toolchain_versions(project_path, inputs);
     let up_to_date = lock.lock_version == LOCK_VERSION
         && missing_targets.is_empty()
         && extra_targets.is_empty()
         && library_up_to_date
+        && packages_up_to_date
         && toolchain_up_to_date
         && statuses.values().all(|status| status.up_to_date);
 
@@ -2208,7 +2207,10 @@ pub fn check_lock_targets(
         exists: true,
         up_to_date,
         library_up_to_date,
+        packages_up_to_date,
         toolchain_up_to_date,
+        missing_packages,
+        extra_packages,
         missing_targets,
         extra_targets,
         targets: statuses,
@@ -2354,7 +2356,10 @@ fn toolchain_versions(
         } else {
             versions.insert("latex_engine".to_string(), "unavailable".to_string());
         }
-        if let Ok(Some(theme)) = load_selected_theme(config) {
+        if let Ok(Some(theme)) = resolve_selected_theme(Some(project_path), config) {
+            if !theme.supports_output("pdf") {
+                return versions;
+            }
             for font in theme.requirements.fonts {
                 versions.insert(format!("font:{font}"), font_identity(&font));
             }
@@ -2408,6 +2413,44 @@ fn combined_toolchain_versions(
         versions.extend(toolchain_versions(project_path, input.config, input.output));
     }
     versions
+}
+
+fn combined_locked_packages(
+    project_path: &Path,
+    inputs: &[LockTargetInput<'_>],
+) -> Result<Vec<LockedPackage>> {
+    let mut packages = BTreeSet::new();
+    for input in inputs {
+        if let Some(theme) = resolve_selected_theme(Some(project_path), input.config)? {
+            for package in theme.packages {
+                packages.insert(LockedPackage {
+                    kind: package.kind,
+                    id: package.id,
+                    version: package.version,
+                    source: locked_package_source(package.scope).to_string(),
+                    digest: package.digest,
+                });
+            }
+        }
+        for plugin in enabled_plugins(project_path, input.config)? {
+            packages.insert(LockedPackage {
+                kind: plugin.package.kind,
+                id: plugin.package.id,
+                version: plugin.package.version,
+                source: locked_package_source(plugin.package.scope).to_string(),
+                digest: plugin.package.digest,
+            });
+        }
+    }
+    Ok(packages.into_iter().collect())
+}
+
+fn locked_package_source(scope: crate::extensions::PackageScope) -> &'static str {
+    match scope {
+        crate::extensions::PackageScope::Builtin => "builtin",
+        crate::extensions::PackageScope::User => "user",
+        crate::extensions::PackageScope::Project => "project",
+    }
 }
 
 fn font_identity(requested: &str) -> String {
@@ -2499,82 +2542,6 @@ fn command_version(program: &str) -> String {
                 .map(str::to_string)
         })
         .unwrap_or_else(|| "unavailable".to_string())
-}
-
-pub fn discovered_plugins(project_path: &Path, config: &MergedConfig) -> Vec<PluginInfo> {
-    loaded_plugins(project_path, config)
-        .into_iter()
-        .map(|plugin| plugin.info)
-        .collect()
-}
-
-pub fn inspect_plugin_manifest(path: &Path) -> PluginInfo {
-    load_plugin_manifest(path).info
-}
-
-pub fn run_plugin_hook(context: &PluginContext<'_>, hook: PluginHook) -> Result<()> {
-    for plugin in loaded_plugins(context.project_path, context.config)
-        .into_iter()
-        .filter(|plugin| plugin.info.valid)
-    {
-        let Some(command) = plugin_hook_command(&plugin.manifest, hook) else {
-            continue;
-        };
-        run_hook_command(context, &plugin, command, hook)?;
-    }
-    Ok(())
-}
-
-pub fn run_plugin_lint_rules(project_path: &Path, config: &MergedConfig) -> Vec<ProjectIssue> {
-    let context = PluginContext {
-        project_path,
-        config,
-        output: None,
-        target: None,
-    };
-    let mut issues = Vec::new();
-    for plugin in loaded_plugins(project_path, config)
-        .into_iter()
-        .filter(|plugin| plugin.info.valid)
-    {
-        let Some(command) = plugin_hook_command(&plugin.manifest, PluginHook::LintRule) else {
-            continue;
-        };
-        match run_hook_command_capture(&context, &plugin, command, PluginHook::LintRule) {
-            Ok(output) => issues.extend(parse_lint_rule_output(&plugin, &output)),
-            Err(err) => issues.push(error(
-                format!("Plugin lint_rule failed for {}: {}", plugin.info.key, err),
-                Some(plugin.info.path.clone()),
-                None,
-            )),
-        }
-    }
-    issues
-}
-
-fn loaded_plugins(project_path: &Path, config: &MergedConfig) -> Vec<LoadedPlugin> {
-    let mut plugins = Vec::new();
-    for base in [
-        config.template_dir.as_ref().map(PathBuf::from),
-        config
-            .lib_path
-            .as_ref()
-            .map(|path| Path::new(path).join("templates")),
-        Some(project_path.join("plugins")),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        if !base.exists() {
-            continue;
-        }
-        for manifest_path in plugin_manifest_paths(&base) {
-            plugins.push(load_plugin_manifest(&manifest_path));
-        }
-    }
-    plugins.sort_by(|left, right| left.info.path.cmp(&right.info.path));
-    plugins.dedup_by(|left, right| left.info.path == right.info.path);
-    plugins
 }
 
 pub fn has_errors(issues: &[ProjectIssue]) -> bool {
@@ -2783,463 +2750,6 @@ fn check_configured_css_path(
     ));
 }
 
-fn plugin_manifest_paths(base: &Path) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    for entry in WalkDir::new(base)
-        .max_depth(3)
-        .into_iter()
-        .flatten()
-        .filter(|entry| entry.file_type().is_file())
-    {
-        let path = entry.path();
-        let file_name = path.file_name().and_then(|name| name.to_str());
-        let parent_name = path
-            .parent()
-            .and_then(|parent| parent.file_name())
-            .and_then(|name| name.to_str());
-        let is_manifest = file_name == Some("manifest.toml")
-            || (parent_name == Some("manifests")
-                && path.extension().and_then(|ext| ext.to_str()) == Some("toml"));
-        if is_manifest {
-            paths.push(path.to_path_buf());
-        }
-    }
-    paths.sort();
-    paths.dedup();
-    paths
-}
-
-fn load_plugin_manifest(path: &Path) -> LoadedPlugin {
-    let base_dir = path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .to_path_buf();
-    let fallback_key = path
-        .parent()
-        .and_then(|parent| parent.file_name())
-        .and_then(|name| name.to_str())
-        .or_else(|| path.file_stem().and_then(|name| name.to_str()))
-        .unwrap_or("plugin")
-        .to_string();
-    let content = match fs::read_to_string(path) {
-        Ok(content) => content,
-        Err(err) => {
-            return invalid_loaded_plugin(
-                path,
-                base_dir,
-                fallback_key,
-                format!("Failed to read manifest: {}", err),
-            );
-        }
-    };
-    let manifest = match toml::from_str::<PluginManifest>(&content) {
-        Ok(manifest) => manifest,
-        Err(err) => {
-            return invalid_loaded_plugin(
-                path,
-                base_dir,
-                fallback_key,
-                format!("Failed to parse manifest: {}", err),
-            );
-        }
-    };
-
-    let key = manifest.key.clone().unwrap_or(fallback_key);
-    let kind = manifest.kind.clone().unwrap_or_else(|| {
-        if manifest.template_file.is_some() {
-            "template".to_string()
-        } else {
-            "plugin".to_string()
-        }
-    });
-    let error = validate_plugin_manifest(path, &manifest);
-    let hooks = manifest_hook_names(&manifest);
-    let info = PluginInfo {
-        path: path.display().to_string(),
-        key,
-        manifest_version: manifest.manifest_version.unwrap_or(1),
-        name: manifest.name.clone(),
-        version: manifest.version.clone(),
-        compatible_omnidoc: manifest.compatible_omnidoc.clone(),
-        description: manifest.description.clone(),
-        kind,
-        hooks,
-        valid: error.is_none(),
-        error,
-    };
-
-    LoadedPlugin {
-        info,
-        manifest,
-        base_dir,
-    }
-}
-
-fn invalid_loaded_plugin(
-    path: &Path,
-    base_dir: PathBuf,
-    key: String,
-    error: String,
-) -> LoadedPlugin {
-    LoadedPlugin {
-        info: PluginInfo {
-            path: path.display().to_string(),
-            key,
-            manifest_version: 0,
-            name: None,
-            version: None,
-            compatible_omnidoc: None,
-            description: None,
-            kind: "plugin".to_string(),
-            hooks: Vec::new(),
-            valid: false,
-            error: Some(error),
-        },
-        manifest: PluginManifest {
-            manifest_version: None,
-            key: None,
-            name: None,
-            version: None,
-            compatible_omnidoc: None,
-            description: None,
-            kind: None,
-            language: None,
-            template_file: None,
-            hooks: None,
-        },
-        base_dir,
-    }
-}
-
-fn plugin_hook_command(manifest: &PluginManifest, hook: PluginHook) -> Option<&HookCommand> {
-    let hooks = manifest.hooks.as_ref()?;
-    match hook {
-        PluginHook::PreBuild => hooks.pre_build.as_ref(),
-        PluginHook::PostBuild => hooks.post_build.as_ref(),
-        PluginHook::LintRule => hooks.lint_rule.as_ref(),
-        PluginHook::AssetProvider => hooks.asset_provider.as_ref(),
-    }
-}
-
-fn manifest_hook_names(manifest: &PluginManifest) -> Vec<String> {
-    let Some(hooks) = &manifest.hooks else {
-        return Vec::new();
-    };
-    let mut names = Vec::new();
-    if hooks.asset_provider.is_some() {
-        names.push("asset_provider".to_string());
-    }
-    if hooks.pre_build.is_some() {
-        names.push("pre_build".to_string());
-    }
-    if hooks.post_build.is_some() {
-        names.push("post_build".to_string());
-    }
-    if hooks.lint_rule.is_some() {
-        names.push("lint_rule".to_string());
-    }
-    names
-}
-
-fn run_hook_command(
-    context: &PluginContext<'_>,
-    plugin: &LoadedPlugin,
-    command: &HookCommand,
-    hook: PluginHook,
-) -> Result<()> {
-    run_hook_command_capture(context, plugin, command, hook).map(|_| ())
-}
-
-fn run_hook_command_capture(
-    context: &PluginContext<'_>,
-    plugin: &LoadedPlugin,
-    command: &HookCommand,
-    hook: PluginHook,
-) -> Result<String> {
-    let argv = resolved_hook_argv(context, plugin, command)?;
-    if argv.is_empty() {
-        return Err(OmniDocError::Project(format!(
-            "Plugin hook command is empty: {}",
-            plugin.info.key
-        )));
-    }
-
-    let program = resolve_hook_program(&plugin.base_dir, &argv[0]);
-    let output = Command::new(&program)
-        .args(&argv[1..])
-        .current_dir(context.project_path)
-        .env("OMNIDOC_PROJECT_DIR", context.project_path)
-        .env("OMNIDOC_PLUGIN_DIR", &plugin.base_dir)
-        .env("OMNIDOC_PLUGIN_KEY", &plugin.info.key)
-        .env(
-            "OMNIDOC_PLUGIN_MANIFEST_VERSION",
-            plugin.info.manifest_version.to_string(),
-        )
-        .env("OMNIDOC_HOOK", hook_name(hook))
-        .env("OMNIDOC_OUTPUT", context.output.unwrap_or(""))
-        .env("OMNIDOC_TARGET", context.target.unwrap_or(""))
-        .output()
-        .map_err(|err| {
-            OmniDocError::Project(format!(
-                "Failed to execute plugin hook {} for {}: {}",
-                hook_name(hook),
-                plugin.info.key,
-                err
-            ))
-        })?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    if output.status.success() {
-        return Ok(stdout);
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(OmniDocError::Project(format!(
-        "Plugin hook {} failed for {} with status {}\nstdout:\n{}\nstderr:\n{}",
-        hook_name(hook),
-        plugin.info.key,
-        output.status,
-        compact_snippet(&stdout),
-        compact_snippet(&stderr)
-    )))
-}
-
-fn hook_argv(command: &HookCommand) -> Vec<String> {
-    match command {
-        HookCommand::String(command) => command.split_whitespace().map(str::to_string).collect(),
-        HookCommand::Args(args) => args.clone(),
-    }
-}
-
-fn resolved_hook_argv(
-    context: &PluginContext<'_>,
-    plugin: &LoadedPlugin,
-    command: &HookCommand,
-) -> Result<Vec<String>> {
-    let mut argv = hook_argv(command)
-        .into_iter()
-        .map(|argument| {
-            expand_hook_argument(
-                &argument,
-                context.project_path,
-                &plugin.base_dir,
-                context.output,
-                context.target,
-            )
-        })
-        .collect::<Vec<_>>();
-    if argv.first().is_some_and(|program| program == "{python}") {
-        let launcher = portable_python_launcher().ok_or_else(|| {
-            OmniDocError::Project(format!(
-                "Plugin {} requires Python 3, but no python3, python, or py launcher was found",
-                plugin.info.key
-            ))
-        })?;
-        argv.splice(0..1, launcher);
-    }
-    Ok(argv)
-}
-
-fn expand_hook_argument(
-    argument: &str,
-    project_path: &Path,
-    plugin_dir: &Path,
-    output: Option<&str>,
-    target: Option<&str>,
-) -> String {
-    argument
-        .replace("{project_dir}", &project_path.to_string_lossy())
-        .replace("{plugin_dir}", &plugin_dir.to_string_lossy())
-        .replace("{output}", output.unwrap_or(""))
-        .replace("{target}", target.unwrap_or(""))
-}
-
-fn portable_python_launcher() -> Option<Vec<String>> {
-    if let Some(configured) = std::env::var_os("OMNIDOC_PYTHON").filter(|value| !value.is_empty()) {
-        return Some(vec![PathBuf::from(configured)
-            .to_string_lossy()
-            .to_string()]);
-    }
-    for candidate in ["python3", "python"] {
-        if let Ok(path) = which::which(candidate) {
-            return Some(vec![path.to_string_lossy().to_string()]);
-        }
-    }
-    if let Ok(path) = which::which("py") {
-        return Some(vec![path.to_string_lossy().to_string(), "-3".to_string()]);
-    }
-    None
-}
-
-fn resolve_hook_program(base_dir: &Path, program: &str) -> PathBuf {
-    let path = Path::new(program);
-    if path.is_absolute() {
-        return path.to_path_buf();
-    }
-    let local = base_dir.join(path);
-    if local.exists() {
-        local
-    } else {
-        path.to_path_buf()
-    }
-}
-
-fn hook_name(hook: PluginHook) -> &'static str {
-    match hook {
-        PluginHook::PreBuild => "pre_build",
-        PluginHook::PostBuild => "post_build",
-        PluginHook::LintRule => "lint_rule",
-        PluginHook::AssetProvider => "asset_provider",
-    }
-}
-
-fn parse_lint_rule_output(plugin: &LoadedPlugin, output: &str) -> Vec<ProjectIssue> {
-    output
-        .lines()
-        .filter_map(|line| parse_lint_rule_line(plugin, line))
-        .collect()
-}
-
-fn parse_lint_rule_line(plugin: &LoadedPlugin, line: &str) -> Option<ProjectIssue> {
-    let line = line.trim();
-    if line.is_empty() {
-        return None;
-    }
-
-    let mut parts = line.splitn(5, ':');
-    let severity = match parts
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "error" => IssueSeverity::Error,
-        "warning" | "warn" => IssueSeverity::Warning,
-        "info" => IssueSeverity::Info,
-        _ => {
-            return Some(warning(
-                format!("Plugin {}: {}", plugin.info.key, line),
-                Some(plugin.info.path.clone()),
-                None,
-            ));
-        }
-    };
-    let path = parts
-        .next()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let line_no = parts
-        .next()
-        .and_then(|value| value.trim().parse::<usize>().ok());
-    let column = parts.next().map(str::trim).unwrap_or("1");
-    let message = parts.next().map(str::trim).unwrap_or("");
-    let message = if message.is_empty() {
-        format!("Plugin {} reported an issue", plugin.info.key)
-    } else {
-        format!(
-            "Plugin {}: {} (column {})",
-            plugin.info.key, message, column
-        )
-    };
-
-    Some(ProjectIssue {
-        severity,
-        message,
-        path: path.map(str::to_string),
-        line: line_no,
-    })
-}
-
-fn compact_snippet(input: &str) -> String {
-    let snippet = input.split_whitespace().collect::<Vec<_>>().join(" ");
-    if snippet.chars().count() > 500 {
-        snippet.chars().take(497).collect::<String>() + "..."
-    } else {
-        snippet
-    }
-}
-
-fn validate_plugin_manifest(path: &Path, manifest: &PluginManifest) -> Option<String> {
-    let manifest_version = manifest.manifest_version.unwrap_or(1);
-    if manifest_version != 1 {
-        return Some(format!(
-            "Unsupported plugin manifest_version: {manifest_version}"
-        ));
-    }
-    if let Some(requirement) = manifest.compatible_omnidoc.as_deref() {
-        let requirement = match semver::VersionReq::parse(requirement) {
-            Ok(requirement) => requirement,
-            Err(error) => return Some(format!("Invalid OmniDoc compatibility range: {error}")),
-        };
-        let version = semver::Version::parse(env!("CARGO_PKG_VERSION"))
-            .expect("Cargo package version should be valid semver");
-        if !requirement.matches(&version) {
-            return Some(format!(
-                "Plugin requires OmniDoc {}, installed {}",
-                requirement, version
-            ));
-        }
-    }
-    if let Some(language) = &manifest.language {
-        if !matches!(language.to_ascii_lowercase().as_str(), "markdown" | "latex") {
-            return Some(format!("Unsupported template language: {}", language));
-        }
-    }
-
-    if let Some(template_file) = &manifest.template_file {
-        let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
-        if !base_dir.join(template_file).exists() {
-            return Some(format!("Template file not found: {}", template_file));
-        }
-        if manifest.language.is_none() {
-            return Some("Template plugins must declare language".to_string());
-        }
-    }
-
-    if let Some(hooks) = &manifest.hooks {
-        for (name, command) in [
-            ("asset_provider", hooks.asset_provider.as_ref()),
-            ("pre_build", hooks.pre_build.as_ref()),
-            ("post_build", hooks.post_build.as_ref()),
-            ("lint_rule", hooks.lint_rule.as_ref()),
-        ] {
-            let Some(command) = command else {
-                continue;
-            };
-            if let Some(error) = validate_hook_command(path, command) {
-                return Some(format!("Invalid {} hook: {}", name, error));
-            }
-        }
-    }
-
-    None
-}
-
-fn validate_hook_command(manifest_path: &Path, command: &HookCommand) -> Option<String> {
-    let argv = hook_argv(command);
-    if argv.is_empty() {
-        return Some("command is empty".to_string());
-    }
-    if argv[0] == "{python}" {
-        return portable_python_launcher()
-            .is_none()
-            .then(|| "Python 3 launcher not found (tried python3, python, and py)".to_string());
-    }
-    let base_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
-    let expanded_program = argv[0].replace("{plugin_dir}", &base_dir.to_string_lossy());
-    let program = Path::new(&expanded_program);
-    if program.components().count() <= 1 && !program.is_absolute() {
-        return None;
-    }
-    let resolved = resolve_hook_program(base_dir, &expanded_program);
-    if resolved.exists() {
-        None
-    } else {
-        Some(format!("command not found: {}", argv[0]))
-    }
-}
-
 fn is_local_path(target: &str) -> bool {
     !target.starts_with("http://")
         && !target.starts_with("https://")
@@ -3296,12 +2806,10 @@ fn warning(message: String, path: Option<String>, line: Option<usize>) -> Projec
 mod tests {
     use super::{
         acquire_project_write_lock, build_input_digest, build_report, cache_hit,
-        changed_cache_components, dependency_graph, expand_hook_argument,
-        filter_depfile_metadata_key, filter_depfile_name, hook_argv, latex_engine_preference,
-        lint_project, manifest_hook_names, pandoc_option_file_references, parse_lint_rule_output,
-        supported_outputs, validate_config, validate_hook_command, write_cache, write_lock,
-        write_lock_targets, HookCommand, LoadedPlugin, LockFile, LockTargetInput, PluginHooks,
-        PluginInfo, PluginManifest, CACHE_DIR, INCLUDE_DEPFILE, LATEX_INPUT_DEPFILE,
+        changed_cache_components, check_lock, dependency_graph, filter_depfile_metadata_key,
+        filter_depfile_name, latex_engine_preference, lint_project, pandoc_option_file_references,
+        supported_outputs, validate_config, write_cache, write_lock, write_lock_targets, LockFile,
+        LockTargetInput, CACHE_DIR, INCLUDE_DEPFILE, LATEX_INPUT_DEPFILE,
     };
     use crate::build::executor::LatexEnginePreference;
     use crate::config::MergedConfig;
@@ -3877,8 +3385,8 @@ user@example.com
 
         write_lock(project.path(), &config, &graph).expect("lock");
         let lock_text = fs::read_to_string(project.path().join("omnidoc.lock")).expect("lock text");
-        let lock: LockFile = toml::from_str(&lock_text).expect("lock v4");
-        assert_eq!(lock.lock_version, 4);
+        let lock: LockFile = toml::from_str(&lock_text).expect("lock v5");
+        assert_eq!(lock.lock_version, 5);
         let locked_library = lock.library.as_ref().expect("locked library");
         assert_eq!(locked_library.version.as_deref(), Some("1.0.0"));
         assert_eq!(locked_library.revision.as_deref(), Some("v1.0.0"));
@@ -3939,7 +3447,7 @@ user@example.com
     }
 
     #[test]
-    fn lock_v4_keeps_multiple_output_targets() {
+    fn lock_v5_keeps_multiple_output_targets() {
         let project = tempfile::tempdir().expect("project");
         fs::write(project.path().join("main.md"), "# Book\n").expect("entry");
         let html_config = MergedConfig {
@@ -3973,8 +3481,8 @@ user@example.com
         .expect("multi-target lock");
 
         let lock_text = fs::read_to_string(project.path().join("omnidoc.lock")).expect("lock");
-        let lock: LockFile = toml::from_str(&lock_text).expect("lock v4");
-        assert_eq!(lock.lock_version, 4);
+        let lock: LockFile = toml::from_str(&lock_text).expect("lock v5");
+        assert_eq!(lock.lock_version, 5);
         assert!(!lock.toolchain.contains_key("latex_engine"));
         assert_eq!(
             lock.targets.keys().cloned().collect::<Vec<_>>(),
@@ -4064,287 +3572,67 @@ user@example.com
     }
 
     #[test]
-    fn parses_hook_command_arguments() {
-        assert_eq!(
-            hook_argv(&HookCommand::String("scripts/pre arg".to_string())),
-            vec!["scripts/pre", "arg"]
-        );
-        assert_eq!(
-            hook_argv(&HookCommand::Args(vec![
-                "tool".to_string(),
-                "--flag".to_string()
-            ])),
-            vec!["tool", "--flag"]
-        );
-    }
-
-    #[test]
-    fn expands_hook_arguments_without_a_shell() {
-        let expanded = expand_hook_argument(
-            "{plugin_dir}/lint.py:{project_dir}:{output}:{target}",
-            Path::new("/tmp/project"),
-            Path::new("/tmp/plugin"),
-            Some("html"),
-            Some("manual"),
-        );
-        assert_eq!(expanded, "/tmp/plugin/lint.py:/tmp/project:html:manual");
-    }
-
-    #[test]
-    fn lists_and_validates_hook_metadata() {
-        let manifest = PluginManifest {
-            manifest_version: Some(1),
-            key: Some("sample".to_string()),
-            name: None,
-            version: None,
-            compatible_omnidoc: None,
-            description: None,
-            kind: None,
-            language: None,
-            template_file: None,
-            hooks: Some(PluginHooks {
-                pre_build: Some(HookCommand::Args(vec!["tool".to_string()])),
-                post_build: None,
-                lint_rule: Some(HookCommand::String("lint-tool".to_string())),
-                asset_provider: None,
-            }),
-        };
-
-        assert_eq!(
-            manifest_hook_names(&manifest),
-            vec!["pre_build".to_string(), "lint_rule".to_string()]
-        );
-        assert!(validate_hook_command(
-            Path::new("plugins/sample/manifest.toml"),
-            &HookCommand::String("tool".to_string())
-        )
-        .is_none());
-        assert!(validate_hook_command(
-            Path::new("plugins/sample/manifest.toml"),
-            &HookCommand::String("scripts/missing.sh".to_string())
-        )
-        .is_some());
-    }
-
-    #[test]
-    fn active_plugin_files_are_tracked_build_resources() {
-        let project = temporary_project("plugin-resource-project");
-        let library = temporary_project("plugin-resource-library");
-        let plugin_dir = project.join("plugins/quality-gate");
-        fs::create_dir_all(&plugin_dir).expect("plugin directory");
-        fs::create_dir_all(&library).expect("library directory");
+    fn active_theme_packages_invalidate_cache_and_lock_identity() {
+        let project = temporary_project("theme-package-project");
+        let store = temporary_project("theme-package-store");
+        let package = store.join("themes/acme/cache-theme/1.0.0");
+        fs::create_dir_all(package.join("styles")).expect("theme package");
+        fs::create_dir_all(&project).expect("project");
         fs::write(project.join("main.md"), "# Guide\n").expect("entry");
+        fs::write(package.join("styles/theme.css"), "body { color: #111; }\n").expect("theme CSS");
         fs::write(
-            plugin_dir.join("manifest.toml"),
-            r#"manifest_version = 1
-key = "quality-gate"
-kind = "plugin"
+            package.join("omnidoc-package.toml"),
+            r##"manifest_version = 2
+kind = "theme"
+id = "acme/cache-theme"
+version = "1.0.0"
+compatible_omnidoc = ">=1.8,<2"
 
-[hooks]
-pre_build = ["tool"]
-"#,
+[theme]
+api_version = 1
+outputs = ["html"]
+
+[theme.resources]
+html_css = ["styles/theme.css"]
+
+[theme.tokens.color]
+text = "#111111"
+"##,
         )
-        .expect("plugin manifest");
-        let rules = plugin_dir.join("rules.txt");
-        fs::write(&rules, "first rule\n").expect("plugin support file");
+        .expect("theme manifest");
         let config = MergedConfig {
             entry: Some("main.md".to_string()),
             to: Some("html".to_string()),
-            lib_path: Some(library.to_string_lossy().to_string()),
+            theme_name: Some("acme/cache-theme".to_string()),
+            theme_version: Some("=1.0.0".to_string()),
+            extension_path: Some(store.to_string_lossy().to_string()),
+            project_root: Some(project.to_string_lossy().to_string()),
             ..Default::default()
         };
 
         let first_graph = dependency_graph(&project, &config);
-        assert!(first_graph
-            .resources
-            .iter()
-            .any(|resource| { resource.logical_name == "plugin:quality-gate:manifest.toml" }));
-        assert!(first_graph
-            .resources
-            .iter()
-            .any(|resource| { resource.logical_name == "plugin:quality-gate:rules.txt" }));
         let first_digest =
             build_input_digest(&project, &first_graph, &config, "html").expect("first digest");
+        write_lock(&project, &config, &first_graph).expect("write lock");
+        let lock: LockFile = toml::from_str(
+            &fs::read_to_string(project.join("omnidoc.lock")).expect("lock content"),
+        )
+        .expect("lock file");
+        assert_eq!(lock.packages.len(), 1);
+        assert_eq!(lock.packages[0].id, "acme/cache-theme");
 
-        fs::write(&rules, "updated rule\n").expect("updated plugin support file");
+        fs::write(package.join("styles/theme.css"), "body { color: #222; }\n")
+            .expect("updated theme CSS");
         let second_graph = dependency_graph(&project, &config);
         let second_digest =
             build_input_digest(&project, &second_graph, &config, "html").expect("second digest");
         assert_ne!(first_digest, second_digest);
+        let status = check_lock(&project, &config, &second_graph).expect("lock status");
+        assert!(!status.packages_up_to_date);
+        assert_eq!(status.missing_packages.len(), 1);
+        assert_eq!(status.extra_packages.len(), 1);
 
         fs::remove_dir_all(project).expect("project cleanup");
-        fs::remove_dir_all(library).expect("library cleanup");
-    }
-
-    #[test]
-    fn validates_plugin_manifest_schema_and_compatibility() {
-        let compatible = PluginManifest {
-            manifest_version: Some(1),
-            key: Some("sample".to_string()),
-            name: None,
-            version: Some("1.0.0".to_string()),
-            compatible_omnidoc: Some(">=1.3.0,<2.0.0".to_string()),
-            description: None,
-            kind: None,
-            language: None,
-            template_file: None,
-            hooks: None,
-        };
-        assert!(super::validate_plugin_manifest(
-            Path::new("plugins/sample/manifest.toml"),
-            &compatible
-        )
-        .is_none());
-
-        let unsupported_schema = PluginManifest {
-            manifest_version: Some(2),
-            ..compatible.clone()
-        };
-        assert!(super::validate_plugin_manifest(
-            Path::new("plugins/sample/manifest.toml"),
-            &unsupported_schema
-        )
-        .is_some_and(|error| error.contains("manifest_version")));
-
-        let incompatible = PluginManifest {
-            manifest_version: Some(1),
-            compatible_omnidoc: Some(">=2.0.0".to_string()),
-            ..compatible
-        };
-        assert!(super::validate_plugin_manifest(
-            Path::new("plugins/sample/manifest.toml"),
-            &incompatible
-        )
-        .is_some_and(|error| error.contains("requires OmniDoc")));
-    }
-
-    #[test]
-    fn parses_plugin_lint_rule_output() {
-        let plugin = LoadedPlugin {
-            info: PluginInfo {
-                path: "plugins/sample/manifest.toml".to_string(),
-                key: "sample".to_string(),
-                manifest_version: 1,
-                name: None,
-                version: None,
-                compatible_omnidoc: None,
-                description: None,
-                kind: "plugin".to_string(),
-                hooks: Vec::new(),
-                valid: true,
-                error: None,
-            },
-            manifest: PluginManifest {
-                manifest_version: Some(1),
-                key: Some("sample".to_string()),
-                name: None,
-                version: None,
-                compatible_omnidoc: None,
-                description: None,
-                kind: None,
-                language: None,
-                template_file: None,
-                hooks: None,
-            },
-            base_dir: PathBuf::from("plugins/sample"),
-        };
-
-        let issues = parse_lint_rule_output(
-            &plugin,
-            "warning:main.md:7:3:custom lint warning\ninfo:main.md:9:1:note",
-        );
-
-        assert_eq!(issues.len(), 2);
-        assert_eq!(issues[0].path.as_deref(), Some("main.md"));
-        assert_eq!(issues[0].line, Some(7));
-        assert!(issues[0].message.contains("column 3"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn executes_plugin_hook_command() {
-        use super::{run_hook_command_capture, PluginContext, PluginHook};
-        use std::fs;
-        use std::os::unix::fs::PermissionsExt;
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let root = std::env::temp_dir().join(format!(
-            "omnidoc-hook-test-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
-        ));
-        let plugin_dir = root.join("plugin");
-        fs::create_dir_all(&plugin_dir).expect("plugin dir");
-        let script = plugin_dir.join("hook.sh");
-        fs::write(
-            &script,
-            "#!/bin/sh\nprintf '%s:%s:%s:%s:%s:%s' \"$OMNIDOC_HOOK\" \"$OMNIDOC_OUTPUT\" \"$1\" \"$2\" \"$3\" \"$4\"\n",
-        )
-        .expect("script");
-        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&script, permissions).expect("permissions");
-
-        let plugin = LoadedPlugin {
-            info: PluginInfo {
-                path: plugin_dir.join("manifest.toml").display().to_string(),
-                key: "hook-test".to_string(),
-                manifest_version: 1,
-                name: None,
-                version: None,
-                compatible_omnidoc: None,
-                description: None,
-                kind: "plugin".to_string(),
-                hooks: Vec::new(),
-                valid: true,
-                error: None,
-            },
-            manifest: PluginManifest {
-                manifest_version: Some(1),
-                key: Some("hook-test".to_string()),
-                name: None,
-                version: None,
-                compatible_omnidoc: None,
-                description: None,
-                kind: None,
-                language: None,
-                template_file: None,
-                hooks: None,
-            },
-            base_dir: plugin_dir,
-        };
-        let config = MergedConfig::default();
-        let context = PluginContext {
-            project_path: &root,
-            config: &config,
-            output: Some("html"),
-            target: Some("manual"),
-        };
-
-        let output = run_hook_command_capture(
-            &context,
-            &plugin,
-            &HookCommand::Args(vec![
-                "hook.sh".to_string(),
-                "{plugin_dir}".to_string(),
-                "{project_dir}".to_string(),
-                "{output}".to_string(),
-                "{target}".to_string(),
-            ]),
-            PluginHook::PreBuild,
-        )
-        .expect("hook output");
-
-        assert_eq!(
-            output,
-            format!(
-                "pre_build:html:{}:{}:html:manual",
-                plugin.base_dir.display(),
-                root.display()
-            )
-        );
-        let _ = fs::remove_dir_all(root);
+        fs::remove_dir_all(store).expect("store cleanup");
     }
 }

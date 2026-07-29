@@ -11,7 +11,7 @@ use clap::{Parser, Subcommand, ValueEnum, ValueHint};
 )]
 #[command(arg_required_else_help = true, propagate_version = true)]
 #[command(
-    after_help = "Quick start:\n  omnidoc new my-book --type ctex-md\n  omnidoc build my-book\n  omnidoc status my-book\n\nWorkflow groups:\n  omnidoc check --help       Project validation and CI\n  omnidoc convert --help     Standalone format conversion\n  omnidoc template --help    Template discovery and validation\n  omnidoc plugin --help      Plugin examples and project hooks\n  omnidoc lib --help         Managed library lifecycle\n\nLegacy flat command forms remain supported for scripts."
+    after_help = "Quick start:\n  omnidoc new my-book --type ctex-md\n  omnidoc build my-book\n  omnidoc status my-book\n\nWorkflow groups:\n  omnidoc check --help       Project validation and CI\n  omnidoc convert --help     Standalone format conversion\n  omnidoc template --help    Template discovery and validation\n  omnidoc plugin --help      Pandoc Lua extension packages\n  omnidoc lib --help         Managed library lifecycle\n\nLegacy flat command forms remain supported for scripts."
 )]
 pub struct OmniCli {
     /// document management subcommands
@@ -376,26 +376,13 @@ pub enum Commands {
         update: bool,
     },
 
-    /// discover, install, and validate project plugins
+    /// install, trust, enable, and run Pandoc Lua plugins
     #[command(
-        args_conflicts_with_subcommands = true,
-        after_help = "Examples:\n  omnidoc plugin examples\n  omnidoc plugin add quality-gate docs\n  omnidoc plugin add asset-index docs --dry-run\n  omnidoc plugin list docs\n  omnidoc plugin validate docs --json\n\nBundled examples are inert until `plugin add` copies one into a project's `plugins/` directory. The legacy `omnidoc plugin [PATH] --validate` form remains supported."
+        after_help = "Examples:\n  omnidoc plugin install ./my-plugin\n  omnidoc plugin install-example word-count --project ./docs\n  omnidoc plugin trust omnidoc/word-count@=1.0.0 --project ./docs\n  omnidoc plugin enable omnidoc/word-count@=1.0.0 ./docs\n  omnidoc plugin run omnidoc/word-count word-count --project ./docs -- chapters/intro.md"
     )]
     Plugin {
         #[command(subcommand)]
-        subcommand: Option<PluginSubcommand>,
-
-        /// set the path to a documentation project
-        #[arg(value_hint = ValueHint::DirPath, hide = true)]
-        path: Option<String>,
-
-        /// emit JSON plugin metadata
-        #[arg(long, hide = true)]
-        json: bool,
-
-        /// validate discovered plugin/template manifests
-        #[arg(long, hide = true)]
-        validate: bool,
+        subcommand: PluginSubcommand,
     },
 
     /// show resolved project paths, configuration, and build artifacts
@@ -539,9 +526,9 @@ pub enum Commands {
         json: bool,
     },
 
-    /// discover, validate, and select versioned theme bundles
+    /// install, inspect, validate, and select versioned theme bundles
     #[command(
-        after_help = "Examples:\n  omnidoc theme list\n  omnidoc theme inspect corporate-docs\n  omnidoc theme apply corporate-docs ./docs\n  omnidoc theme apply modern-slides ./talk --dry-run\n  omnidoc theme validate --json"
+        after_help = "Examples:\n  omnidoc theme install ./corporate-theme\n  omnidoc theme list --project ./docs\n  omnidoc theme inspect acme/corporate@^2\n  omnidoc theme apply acme/corporate@=2.1.0 ./docs\n  omnidoc theme validate --check-fonts --check-latex"
     )]
     Theme {
         #[command(subcommand)]
@@ -841,55 +828,175 @@ pub enum LibSubcommand {
 
 #[derive(Debug, Subcommand)]
 pub enum PluginSubcommand {
-    /// list bundled plugin examples that can be installed explicitly
-    Examples {
-        /// optional project path used to resolve the configured library
-        #[arg(value_hint = ValueHint::DirPath)]
-        path: Option<String>,
+    /// install a plugin package from a directory, archive, or pinned HTTPS URL
+    Install {
+        /// package directory, manifest, .zip/.odpkg/.tar.gz archive, or HTTPS URL
+        source: String,
 
-        /// emit stable JSON example metadata
+        /// required SHA-256 for HTTPS sources; optional verification for archives
         #[arg(long)]
-        json: bool,
-    },
+        sha256: Option<String>,
 
-    /// install one bundled example into a project's plugins directory
-    Add {
-        /// bundled example key, such as quality-gate or asset-index
-        preset: String,
+        /// install into this project's .omnidoc/extensions store instead of the user store
+        #[arg(long, value_hint = ValueHint::DirPath)]
+        project: Option<String>,
 
-        /// set the path to a documentation project
-        #[arg(value_hint = ValueHint::DirPath)]
-        path: Option<String>,
-
-        /// report the installation without writing files
+        /// replace an installed package with the same ID and version but a different digest
         #[arg(long)]
-        dry_run: bool,
+        replace: bool,
 
         /// emit a stable JSON installation report
         #[arg(long)]
         json: bool,
     },
 
-    /// list discovered plugins and external templates
+    /// install one bundled Pandoc Lua example into a project
+    #[command(visible_alias = "add")]
+    InstallExample {
+        /// bundled example key, such as quality-gate or word-count
+        preset: String,
+
+        /// project receiving the example package
+        #[arg(long, value_hint = ValueHint::DirPath)]
+        project: Option<String>,
+
+        /// replace an installed example with the same ID and version
+        #[arg(long)]
+        replace: bool,
+
+        /// emit a stable JSON installation report
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// uninstall a plugin package from the selected store
+    Uninstall {
+        /// plugin package specification, such as acme/check@=1.2.0
+        package: String,
+
+        /// uninstall from this project's store instead of the user store
+        #[arg(long, value_hint = ValueHint::DirPath)]
+        project: Option<String>,
+
+        /// emit a stable JSON removal report
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// list installed plugins; project packages override user packages
     List {
-        /// set the path to a documentation project
-        #[arg(value_hint = ValueHint::DirPath)]
-        path: Option<String>,
+        /// include packages installed for this project
+        #[arg(long, value_hint = ValueHint::DirPath)]
+        project: Option<String>,
 
         /// emit JSON plugin metadata
         #[arg(long)]
         json: bool,
     },
 
-    /// validate discovered plugin and template manifests
+    /// inspect one resolved plugin package
+    Inspect {
+        /// plugin package specification
+        package: String,
+
+        /// resolve project-local packages for this project
+        #[arg(long, value_hint = ValueHint::DirPath)]
+        project: Option<String>,
+
+        /// emit JSON plugin metadata
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// validate one plugin, or every installed plugin when PACKAGE is omitted
     Validate {
-        /// set the path to a documentation project
-        #[arg(value_hint = ValueHint::DirPath)]
-        path: Option<String>,
+        /// optional plugin package specification
+        package: Option<String>,
+
+        /// include packages installed for this project
+        #[arg(long, value_hint = ValueHint::DirPath)]
+        project: Option<String>,
+
+        /// ask Pandoc to parse every Lua script without executing the plugin
+        #[arg(long)]
+        check_lua: bool,
 
         /// emit JSON validation metadata
         #[arg(long)]
         json: bool,
+    },
+
+    /// enable an installed plugin for a project (trust is still required)
+    Enable {
+        /// plugin package specification
+        package: String,
+
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// emit JSON configuration output
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// disable a plugin for a project
+    Disable {
+        /// plugin ID or package specification
+        package: String,
+
+        /// set the path to a documentation project
+        #[arg(value_hint = ValueHint::DirPath)]
+        path: Option<String>,
+
+        /// emit JSON configuration output
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// trust the exact installed plugin payload on this machine
+    Trust {
+        /// plugin package specification
+        package: String,
+
+        /// resolve project-local packages for this project
+        #[arg(long, value_hint = ValueHint::DirPath)]
+        project: Option<String>,
+
+        /// emit JSON trust metadata
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// revoke trust for the exact installed plugin payload
+    Untrust {
+        /// plugin package specification
+        package: String,
+
+        /// resolve project-local packages for this project
+        #[arg(long, value_hint = ValueHint::DirPath)]
+        project: Option<String>,
+
+        /// emit JSON trust metadata
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// run an explicitly declared plugin command through `pandoc lua`
+    Run {
+        /// plugin package specification
+        package: String,
+
+        /// declared plugin command name
+        command: String,
+
+        /// project used as the command working directory
+        #[arg(long, value_hint = ValueHint::DirPath)]
+        project: Option<String>,
+
+        /// arguments passed to the Lua command after `--`
+        #[arg(last = true)]
+        arguments: Vec<String>,
     },
 }
 
@@ -1030,27 +1137,75 @@ pub enum ConvertSubcommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ThemeSubcommand {
-    /// list installed theme bundles
+    /// install a theme package from a directory, archive, or pinned HTTPS URL
+    Install {
+        /// package directory, manifest, .zip/.odpkg/.tar.gz archive, or HTTPS URL
+        source: String,
+
+        /// required SHA-256 for HTTPS sources; optional verification for archives
+        #[arg(long)]
+        sha256: Option<String>,
+
+        /// install into this project's .omnidoc/extensions store instead of the user store
+        #[arg(long, value_hint = ValueHint::DirPath)]
+        project: Option<String>,
+
+        /// replace an installed package with the same ID and version but a different digest
+        #[arg(long)]
+        replace: bool,
+
+        /// emit a stable JSON installation report
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// uninstall a theme package from the selected store
+    Uninstall {
+        /// theme package specification, such as acme/corporate@=2.1.0
+        package: String,
+
+        /// uninstall from this project's store instead of the user store
+        #[arg(long, value_hint = ValueHint::DirPath)]
+        project: Option<String>,
+
+        /// emit a stable JSON removal report
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// list installed and built-in theme bundles
     List {
+        /// include packages installed for this project
+        #[arg(long, value_hint = ValueHint::DirPath)]
+        project: Option<String>,
+
         /// emit JSON theme metadata
         #[arg(long)]
         json: bool,
     },
 
-    /// inspect one installed theme bundle
+    /// inspect one resolved theme bundle, including inherited resources
     Inspect {
-        /// theme name
-        name: String,
+        /// theme package specification
+        package: String,
+
+        /// resolve project-local packages for this project
+        #[arg(long, value_hint = ValueHint::DirPath)]
+        project: Option<String>,
 
         /// emit JSON theme metadata
         #[arg(long)]
         json: bool,
     },
 
-    /// validate one theme, or every installed theme when NAME is omitted
+    /// validate one theme, or every installed theme when PACKAGE is omitted
     Validate {
-        /// optional theme name
-        name: Option<String>,
+        /// optional theme package specification
+        package: Option<String>,
+
+        /// include packages installed for this project
+        #[arg(long, value_hint = ValueHint::DirPath)]
+        project: Option<String>,
 
         /// emit JSON validation results
         #[arg(long)]
@@ -1068,8 +1223,8 @@ pub enum ThemeSubcommand {
     /// select an installed theme for a project
     #[command(visible_alias = "use")]
     Apply {
-        /// installed theme name
-        name: String,
+        /// installed theme package specification
+        package: String,
 
         /// set the path to a documentation project
         #[arg(value_hint = ValueHint::DirPath)]
@@ -1626,7 +1781,7 @@ mod tests {
     }
 
     #[test]
-    fn grouped_and_legacy_library_and_plugin_forms_parse() {
+    fn grouped_library_and_extension_forms_parse() {
         let library = OmniCli::try_parse_from(["omnidoc", "lib", "verify", "--json"])
             .expect("grouped library verification");
         assert!(matches!(
@@ -1649,30 +1804,50 @@ mod tests {
             }
         ));
 
-        let plugins = OmniCli::try_parse_from(["omnidoc", "plugin", "validate", "docs", "--json"])
-            .expect("grouped plugin validation");
+        let plugins = OmniCli::try_parse_from([
+            "omnidoc",
+            "plugin",
+            "validate",
+            "acme/check@^1",
+            "--project",
+            "docs",
+            "--check-lua",
+            "--json",
+        ])
+        .expect("grouped plugin validation");
         assert!(matches!(
             plugins.command,
             Commands::Plugin {
-                subcommand: Some(PluginSubcommand::Validate {
-                    path: Some(path),
+                subcommand: PluginSubcommand::Validate {
+                    package: Some(package),
+                    project: Some(path),
+                    check_lua: true,
                     json: true,
-                }),
-                ..
-            } if path == "docs"
+                },
+            } if path == "docs" && package == "acme/check@^1"
         ));
 
-        let examples = OmniCli::try_parse_from(["omnidoc", "plugin", "examples", "docs", "--json"])
-            .expect("plugin example discovery");
+        let install = OmniCli::try_parse_from([
+            "omnidoc",
+            "plugin",
+            "install",
+            "plugin.odpkg",
+            "--sha256",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "--json",
+        ])
+        .expect("plugin package installation");
         assert!(matches!(
-            examples.command,
+            install.command,
             Commands::Plugin {
-                subcommand: Some(PluginSubcommand::Examples {
-                    path: Some(path),
+                subcommand: PluginSubcommand::Install {
+                    source,
+                    sha256: Some(_),
+                    project: None,
                     json: true,
-                }),
-                ..
-            } if path == "docs"
+                    ..
+                },
+            } if source == "plugin.odpkg"
         ));
 
         let add = OmniCli::try_parse_from([
@@ -1680,35 +1855,49 @@ mod tests {
             "plugin",
             "add",
             "quality-gate",
+            "--project",
             "docs",
-            "--dry-run",
+            "--replace",
             "--json",
         ])
         .expect("plugin example installation");
         assert!(matches!(
             add.command,
             Commands::Plugin {
-                subcommand: Some(PluginSubcommand::Add {
+                subcommand: PluginSubcommand::InstallExample {
                     preset,
-                    path: Some(path),
-                    dry_run: true,
+                    project: Some(path),
+                    replace: true,
                     json: true,
-                }),
-                ..
+                },
             } if preset == "quality-gate" && path == "docs"
         ));
 
-        let legacy_plugins =
-            OmniCli::try_parse_from(["omnidoc", "plugin", "docs", "--validate", "--json"])
-                .expect("legacy plugin validation");
+        let run = OmniCli::try_parse_from([
+            "omnidoc",
+            "plugin",
+            "run",
+            "acme/tools",
+            "word-count",
+            "--project",
+            "docs",
+            "--",
+            "main.md",
+        ])
+        .expect("plugin command invocation");
         assert!(matches!(
-            legacy_plugins.command,
+            run.command,
             Commands::Plugin {
-                subcommand: None,
-                path: Some(path),
-                validate: true,
-                json: true,
-            } if path == "docs"
+                subcommand: PluginSubcommand::Run {
+                    package,
+                    command,
+                    project: Some(path),
+                    arguments,
+                },
+            } if package == "acme/tools"
+                && command == "word-count"
+                && path == "docs"
+                && arguments == ["main.md"]
         ));
     }
 }

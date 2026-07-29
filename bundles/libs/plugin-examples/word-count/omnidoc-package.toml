@@ -1,0 +1,16 @@
+manifest_version = 2
+kind = "plugin"
+id = "omnidoc/word-count"
+name = "Word Count"
+version = "1.0.0"
+description = "Counts rendered text through an explicitly invoked Pandoc Lua command"
+compatible_omnidoc = ">=1.8.0,<2.0.0"
+compatible_pandoc = ">=3.0,<4.0"
+
+[plugin]
+api_version = 1
+
+[[plugin.commands]]
+name = "word-count"
+script = "commands/word-count.lua"
+description = "Print tab-separated path, word count, and UTF-8 character count"

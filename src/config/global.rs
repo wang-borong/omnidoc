@@ -32,6 +32,12 @@ impl GlobalConfig {
 
         let config = if fs::exists(&config_file) {
             let content = fs::read_to_string(&config_file)?;
+            crate::config::schema::validate_plugin_configuration(&content).map_err(|error| {
+                OmniDocError::Config(format!("Failed to parse global config: {error}"))
+            })?;
+            crate::config::schema::validate_global_extension_scope(&content).map_err(|error| {
+                OmniDocError::Config(format!("Failed to parse global config: {error}"))
+            })?;
             toml::from_str(&content).map_err(|e| {
                 OmniDocError::Config(format!("Failed to parse global config: {}", e))
             })?

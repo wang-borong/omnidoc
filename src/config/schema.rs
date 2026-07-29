@@ -21,6 +21,10 @@ pub struct ConfigSchema {
     #[serde(flatten)]
     pub theme: Option<ThemeConfig>,
     #[serde(flatten)]
+    pub extensions: Option<ExtensionsConfig>,
+    #[serde(flatten)]
+    pub plugins: Option<PluginsConfig>,
+    #[serde(flatten)]
     pub tools: Option<ToolsConfig>,
     #[serde(flatten)]
     pub tectonic: Option<TectonicConfig>,
@@ -43,6 +47,79 @@ pub struct ThemeSection {
     pub name: Option<String>,
     pub version: Option<String>,
     pub compatibility: Option<String>,
+}
+
+/// User-installable extension package storage.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub struct ExtensionsConfig {
+    #[serde(rename = "extensions")]
+    pub extensions: Option<ExtensionsSection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ExtensionsSection {
+    /// User package store. Project-local packages always live under
+    /// `.omnidoc/extensions` and take precedence over this directory.
+    pub path: Option<String>,
+}
+
+/// Project plugin selection. Installed plugins are inert until their exact
+/// package is listed here and trusted on the current machine.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub struct PluginsConfig {
+    #[serde(rename = "plugins")]
+    pub plugins: Option<PluginsSection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PluginsSection {
+    /// Package specifications such as `acme/quality@=1.2.0`.
+    pub enabled: Option<Vec<String>>,
+}
+
+pub fn validate_plugin_configuration(content: &str) -> std::result::Result<(), String> {
+    let value = toml::from_str::<toml::Value>(content).map_err(|error| error.to_string())?;
+    let Some(plugins) = value.get("plugins") else {
+        return Ok(());
+    };
+    let table = plugins
+        .as_table()
+        .ok_or_else(|| "configuration key 'plugins' must be a table".to_string())?;
+    let unsupported = table
+        .keys()
+        .filter(|key| key.as_str() != "enabled")
+        .cloned()
+        .collect::<Vec<_>>();
+    if unsupported.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "unsupported [plugins] field(s): {}; lifecycle hooks are no longer supported",
+            unsupported.join(", ")
+        ))
+    }
+}
+
+pub fn validate_global_extension_scope(content: &str) -> std::result::Result<(), String> {
+    let value = toml::from_str::<toml::Value>(content).map_err(|error| error.to_string())?;
+    if value.get("plugins").is_some() {
+        return Err(
+            "[plugins] is project-only; put enabled plugin pins in .omnidoc.toml".to_string(),
+        );
+    }
+    Ok(())
+}
+
+pub fn validate_project_extension_scope(content: &str) -> std::result::Result<(), String> {
+    let value = toml::from_str::<toml::Value>(content).map_err(|error| error.to_string())?;
+    if value.get("extensions").is_some() {
+        return Err(
+            "[extensions] is global-only; project packages use .omnidoc/extensions".to_string(),
+        );
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -350,5 +427,34 @@ impl PathConfig {
                 self.md_dir = v.clone();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        validate_global_extension_scope, validate_plugin_configuration,
+        validate_project_extension_scope,
+    };
+
+    #[test]
+    fn obsolete_plugin_hook_configuration_is_rejected() {
+        let error =
+            validate_plugin_configuration("[plugins]\nenabled = []\npre_build = ['legacy-hook']\n")
+                .expect_err("obsolete plugin hook fields must not be ignored");
+
+        assert!(error.contains("pre_build"));
+    }
+
+    #[test]
+    fn extension_configuration_scopes_are_not_silently_ignored() {
+        let global =
+            validate_global_extension_scope("[plugins]\nenabled = ['acme/check@=1.0.0']\n")
+                .expect_err("global plugin enablement must fail");
+        assert!(global.contains("project-only"));
+
+        let project = validate_project_extension_scope("[extensions]\npath = './store'\n")
+            .expect_err("project extension path must fail");
+        assert!(project.contains("global-only"));
     }
 }

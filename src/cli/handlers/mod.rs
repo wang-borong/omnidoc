@@ -34,7 +34,7 @@ pub use md2html::handle_md2html;
 pub use md2pdf::handle_md2pdf;
 pub use new::handle_new;
 pub use open::handle_open;
-pub use plugin::{handle_plugin, handle_plugin_add, handle_plugin_examples};
+pub use plugin::handle_plugin;
 pub use publish::handle_publish;
 pub use quality::{
     handle_ci, handle_config_validate, handle_deps, handle_doctor, handle_lint, handle_lock,

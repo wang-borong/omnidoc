@@ -9,6 +9,7 @@ pub mod doctype;
 pub mod epub;
 pub mod error;
 pub mod executor;
+pub mod extensions;
 pub mod fs;
 pub mod fs_abstract;
 pub mod git;

@@ -57,7 +57,8 @@ platform-specific OmniDoc binaries in one GitHub release.
 
 ## Lua filter dependency protocol
 
-For every active Lua filter, OmniDoc passes a metadata field named from the
+For core filters and filters configured directly through
+`[pandoc].lua_filters`, OmniDoc passes a metadata field named from the
 normalized filter basename:
 
 ```text
@@ -76,3 +77,33 @@ Dependencies may be absolute or project-relative. OmniDoc consumes depfiles
 only for filters active in the current output policy, content-hashes external
 resources, and ignores malformed or stale depfiles. The include filters accept
 this generic key while retaining their legacy metadata keys for compatibility.
+
+Installed plugin filters do not inherit the basename convention because common
+paths such as `filters/main.lua` would collide. A plugin that reads dynamic
+inputs declares a globally unique `dependency_key` on its `[[plugin.filters]]`
+entry. For `dependency_key = "acme-reader-inputs"`, OmniDoc passes:
+
+```text
+omnidoc-plugin-depfile-acme-reader-inputs=/absolute/path/to/plugin-acme-reader-inputs.d
+```
+
+Duplicate keys among enabled plugins are rejected. A plugin filter without a
+`dependency_key` receives no plugin depfile channel and must not rely on
+untracked external inputs for cache correctness. OmniDoc clears active
+depfiles immediately before Pandoc runs, so participating filters must always
+write a fresh header even when they have no dependency lines.
+
+## Extension package storage contract
+
+Installable themes and plugins share `omnidoc-package.toml` manifest version 2
+and the canonical `<store>/<themes|plugins>/<ID segments>/<VERSION>` layout.
+Each payload contains exactly one root manifest. Portable UTF-8 path checks
+reject traversal, symbolic links, Windows-reserved components, trailing dots
+or spaces, and case-insensitive collisions. Package identity digests include
+file paths, contents, and empty directories; only the internal installation
+receipt is excluded.
+
+Store replacement is transactional. A later install or uninstall restores an
+interrupted backup, or verifies an already-promoted payload before deleting
+the backup. If the promoted digest is different from the transaction record,
+OmniDoc preserves both copies and reports the conflict.

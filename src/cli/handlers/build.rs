@@ -6,6 +6,7 @@ use crate::config::MergedConfig;
 use crate::doc::artifacts::expected_output_file;
 use crate::epub::{validate_epub, EpubCompatibilityReport};
 use crate::error::{OmniDocError, Result};
+use crate::extensions::acquire_extension_store_read_locks;
 use crate::project_tools;
 use crate::utils::path;
 use std::path::Path;
@@ -64,13 +65,13 @@ pub fn build_project(
     cli_overrides: CliOverrides,
     verbose: bool,
 ) -> Result<()> {
-    build_project_once(
+    build_project_outputs(
         project_path,
         cli_overrides,
+        false,
         BuildRunOptions::default(),
         verbose,
     )
-    .map(|_| ())
 }
 
 pub fn build_project_outputs(
@@ -93,6 +94,9 @@ pub(crate) fn build_project_outputs_unlocked(
 ) -> Result<()> {
     let config_manager = create_config_manager(Some(project_path), cli_overrides.clone())?;
     let merged = config_manager.get_merged().clone();
+    let _extension_locks = (merged.theme_name.is_some() || !merged.plugins_enabled.is_empty())
+        .then(|| acquire_extension_store_read_locks(Some(project_path), &merged, "build project"))
+        .transpose()?;
     let outputs = resolve_outputs(&merged, &cli_overrides, all);
     let mut reports = Vec::new();
     let mut per_output_options = run_options.clone();
@@ -148,17 +152,9 @@ fn build_project_once(
     let config_manager = create_config_manager(Some(project_path), cli_overrides.clone())?;
     let config = config_manager.get_merged().clone();
     config_manager.setup_env()?;
-    let asset_context = project_tools::PluginContext {
-        project_path,
-        config: &config,
-        output: None,
-        target: None,
-    };
-    project_tools::run_plugin_hook(&asset_context, project_tools::PluginHook::AssetProvider)?;
 
     let mut issues = project_tools::validate_config(project_path, &config);
     issues.extend(project_tools::lint_project(project_path));
-    issues.extend(project_tools::run_plugin_lint_rules(project_path, &config));
     if run_options.strict && project_tools::has_warnings_or_errors(&issues) {
         project_tools::print_issues(&issues);
         return Err(OmniDocError::Project(
@@ -238,19 +234,10 @@ fn build_project_once(
         cache_details.extend(cache_probe.details);
     }
 
-    let build_context = project_tools::PluginContext {
-        project_path,
-        config: &config,
-        output: Some(&output),
-        target: Some(&target),
-    };
-    project_tools::run_plugin_hook(&build_context, project_tools::PluginHook::PreBuild)?;
-
     let build_service = create_build_service(Some(project_path), cli_overrides)?;
     build_service
         .build(project_path, verbose)
         .map_err(|e| OmniDocError::Project(format!("Failed to build project: {}", e)))?;
-    project_tools::run_plugin_hook(&build_context, project_tools::PluginHook::PostBuild)?;
 
     // Filters may emit authoritative dependency files during the build. Re-read
     // the graph before writing the cache/report so the first successful build

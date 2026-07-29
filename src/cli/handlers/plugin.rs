@@ -1,458 +1,669 @@
+use crate::cli::commands::PluginSubcommand;
 use crate::cli::handlers::common::{create_config_manager, print_json_error};
-use crate::config::CliOverrides;
+use crate::cli::handlers::config::handle_project_config_set_locked;
+use crate::config::{CliOverrides, MergedConfig};
 use crate::error::{OmniDocError, Result};
+use crate::extensions::{
+    acquire_extension_store_read_locks, ensure_pandoc_compatible, install_package,
+    is_plugin_trusted, package_spec, plugin_catalog, resolve_plugin_manifest,
+    resolve_plugin_request, revoke_plugin_trust, run_plugin_command, trust_plugin,
+    uninstall_package, validate_plugin_lua, InstallPackageRequest, PackageKind, PluginCatalogEntry,
+    ResolvedPlugin, PACKAGE_MANIFEST_FILE,
+};
 use crate::project_tools;
 use crate::utils::directories::data_local_dir;
 use crate::utils::path;
 use serde::Serialize;
-use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
-use walkdir::WalkDir;
 
 const PLUGIN_EXAMPLES_DIR: &str = "plugin-examples";
 
 #[derive(Debug, Serialize)]
-struct PluginExampleInfo {
-    preset: String,
-    key: String,
-    name: Option<String>,
-    version: Option<String>,
-    description: Option<String>,
-    hooks: Vec<String>,
-    valid: bool,
-    error: Option<String>,
+struct PluginTrustReport {
+    schema_version: u32,
+    id: String,
+    version: String,
+    digest: String,
+    trusted: bool,
+    changed: bool,
 }
 
 #[derive(Debug, Serialize)]
-struct PluginInstallReport {
-    schema_version: u32,
-    preset: String,
-    source: String,
-    destination: String,
-    files: Vec<String>,
-    dry_run: bool,
-    installed: bool,
+struct PluginValidationReport {
+    package: PluginCatalogEntry,
+    lua_checked: bool,
+    lua_valid: Option<bool>,
+    errors: Vec<String>,
 }
 
-pub fn handle_plugin(path: Option<String>, json: bool, validate: bool) -> Result<()> {
-    let plugins = match (|| {
-        let project_path = path::determine_project_context(path)?;
-        let config_manager = create_config_manager(Some(&project_path), CliOverrides::new())?;
-        Ok(project_tools::discovered_plugins(
-            &project_path,
-            config_manager.get_merged(),
-        ))
-    })() {
-        Ok(plugins) => plugins,
-        Err(error) => {
-            if json {
-                print_json_error(&error);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ValidationOutcome {
+    Valid,
+    Invalid,
+}
+
+pub fn handle_plugin(subcommand: PluginSubcommand) -> Result<()> {
+    let json = plugin_json_mode(&subcommand);
+    let delegated_json_errors = matches!(
+        &subcommand,
+        PluginSubcommand::Enable { .. } | PluginSubcommand::Disable { .. }
+    );
+    let mut validation_reported_failure = false;
+    let result = match subcommand {
+        PluginSubcommand::Install {
+            source,
+            sha256,
+            project,
+            replace,
+            json,
+        } => install(&source, sha256.as_deref(), project, replace, json),
+        PluginSubcommand::InstallExample {
+            preset,
+            project,
+            replace,
+            json,
+        } => install_example(&preset, project, replace, json),
+        PluginSubcommand::Uninstall {
+            package,
+            project,
+            json,
+        } => uninstall(&package, project, json),
+        PluginSubcommand::List { project, json } => list(project, json),
+        PluginSubcommand::Inspect {
+            package,
+            project,
+            json,
+        } => inspect(&package, project, json),
+        PluginSubcommand::Validate {
+            package,
+            project,
+            check_lua,
+            json,
+        } => match validate(package.as_deref(), project, check_lua, json) {
+            Ok(ValidationOutcome::Valid) => Ok(()),
+            Ok(ValidationOutcome::Invalid) => {
+                validation_reported_failure = json;
+                Err(OmniDocError::Project(
+                    "plugin validation failed".to_string(),
+                ))
             }
-            return Err(error);
-        }
+            Err(error) => Err(error),
+        },
+        PluginSubcommand::Enable {
+            package,
+            path,
+            json,
+        } => set_enabled(&package, path, true, json),
+        PluginSubcommand::Disable {
+            package,
+            path,
+            json,
+        } => set_enabled(&package, path, false, json),
+        PluginSubcommand::Trust {
+            package,
+            project,
+            json,
+        } => set_trust(&package, project, true, json),
+        PluginSubcommand::Untrust {
+            package,
+            project,
+            json,
+        } => set_trust(&package, project, false, json),
+        PluginSubcommand::Run {
+            package,
+            command,
+            project,
+            arguments,
+        } => run(&package, &command, project, &arguments),
     };
-    if json {
-        let content = serde_json::to_string_pretty(&plugins)
-            .map_err(|err| OmniDocError::Other(err.to_string()))?;
-        println!("{}", content);
-    } else if plugins.is_empty() {
-        println!("No project plugins or external templates discovered.");
-        println!("Run `omnidoc plugin examples` to see installable examples.");
-    } else {
-        for plugin in &plugins {
-            let status = if plugin.valid { "ok" } else { "fail" };
-            let hooks = if plugin.hooks.is_empty() {
-                "no hooks".to_string()
-            } else {
-                plugin.hooks.join(", ")
-            };
-            if let Some(error) = &plugin.error {
-                println!(
-                    "{} {} ({}) [{}] - {}",
-                    status, plugin.key, plugin.path, hooks, error
-                );
-            } else {
-                println!("{} {} ({}) [{}]", status, plugin.key, plugin.path, hooks);
-            }
+    if let Err(error) = &result {
+        if json && !delegated_json_errors && !validation_reported_failure {
+            print_json_error(error);
         }
     }
-
-    if validate && plugins.iter().any(|plugin| !plugin.valid) {
-        return Err(OmniDocError::Project(
-            "plugin validation failed".to_string(),
-        ));
-    }
-    Ok(())
+    result
 }
 
-pub fn handle_plugin_examples(path: Option<String>, json: bool) -> Result<()> {
-    let result = (|| {
-        let context = path::determine_project_context(path)?;
-        let root = configured_examples_root(&context)?;
-        load_examples(&root)
-    })();
-    let examples = match result {
-        Ok(examples) => examples,
-        Err(error) => {
-            if json {
-                print_json_error(&error);
-            }
-            return Err(error);
-        }
-    };
-
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&examples)
-                .map_err(|error| OmniDocError::Other(error.to_string()))?
-        );
-    } else if examples.is_empty() {
-        println!("No bundled plugin examples found.");
-    } else {
-        for example in examples {
-            let status = if example.valid {
-                "available"
-            } else {
-                "invalid"
-            };
-            let description = example.description.as_deref().unwrap_or("No description");
-            println!("{} [{}] - {}", example.preset, status, description);
-            if !example.hooks.is_empty() {
-                println!("  hooks: {}", example.hooks.join(", "));
-            }
-            if let Some(error) = example.error {
-                println!("  error: {}", error);
-            }
-        }
-        println!("\nInstall one with `omnidoc plugin add <PRESET> [PATH]`.");
-    }
-    Ok(())
-}
-
-pub fn handle_plugin_add(
-    preset: String,
-    path: Option<String>,
-    dry_run: bool,
+fn install(
+    source: &str,
+    sha256: Option<&str>,
+    requested_project: Option<String>,
+    replace: bool,
     json: bool,
 ) -> Result<()> {
-    let result = install_plugin_example(&preset, path, dry_run);
-    let report = match result {
-        Ok(report) => report,
-        Err(error) => {
-            if json {
-                print_json_error(&error);
-            }
-            return Err(error);
-        }
-    };
-
+    let project_root = explicit_project(requested_project)?;
+    let config = load_config(project_root.as_deref())?;
+    let _lock = project_root
+        .as_deref()
+        .map(|root| project_tools::acquire_project_write_lock(root, "install a plugin package"))
+        .transpose()?;
+    let report = install_package(InstallPackageRequest {
+        expected_kind: PackageKind::Plugin,
+        source,
+        expected_sha256: sha256,
+        project_root: project_root.as_deref(),
+        config: &config,
+        replace,
+    })?;
     if json {
+        print_json(&report)?;
+    } else if report.installed {
         println!(
-            "{}",
-            serde_json::to_string_pretty(&report)
-                .map_err(|error| OmniDocError::Other(error.to_string()))?
+            "Installed plugin {}@{} to {} ({}).",
+            report.id, report.version, report.destination, report.digest
         );
-    } else if report.dry_run {
-        println!(
-            "Would install plugin example '{}' to {} ({} files).",
-            report.preset,
-            report.destination,
-            report.files.len()
-        );
+        println!("The plugin is inert until it is trusted and enabled for a project.");
     } else {
         println!(
-            "Installed plugin example '{}' to {} ({} files).",
-            report.preset,
-            report.destination,
-            report.files.len()
+            "Plugin {}@{} is already installed with the same digest.",
+            report.id, report.version
         );
-        println!("Next: run `omnidoc plugin validate` and inspect the plugin README.");
     }
     Ok(())
 }
 
-fn install_plugin_example(
-    requested_preset: &str,
-    requested_path: Option<String>,
-    dry_run: bool,
-) -> Result<PluginInstallReport> {
-    let preset = normalize_plugin_key(requested_preset);
-    if !valid_plugin_key(&preset) {
+fn install_example(
+    preset: &str,
+    requested_project: Option<String>,
+    replace: bool,
+    json: bool,
+) -> Result<()> {
+    if !safe_example_key(preset) {
         return Err(OmniDocError::Project(format!(
-            "invalid plugin example key: {requested_preset}"
+            "invalid plugin example key: {preset}"
         )));
     }
-    let project_path = path::determine_project_root(requested_path)?;
-    let examples_root = configured_examples_root(&project_path)?;
-    let examples = load_examples(&examples_root)?;
-    let example = examples
-        .iter()
-        .find(|example| normalize_plugin_key(&example.preset) == preset)
-        .ok_or_else(|| {
-            let available = examples
-                .iter()
-                .map(|example| example.preset.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            OmniDocError::Project(format!(
-                "unknown plugin example '{requested_preset}'; available examples: {available}"
-            ))
-        })?;
-    if !example.valid {
-        return Err(OmniDocError::Project(format!(
-            "plugin example '{}' is invalid: {}",
-            example.preset,
-            example.error.as_deref().unwrap_or("validation failed")
-        )));
-    }
-
-    let source = examples_root.join(&example.preset);
-    let files = example_files(&source)?;
-    let plugins_dir = project_path.join("plugins");
-    reject_symlink(&plugins_dir, "project plugins directory")?;
-    let destination_key = normalize_plugin_key(&example.key);
-    if !valid_plugin_key(&destination_key) {
-        return Err(OmniDocError::Project(format!(
-            "plugin example '{}' has an unsafe manifest key: {}",
-            example.preset, example.key
-        )));
-    }
-    let destination = plugins_dir.join(&destination_key);
-    if destination.exists() {
-        return Err(OmniDocError::Project(format!(
-            "plugin destination already exists: {}",
-            destination.display()
-        )));
-    }
-
-    let report_files = files
-        .iter()
-        .map(|path| path.to_string_lossy().replace('\\', "/"))
-        .collect::<Vec<_>>();
-    let mut report = PluginInstallReport {
-        schema_version: 1,
-        preset: example.preset.clone(),
-        source: source.display().to_string(),
-        destination: destination.display().to_string(),
-        files: report_files,
-        dry_run,
-        installed: false,
-    };
-    if dry_run {
-        return Ok(report);
-    }
-
-    let _project_lock = project_tools::acquire_project_write_lock(
-        &project_path,
-        "install a project plugin example",
-    )?;
-    reject_symlink(&plugins_dir, "project plugins directory")?;
-    if destination.exists() {
-        return Err(OmniDocError::Project(format!(
-            "plugin destination already exists: {}",
-            destination.display()
-        )));
-    }
-    fs::create_dir_all(&plugins_dir).map_err(OmniDocError::Io)?;
-    let canonical_plugins = fs::canonicalize(&plugins_dir).map_err(OmniDocError::Io)?;
-    if !canonical_plugins.starts_with(&project_path) {
-        return Err(OmniDocError::Project(format!(
-            "project plugins directory resolves outside the project: {}",
-            plugins_dir.display()
-        )));
-    }
-
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
-    let staging = plugins_dir.join(format!(
-        ".omnidoc-install-{}-{}-{nonce}",
-        destination_key,
-        std::process::id()
-    ));
-    if staging.exists() {
-        return Err(OmniDocError::Project(format!(
-            "temporary plugin installation path already exists: {}",
-            staging.display()
-        )));
-    }
-    fs::create_dir(&staging).map_err(OmniDocError::Io)?;
-    let copy_result = copy_example_files(&source, &staging, &files);
-    if let Err(error) = copy_result {
-        let _ = fs::remove_dir_all(&staging);
-        return Err(error);
-    }
-    let staged_info = project_tools::inspect_plugin_manifest(&staging.join("manifest.toml"));
-    if !staged_info.valid || normalize_plugin_key(&staged_info.key) != destination_key {
-        let detail = staged_info
-            .error
-            .as_deref()
-            .unwrap_or("copied manifest key changed during installation");
-        let _ = fs::remove_dir_all(&staging);
-        return Err(OmniDocError::Project(format!(
-            "copied plugin example failed validation: {detail}"
-        )));
-    }
-    if destination.exists() {
-        let _ = fs::remove_dir_all(&staging);
-        return Err(OmniDocError::Project(format!(
-            "plugin destination was created during installation: {}",
-            destination.display()
-        )));
-    }
-    if let Err(error) = fs::rename(&staging, &destination) {
-        let _ = fs::remove_dir_all(&staging);
-        return Err(OmniDocError::Io(error));
-    }
-    report.installed = true;
-    Ok(report)
-}
-
-fn configured_examples_root(project_path: &Path) -> Result<PathBuf> {
-    let manager = create_config_manager(Some(project_path), CliOverrides::new())?;
-    let library = manager
-        .get_merged()
+    let project_root = path::determine_project_root(requested_project)?;
+    let config = load_config(Some(&project_root))?;
+    let library = config
         .lib_path
         .as_ref()
         .map(PathBuf::from)
-        .or_else(|| data_local_dir().map(|path| path.join("omnidoc")))
+        .or_else(|| data_local_dir().map(|root| root.join("omnidoc")))
         .ok_or_else(|| OmniDocError::Project("OmniDoc library path is unavailable".to_string()))?;
-    let root = library.join(PLUGIN_EXAMPLES_DIR);
-    if !root.is_dir() {
+    let source = library.join(PLUGIN_EXAMPLES_DIR).join(preset);
+    if !source.join(PACKAGE_MANIFEST_FILE).is_file() {
+        let available = bundled_example_names(&library.join(PLUGIN_EXAMPLES_DIR));
         return Err(OmniDocError::Project(format!(
-            "bundled plugin examples were not found in {}; run `omnidoc lib update`",
-            root.display()
+            "unknown plugin example '{preset}'; available examples: {}",
+            if available.is_empty() {
+                "none (run `omnidoc lib update`)".to_string()
+            } else {
+                available.join(", ")
+            }
         )));
     }
-    reject_symlink(&root, "plugin examples directory")?;
-    Ok(root)
+    let _lock =
+        project_tools::acquire_project_write_lock(&project_root, "install a plugin example")?;
+    let source_string = source.to_string_lossy().to_string();
+    let report = install_package(InstallPackageRequest {
+        expected_kind: PackageKind::Plugin,
+        source: &source_string,
+        expected_sha256: None,
+        project_root: Some(&project_root),
+        config: &config,
+        replace,
+    })?;
+    if json {
+        print_json(&report)?;
+    } else if report.installed {
+        println!(
+            "Installed plugin example '{}' as {}@{}.",
+            preset, report.id, report.version
+        );
+        println!(
+            "Next: `omnidoc plugin trust {}@={} --project {}` then `omnidoc plugin enable {}@={} {}`.",
+            report.id,
+            report.version,
+            project_root.display(),
+            report.id,
+            report.version,
+            project_root.display()
+        );
+    } else {
+        println!(
+            "Plugin example '{}' is already installed as {}@{}.",
+            preset, report.id, report.version
+        );
+    }
+    Ok(())
 }
 
-fn load_examples(root: &Path) -> Result<Vec<PluginExampleInfo>> {
-    let mut entries = fs::read_dir(root)
-        .map_err(OmniDocError::Io)?
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-        .collect::<Vec<_>>();
-    entries.sort_by_key(|entry| entry.file_name());
-    let mut examples = Vec::new();
-    for entry in entries {
-        let preset = entry.file_name().to_string_lossy().to_string();
-        let directory = entry.path();
-        let manifest = directory.join("manifest.toml");
-        let mut info = project_tools::inspect_plugin_manifest(&manifest);
-        if info.valid {
-            let normalized_key = normalize_plugin_key(&info.key);
-            if !valid_plugin_key(&normalized_key) {
-                info.valid = false;
-                info.error = Some(format!("manifest key '{}' is unsafe", info.key));
-            } else if normalized_key != normalize_plugin_key(&preset) {
-                info.valid = false;
-                info.error = Some(format!(
-                    "manifest key '{}' does not match example directory '{}'",
-                    info.key, preset
-                ));
+fn uninstall(package: &str, requested_project: Option<String>, json: bool) -> Result<()> {
+    let project_root = explicit_project(requested_project)?;
+    let config = load_config(project_root.as_deref())?;
+    let _lock = project_root
+        .as_deref()
+        .map(|root| project_tools::acquire_project_write_lock(root, "uninstall a plugin package"))
+        .transpose()?;
+    let report = uninstall_package(
+        PackageKind::Plugin,
+        package,
+        project_root.as_deref(),
+        &config,
+    )?;
+    if json {
+        print_json(&report)?;
+    } else {
+        println!(
+            "Uninstalled plugin {}@{} from {}.",
+            report.id, report.version, report.path
+        );
+    }
+    Ok(())
+}
+
+fn list(requested_project: Option<String>, json: bool) -> Result<()> {
+    let (project_root, config) = catalog_context(requested_project)?;
+    let _extension_locks =
+        acquire_extension_store_read_locks(project_root.as_deref(), &config, "list plugins")?;
+    let entries = plugin_catalog(project_root.as_deref(), &config)?;
+    if json {
+        print_json(&entries)?;
+    } else if entries.is_empty() {
+        println!("No plugin packages are installed.");
+    } else {
+        for entry in entries {
+            let state = match (entry.enabled, entry.trusted, entry.valid) {
+                (_, _, false) => "invalid",
+                (true, true, true) => "enabled, trusted",
+                (true, false, true) => "enabled, untrusted",
+                (false, true, true) => "disabled, trusted",
+                (false, false, true) => "disabled, untrusted",
+            };
+            println!(
+                "{}@{} [{}; {:?}] - {}",
+                entry.id, entry.version, state, entry.scope, entry.name
+            );
+            for error in entry.errors {
+                println!("  error: {error}");
             }
         }
-        examples.push(PluginExampleInfo {
-            preset,
-            key: info.key,
-            name: info.name,
-            version: info.version,
-            description: info.description,
-            hooks: info.hooks,
-            valid: info.valid,
-            error: info.error,
+    }
+    Ok(())
+}
+
+fn inspect(package: &str, requested_project: Option<String>, json: bool) -> Result<()> {
+    let (project_root, config) = catalog_context(requested_project)?;
+    let _extension_locks =
+        acquire_extension_store_read_locks(project_root.as_deref(), &config, "inspect a plugin")?;
+    let plugin = resolve_plugin_request(project_root.as_deref(), &config, package)?;
+    let entry = matching_catalog_entry(project_root.as_deref(), &config, &plugin)?;
+    if json {
+        print_json(&entry)?;
+    } else {
+        println!("{}@{} - {}", entry.id, entry.version, entry.name);
+        if let Some(description) = entry.description.as_deref() {
+            println!("  {description}");
+        }
+        println!("  source: {} ({:?})", entry.source, entry.scope);
+        println!("  digest: {}", entry.digest.as_deref().unwrap_or("unknown"));
+        println!(
+            "  compatible Pandoc: {}",
+            entry.compatible_pandoc.as_deref().unwrap_or("not declared")
+        );
+        println!("  enabled: {}", entry.enabled);
+        println!("  trusted: {}", entry.trusted);
+        for filter in entry.filters {
+            let formats = if filter.formats.is_empty() {
+                "all formats".to_string()
+            } else {
+                filter.formats.join(", ")
+            };
+            println!(
+                "  filter: {} (order {}, {})",
+                filter.script, filter.order, formats
+            );
+            if let Some(key) = filter.dependency_key.as_deref() {
+                println!("    dependency key: {key}");
+            }
+        }
+        for command in entry.commands {
+            println!("  command: {} -> {}", command.name, command.script);
+        }
+    }
+    Ok(())
+}
+
+fn validate(
+    requested_package: Option<&str>,
+    requested_project: Option<String>,
+    check_lua: bool,
+    json: bool,
+) -> Result<ValidationOutcome> {
+    let (project_root, config) = catalog_context(requested_project)?;
+    let _extension_locks =
+        acquire_extension_store_read_locks(project_root.as_deref(), &config, "validate plugins")?;
+    let catalog = plugin_catalog(project_root.as_deref(), &config)?;
+    let selected = if let Some(requested) = requested_package {
+        let plugin = resolve_plugin_request(project_root.as_deref(), &config, requested)?;
+        vec![matching_entry(&catalog, &plugin).ok_or_else(|| {
+            OmniDocError::Other(format!(
+                "resolved plugin '{}' is missing from the catalog",
+                plugin.id
+            ))
+        })?]
+    } else {
+        catalog.iter().collect::<Vec<_>>()
+    };
+    let validate_resolved_request = requested_package.is_some();
+    let mut reports = Vec::new();
+    let mut failed = false;
+    for entry in selected {
+        let mut errors = entry.errors.clone();
+        let mut lua_valid = None;
+        let mut lua_was_checked = false;
+        if entry.valid {
+            let identity = format!("{}@={}", entry.id, entry.version);
+            let resolved = if validate_resolved_request {
+                resolve_plugin_request(project_root.as_deref(), &config, &identity)
+            } else {
+                resolve_plugin_manifest(
+                    project_root.as_deref(),
+                    &config,
+                    Path::new(&entry.manifest_path),
+                )
+            };
+            match resolved {
+                Ok(plugin) => {
+                    if let Err(error) =
+                        ensure_pandoc_compatible(std::slice::from_ref(&plugin.package), &config)
+                    {
+                        errors.push(error.to_string());
+                    } else if check_lua {
+                        lua_was_checked = true;
+                        match validate_plugin_lua(&plugin, &config) {
+                            Ok(()) => lua_valid = Some(true),
+                            Err(error) => {
+                                lua_valid = Some(false);
+                                errors.push(error.to_string());
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    errors.push(error.to_string());
+                }
+            }
+        }
+        failed |= !entry.valid || lua_valid == Some(false) || !errors.is_empty();
+        reports.push(PluginValidationReport {
+            package: entry.clone(),
+            lua_checked: lua_was_checked,
+            lua_valid,
+            errors,
         });
     }
-    Ok(examples)
+    if json {
+        print_json(&reports)?;
+    } else if reports.is_empty() {
+        println!("No plugin packages are installed.");
+    } else {
+        for report in &reports {
+            let valid =
+                report.package.valid && report.lua_valid != Some(false) && report.errors.is_empty();
+            println!(
+                "{} {}@{}",
+                if valid { "ok" } else { "fail" },
+                report.package.id,
+                report.package.version
+            );
+            for error in &report.errors {
+                println!("  {error}");
+            }
+        }
+    }
+    Ok(if failed {
+        ValidationOutcome::Invalid
+    } else {
+        ValidationOutcome::Valid
+    })
 }
 
-fn example_files(source: &Path) -> Result<Vec<PathBuf>> {
-    let mut files = Vec::new();
-    for entry in WalkDir::new(source).follow_links(false) {
-        let entry = entry.map_err(|error| OmniDocError::Project(error.to_string()))?;
-        if entry.file_type().is_symlink() {
-            return Err(OmniDocError::Project(format!(
-                "plugin example contains a symbolic link: {}",
-                entry.path().display()
-            )));
+fn set_enabled(
+    requested: &str,
+    requested_path: Option<String>,
+    enable: bool,
+    json: bool,
+) -> Result<()> {
+    let prepared = (|| {
+        let project_root = path::determine_project_root(requested_path)?;
+        let project_lock = project_tools::acquire_project_write_lock(
+            &project_root,
+            if enable {
+                "enable a plugin"
+            } else {
+                "disable a plugin"
+            },
+        )?;
+        let config = load_config(Some(&project_root))?;
+        let extension_locks = enable
+            .then(|| {
+                acquire_extension_store_read_locks(Some(&project_root), &config, "enable a plugin")
+            })
+            .transpose()?;
+        let requested_spec = package_spec(requested)?;
+        let mut enabled = config.plugins_enabled.clone();
+        enabled.retain(|value| {
+            package_spec(value)
+                .map(|spec| spec.id != requested_spec.id)
+                .unwrap_or(true)
+        });
+        if enable {
+            let plugin = resolve_plugin_request(Some(&project_root), &config, requested)?;
+            ensure_pandoc_compatible(std::slice::from_ref(&plugin.package), &config)?;
+            let exact = format!("{}@={}", plugin.id, plugin.version);
+            enabled.push(exact);
+            let trusted = is_plugin_trusted(&plugin)?;
+            if !json && !trusted {
+                eprintln!(
+                    "warning: {}@{} is enabled but remains inert until trusted on this machine",
+                    plugin.id, plugin.version
+                );
+            }
         }
-        if !entry.file_type().is_file() {
-            continue;
+        let encoded = serde_json::to_string(&enabled)
+            .map_err(|error| OmniDocError::Other(error.to_string()))?;
+        Ok((project_root, encoded, project_lock, extension_locks))
+    })();
+    let (project_root, encoded, _project_lock, _extension_locks) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            if json {
+                print_json_error(&error);
+            }
+            return Err(error);
         }
-        let relative = entry.path().strip_prefix(source).map_err(|error| {
-            OmniDocError::Project(format!("invalid plugin example path: {error}"))
-        })?;
-        if relative
+    };
+    handle_project_config_set_locked("plugins.enabled".to_string(), encoded, &project_root, json)
+}
+
+fn set_trust(
+    requested: &str,
+    requested_project: Option<String>,
+    trust: bool,
+    json: bool,
+) -> Result<()> {
+    let (project_root, config) = catalog_context(requested_project)?;
+    let _extension_locks = acquire_extension_store_read_locks(
+        project_root.as_deref(),
+        &config,
+        if trust {
+            "trust a plugin"
+        } else {
+            "revoke plugin trust"
+        },
+    )?;
+    let plugin = resolve_plugin_request(project_root.as_deref(), &config, requested)?;
+    let changed = if trust {
+        trust_plugin(&plugin)?
+    } else {
+        revoke_plugin_trust(&plugin)?
+    };
+    let report = PluginTrustReport {
+        schema_version: 1,
+        id: plugin.id,
+        version: plugin.version,
+        digest: plugin.package.digest,
+        trusted: trust,
+        changed,
+    };
+    if json {
+        print_json(&report)?;
+    } else if trust {
+        println!(
+            "Trusted plugin {}@{} with digest {}.",
+            report.id, report.version, report.digest
+        );
+    } else if changed {
+        println!("Revoked trust for plugin {}@{}.", report.id, report.version);
+    } else {
+        println!("Plugin {}@{} was not trusted.", report.id, report.version);
+    }
+    Ok(())
+}
+
+fn run(
+    requested: &str,
+    command: &str,
+    requested_project: Option<String>,
+    arguments: &[String],
+) -> Result<()> {
+    let project_root = path::determine_project_context(requested_project)?;
+    let config = load_config(Some(&project_root))?;
+    let _extension_locks =
+        acquire_extension_store_read_locks(Some(&project_root), &config, "run a plugin command")?;
+    let plugin = resolve_plugin_request(Some(&project_root), &config, requested)?;
+    run_plugin_command(&plugin, command, arguments, &project_root, &config)
+}
+
+fn explicit_project(requested: Option<String>) -> Result<Option<PathBuf>> {
+    requested
+        .map(|path| path::determine_project_root(Some(path)))
+        .transpose()
+}
+
+fn catalog_context(requested: Option<String>) -> Result<(Option<PathBuf>, MergedConfig)> {
+    let project_root = match requested {
+        Some(path) => Some(path::determine_project_root(Some(path))?),
+        None => {
+            let current = std::env::current_dir()?;
+            path::locate_project_root(&current)
+        }
+    };
+    let config = load_config(project_root.as_deref())?;
+    Ok((project_root, config))
+}
+
+fn load_config(project_root: Option<&Path>) -> Result<MergedConfig> {
+    Ok(create_config_manager(project_root, CliOverrides::new())?
+        .get_merged()
+        .clone())
+}
+
+fn matching_catalog_entry(
+    project_root: Option<&Path>,
+    config: &MergedConfig,
+    plugin: &ResolvedPlugin,
+) -> Result<PluginCatalogEntry> {
+    let catalog = plugin_catalog(project_root, config)?;
+    matching_entry(&catalog, plugin).cloned().ok_or_else(|| {
+        OmniDocError::Other(format!(
+            "resolved plugin '{}@{}' is missing from the catalog",
+            plugin.id, plugin.version
+        ))
+    })
+}
+
+fn matching_entry<'a>(
+    catalog: &'a [PluginCatalogEntry],
+    plugin: &ResolvedPlugin,
+) -> Option<&'a PluginCatalogEntry> {
+    catalog.iter().find(|entry| {
+        entry.id == plugin.id
+            && entry.version == plugin.version
+            && entry.digest.as_deref() == Some(plugin.package.digest.as_str())
+    })
+}
+
+fn bundled_example_names(root: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut names = entries
+        .filter_map(std::result::Result::ok)
+        .filter(|entry| {
+            entry.file_type().is_ok_and(|kind| kind.is_dir())
+                && entry.path().join(PACKAGE_MANIFEST_FILE).is_file()
+        })
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    names.sort();
+    names
+}
+
+fn safe_example_key(value: &str) -> bool {
+    !value.is_empty()
+        && !value.contains(['/', '\\'])
+        && Path::new(value)
             .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-        {
-            return Err(OmniDocError::Project(format!(
-                "unsafe plugin example path: {}",
-                relative.display()
-            )));
-        }
-        files.push(relative.to_path_buf());
-    }
-    files.sort();
-    if !files.iter().any(|path| path == Path::new("manifest.toml")) {
-        return Err(OmniDocError::Project(format!(
-            "plugin example is missing manifest.toml: {}",
-            source.display()
-        )));
-    }
-    Ok(files)
+            .all(|component| matches!(component, Component::Normal(_)))
+        && value.chars().all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, '-' | '_')
+        })
 }
 
-fn copy_example_files(source: &Path, staging: &Path, files: &[PathBuf]) -> Result<()> {
-    for relative in files {
-        let destination = staging.join(relative);
-        if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent).map_err(OmniDocError::Io)?;
-        }
-        fs::copy(source.join(relative), destination).map_err(OmniDocError::Io)?;
+fn plugin_json_mode(command: &PluginSubcommand) -> bool {
+    match command {
+        PluginSubcommand::Install { json, .. }
+        | PluginSubcommand::InstallExample { json, .. }
+        | PluginSubcommand::Uninstall { json, .. }
+        | PluginSubcommand::List { json, .. }
+        | PluginSubcommand::Inspect { json, .. }
+        | PluginSubcommand::Validate { json, .. }
+        | PluginSubcommand::Enable { json, .. }
+        | PluginSubcommand::Disable { json, .. }
+        | PluginSubcommand::Trust { json, .. }
+        | PluginSubcommand::Untrust { json, .. } => *json,
+        PluginSubcommand::Run { .. } => false,
     }
+}
+
+fn print_json(value: &impl Serialize) -> Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(value)
+            .map_err(|error| OmniDocError::Other(error.to_string()))?
+    );
     Ok(())
-}
-
-fn reject_symlink(path: &Path, label: &str) -> Result<()> {
-    if path
-        .symlink_metadata()
-        .is_ok_and(|metadata| metadata.file_type().is_symlink())
-    {
-        return Err(OmniDocError::Project(format!(
-            "{label} must not be a symbolic link: {}",
-            path.display()
-        )));
-    }
-    Ok(())
-}
-
-fn normalize_plugin_key(value: &str) -> String {
-    value.trim().to_ascii_lowercase().replace('_', "-")
-}
-
-fn valid_plugin_key(value: &str) -> bool {
-    let mut characters = value.chars();
-    characters
-        .next()
-        .is_some_and(|character| character.is_ascii_alphanumeric())
-        && characters.all(|character| character.is_ascii_alphanumeric() || character == '-')
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_plugin_key, valid_plugin_key};
+    use super::{bundled_example_names, safe_example_key, PACKAGE_MANIFEST_FILE};
+    use std::fs;
 
     #[test]
-    fn normalizes_and_validates_plugin_keys() {
-        assert_eq!(normalize_plugin_key("Quality_Gate"), "quality-gate");
-        assert!(valid_plugin_key("quality-gate"));
-        assert!(!valid_plugin_key("../quality-gate"));
-        assert!(!valid_plugin_key(""));
+    fn example_keys_cannot_escape_the_bundle_directory() {
+        assert!(safe_example_key("quality-gate"));
+        assert!(safe_example_key("word_count"));
+        assert!(!safe_example_key("../quality-gate"));
+        assert!(!safe_example_key("nested/example"));
+        assert!(!safe_example_key(""));
+    }
+
+    #[test]
+    fn example_catalog_ignores_directories_without_package_manifests() {
+        let root = tempfile::tempdir().expect("example root");
+        let valid = root.path().join("valid-example");
+        let stale = root.path().join("removed-example");
+        fs::create_dir_all(&valid).expect("valid example");
+        fs::create_dir_all(&stale).expect("stale example");
+        fs::write(valid.join(PACKAGE_MANIFEST_FILE), "manifest_version = 2\n")
+            .expect("example manifest");
+
+        assert_eq!(bundled_example_names(root.path()), vec!["valid-example"]);
     }
 }

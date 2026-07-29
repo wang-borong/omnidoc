@@ -1,89 +1,98 @@
-use crate::cli::commands::{ConfigWriteScope, ThemeSubcommand};
-use crate::cli::handlers::common::create_config_manager;
-use crate::cli::handlers::config::handle_config_set;
-use crate::cli::handlers::lib::configured_library_path;
-use crate::config::{global::GlobalConfig, CliOverrides};
+use crate::cli::commands::ThemeSubcommand;
+use crate::cli::handlers::common::{create_config_manager, print_json_error};
+use crate::config::schema::ConfigSchema;
+use crate::config::{CliOverrides, MergedConfig};
 use crate::error::{OmniDocError, Result};
+use crate::extensions::{
+    acquire_extension_store_read_locks, install_package, resolve_selected_theme,
+    resolve_theme_manifest, resolve_theme_request, theme_catalog, uninstall_package,
+    InstallPackageRequest, PackageKind, ResolvedPackageIdentity, ResolvedTheme, ThemeCatalogEntry,
+};
+use crate::project_tools;
 use crate::utils::path;
-use semver::{Version, VersionReq};
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use serde::Serialize;
+use similar::TextDiff;
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use toml_edit::{value, DocumentMut, Item, Table};
 
-const THEME_MANIFEST_VERSION: u32 = 1;
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub(crate) struct ThemeManifest {
-    pub(crate) manifest_version: u32,
-    pub(crate) name: String,
-    pub(crate) version: String,
-    #[serde(default)]
-    pub(crate) description: Option<String>,
-    #[serde(default)]
-    pub(crate) category: Option<String>,
-    #[serde(default)]
-    pub(crate) recommended_for: Vec<String>,
-    pub(crate) compatible_omnidoc: String,
-    #[serde(default)]
-    pub(crate) compatibility: Option<String>,
-    #[serde(default)]
-    pub(crate) resources: ThemeResources,
-    #[serde(default)]
-    pub(crate) requirements: ThemeRequirements,
-    #[serde(default)]
-    pub(crate) metadata: ThemeMetadata,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub(crate) struct ThemeResources {
-    #[serde(default)]
-    pub(crate) html_css: Vec<String>,
-    #[serde(default)]
-    pub(crate) epub_css: Vec<String>,
-    #[serde(default)]
-    pub(crate) latex_packages: Vec<String>,
-    #[serde(default)]
-    pub(crate) latex_headers: Vec<String>,
-    #[serde(default)]
-    pub(crate) lua_filters: Vec<String>,
-    #[serde(default)]
-    pub(crate) templates: Vec<String>,
-    #[serde(default)]
-    pub(crate) html_template: Option<String>,
-    #[serde(default)]
-    pub(crate) epub_template: Option<String>,
-    #[serde(default)]
-    pub(crate) latex_template: Option<String>,
-    #[serde(default)]
-    pub(crate) docx_reference_doc: Option<String>,
-    #[serde(default)]
-    pub(crate) pptx_reference_doc: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub(crate) struct ThemeRequirements {
-    #[serde(default)]
-    pub(crate) fonts: Vec<String>,
-    #[serde(default)]
-    pub(crate) system_latex_packages: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub(crate) struct ThemeMetadata {
-    #[serde(default)]
-    pub(crate) defaults: std::collections::BTreeMap<String, String>,
+#[derive(Debug, Serialize)]
+struct ResolvedThemeReport {
+    id: String,
+    name: String,
+    version: String,
+    description: Option<String>,
+    category: Option<String>,
+    recommended_for: Vec<String>,
+    compatibility: Option<String>,
+    outputs: Vec<String>,
+    resources: ResolvedThemeResources,
+    requirements: crate::extensions::ThemeRequirements,
+    metadata: crate::extensions::ThemeMetadata,
+    packages: Vec<ResolvedPackageReport>,
 }
 
 #[derive(Debug, Serialize)]
-struct ThemeReport {
-    manifest: String,
-    #[serde(flatten)]
-    theme: Option<ThemeManifest>,
-    compatible: Option<bool>,
-    valid: bool,
-    outputs: Vec<String>,
+struct ResolvedThemeResources {
+    html_css: Vec<String>,
+    epub_css: Vec<String>,
+    latex_packages: Vec<String>,
+    latex_headers: Vec<String>,
+    html_template: Option<String>,
+    epub_template: Option<String>,
+    latex_template: Option<String>,
+    docx_reference_doc: Option<String>,
+    pptx_reference_doc: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ResolvedPackageReport {
+    kind: PackageKind,
+    scope: crate::extensions::PackageScope,
+    id: String,
+    version: String,
+    source: String,
+    digest: String,
+    root: String,
+    compatible_pandoc: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ThemeValidationReport {
+    package: ThemeCatalogEntry,
+    resolved: bool,
+    font_check_performed: bool,
+    missing_fonts: Vec<String>,
+    latex_check_performed: bool,
+    missing_latex_packages: Vec<String>,
+    errors: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ThemeApplyReport {
+    schema_version: u32,
+    path: String,
+    id: String,
+    version: String,
+    compatibility: Option<String>,
+    previous_id: Option<String>,
+    previous_version: Option<String>,
+    previous_compatibility: Option<String>,
+    changed: bool,
+    dry_run: bool,
+    applied: bool,
+    diff: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ValidationOutcome {
+    Valid,
+    Invalid,
+}
+
+#[derive(Debug, Default)]
+struct EnvironmentCheck {
     font_check_performed: bool,
     missing_fonts: Vec<String>,
     latex_check_performed: bool,
@@ -92,533 +101,604 @@ struct ThemeReport {
 }
 
 pub fn handle_theme(subcommand: ThemeSubcommand) -> Result<()> {
-    match subcommand {
-        ThemeSubcommand::List { json } => {
-            let library = default_library_path()?;
-            let reports = load_theme_reports(&library, false, false)?;
-            print_reports(&reports, json, false)?;
-        }
-        ThemeSubcommand::Inspect { name, json } => {
-            let library = default_library_path()?;
-            let report = load_named_theme(&library, &name, false, false)?;
-            print_reports(std::slice::from_ref(&report), json, true)?;
-        }
+    let json = theme_json_mode(&subcommand);
+    let mut validation_reported_failure = false;
+    let result = match subcommand {
+        ThemeSubcommand::Install {
+            source,
+            sha256,
+            project,
+            replace,
+            json,
+        } => install(&source, sha256.as_deref(), project, replace, json),
+        ThemeSubcommand::Uninstall {
+            package,
+            project,
+            json,
+        } => uninstall(&package, project, json),
+        ThemeSubcommand::List { project, json } => list(project, json),
+        ThemeSubcommand::Inspect {
+            package,
+            project,
+            json,
+        } => inspect(&package, project, json),
         ThemeSubcommand::Validate {
-            name,
+            package,
+            project,
             json,
             check_fonts,
             check_latex,
-        } => {
-            let library = default_library_path()?;
-            let reports = match name {
-                Some(name) => vec![load_named_theme(&library, &name, check_fonts, check_latex)?],
-                None => load_theme_reports(&library, check_fonts, check_latex)?,
-            };
-            print_reports(&reports, json, false)?;
-            ensure_valid(&reports)?;
-        }
+        } => match validate(package.as_deref(), project, check_fonts, check_latex, json) {
+            Ok(ValidationOutcome::Valid) => Ok(()),
+            Ok(ValidationOutcome::Invalid) => {
+                validation_reported_failure = json;
+                Err(OmniDocError::Project("theme validation failed".to_string()))
+            }
+            Err(error) => Err(error),
+        },
         ThemeSubcommand::Apply {
-            name,
+            package,
             path,
             dry_run,
             diff,
             json,
-        } => {
-            let library = project_library_path(path.clone())?;
-            let report = load_named_theme(&library, &name, false, false)?;
-            ensure_valid(std::slice::from_ref(&report))?;
-            handle_config_set(
-                "theme.name".to_string(),
-                name,
-                path,
-                ConfigWriteScope::Project,
-                dry_run,
-                diff,
-                json,
-            )?;
+        } => apply(&package, path, dry_run || diff, diff, json),
+    };
+    if let Err(error) = &result {
+        if json && !validation_reported_failure {
+            print_json_error(error);
+        }
+    }
+    result
+}
+
+fn install(
+    source: &str,
+    sha256: Option<&str>,
+    requested_project: Option<String>,
+    replace: bool,
+    json: bool,
+) -> Result<()> {
+    let project_root = explicit_project(requested_project)?;
+    let config = load_config(project_root.as_deref())?;
+    let _lock = project_root
+        .as_deref()
+        .map(|root| project_tools::acquire_project_write_lock(root, "install a theme package"))
+        .transpose()?;
+    let report = install_package(InstallPackageRequest {
+        expected_kind: PackageKind::Theme,
+        source,
+        expected_sha256: sha256,
+        project_root: project_root.as_deref(),
+        config: &config,
+        replace,
+    })?;
+    if json {
+        print_json(&report)?;
+    } else if report.installed {
+        println!(
+            "Installed theme {}@{} to {} ({}).",
+            report.id, report.version, report.destination, report.digest
+        );
+    } else {
+        println!(
+            "Theme {}@{} is already installed with the same digest.",
+            report.id, report.version
+        );
+    }
+    Ok(())
+}
+
+fn uninstall(package: &str, requested_project: Option<String>, json: bool) -> Result<()> {
+    let project_root = explicit_project(requested_project)?;
+    let config = load_config(project_root.as_deref())?;
+    let _lock = project_root
+        .as_deref()
+        .map(|root| project_tools::acquire_project_write_lock(root, "uninstall a theme package"))
+        .transpose()?;
+    let report = uninstall_package(
+        PackageKind::Theme,
+        package,
+        project_root.as_deref(),
+        &config,
+    )?;
+    if json {
+        print_json(&report)?;
+    } else {
+        println!(
+            "Uninstalled theme {}@{} from {}.",
+            report.id, report.version, report.path
+        );
+    }
+    Ok(())
+}
+
+fn list(requested_project: Option<String>, json: bool) -> Result<()> {
+    let (project_root, config) = catalog_context(requested_project)?;
+    let _extension_locks =
+        acquire_extension_store_read_locks(project_root.as_deref(), &config, "list themes")?;
+    let entries = theme_catalog(project_root.as_deref(), &config)?;
+    if json {
+        print_json(&entries)?;
+    } else if entries.is_empty() {
+        println!("No theme packages or built-in themes were found.");
+    } else {
+        for entry in entries {
+            println!(
+                "{}@{} [{}; {:?}] - {}",
+                entry.id,
+                entry.version,
+                if entry.valid { "valid" } else { "invalid" },
+                entry.scope,
+                entry.name
+            );
+            if !entry.outputs.is_empty() {
+                println!("  outputs: {}", entry.outputs.join(", "));
+            }
+            for error in entry.errors {
+                println!("  error: {error}");
+            }
         }
     }
     Ok(())
 }
 
-fn default_library_path() -> Result<PathBuf> {
-    configured_library_path(&GlobalConfig::load()?)
+fn inspect(package: &str, requested_project: Option<String>, json: bool) -> Result<()> {
+    let (project_root, config) = catalog_context(requested_project)?;
+    let _extension_locks =
+        acquire_extension_store_read_locks(project_root.as_deref(), &config, "inspect a theme")?;
+    let theme = resolve_theme_request(project_root.as_deref(), &config, package)?;
+    let report = resolved_theme_report(&theme);
+    if json {
+        print_json(&report)?;
+    } else {
+        println!("{}@{} - {}", report.id, report.version, report.name);
+        if let Some(description) = report.description.as_deref() {
+            println!("  {description}");
+        }
+        println!("  outputs: {}", report.outputs.join(", "));
+        println!(
+            "  inheritance: {}",
+            report
+                .packages
+                .iter()
+                .map(|package| format!("{}@{}", package.id, package.version))
+                .collect::<Vec<_>>()
+                .join(" -> ")
+        );
+        for css in &report.resources.html_css {
+            println!("  HTML CSS: {css}");
+        }
+        for css in &report.resources.epub_css {
+            println!("  EPUB CSS: {css}");
+        }
+        for header in &report.resources.latex_headers {
+            println!("  LaTeX header: {header}");
+        }
+        for package in &report.packages {
+            println!(
+                "  package: {}@{} [{}; {}]",
+                package.id, package.version, package.source, package.digest
+            );
+            if let Some(requirement) = package.compatible_pandoc.as_deref() {
+                println!("    compatible Pandoc: {requirement}");
+            }
+        }
+    }
+    Ok(())
 }
 
-fn project_library_path(requested_path: Option<String>) -> Result<PathBuf> {
-    let project_path = path::determine_project_root(requested_path)?;
-    let manager = create_config_manager(Some(&project_path), CliOverrides::new())?;
-    manager
-        .get_merged()
-        .lib_path
-        .as_ref()
-        .map(PathBuf::from)
-        .map(Ok)
-        .unwrap_or_else(default_library_path)
-}
-
-fn load_named_theme(
-    library: &Path,
-    name: &str,
+fn validate(
+    requested_package: Option<&str>,
+    requested_project: Option<String>,
     check_fonts: bool,
     check_latex: bool,
-) -> Result<ThemeReport> {
-    if safe_relative_path(name).is_none() || name.contains('/') || name.contains('\\') {
-        return Err(OmniDocError::Other(format!("invalid theme name: {}", name)));
+    json: bool,
+) -> Result<ValidationOutcome> {
+    let (project_root, config) = catalog_context(requested_project)?;
+    let _extension_locks =
+        acquire_extension_store_read_locks(project_root.as_deref(), &config, "validate themes")?;
+    let catalog = theme_catalog(project_root.as_deref(), &config)?;
+    let selected = if let Some(requested) = requested_package {
+        let theme = resolve_theme_request(project_root.as_deref(), &config, requested)?;
+        vec![matching_theme_entry(&catalog, &theme).ok_or_else(|| {
+            OmniDocError::Other(format!(
+                "resolved theme '{}' is missing from the catalog",
+                theme.id
+            ))
+        })?]
+    } else {
+        catalog.iter().collect::<Vec<_>>()
+    };
+    let validate_resolved_request = requested_package.is_some();
+    let mut reports = Vec::new();
+    let mut failed = false;
+    for entry in selected {
+        let resolved = if validate_resolved_request {
+            resolve_theme_request(
+                project_root.as_deref(),
+                &config,
+                &format!("{}@={}", entry.id, entry.version),
+            )
+        } else {
+            resolve_theme_manifest(
+                project_root.as_deref(),
+                &config,
+                Path::new(&entry.manifest_path),
+            )
+        };
+        let mut environment = EnvironmentCheck::default();
+        let mut resolution_ok = false;
+        if entry.valid {
+            match resolved {
+                Ok(theme) => {
+                    resolution_ok = true;
+                    environment = check_environment(&theme, check_fonts, check_latex);
+                }
+                Err(error) => environment.errors.push(error.to_string()),
+            }
+        }
+        let mut errors = entry.errors.clone();
+        errors.extend(environment.errors.clone());
+        failed |= !entry.valid || !resolution_ok || !errors.is_empty();
+        reports.push(ThemeValidationReport {
+            package: entry.clone(),
+            resolved: resolution_ok,
+            font_check_performed: environment.font_check_performed,
+            missing_fonts: environment.missing_fonts,
+            latex_check_performed: environment.latex_check_performed,
+            missing_latex_packages: environment.missing_latex_packages,
+            errors,
+        });
     }
-    let path = library.join("themes").join(format!("{}.toml", name));
-    if !path.is_file() {
-        return Err(OmniDocError::Other(format!(
-            "theme '{}' is not installed in {}",
-            name,
-            library.join("themes").display()
-        )));
+    if json {
+        print_json(&reports)?;
+    } else if reports.is_empty() {
+        println!("No theme packages or built-in themes were found.");
+    } else {
+        for report in &reports {
+            let valid = report.package.valid && report.resolved && report.errors.is_empty();
+            println!(
+                "{} {}@{}",
+                if valid { "ok" } else { "fail" },
+                report.package.id,
+                report.package.version
+            );
+            for error in &report.errors {
+                println!("  {error}");
+            }
+        }
     }
-    Ok(inspect_manifest(library, &path, check_fonts, check_latex))
-}
-
-pub(crate) fn load_theme_manifest(library: &Path, name: &str) -> Result<ThemeManifest> {
-    let report = load_named_theme(library, name, false, false)?;
-    if !report.valid {
-        return Err(OmniDocError::Other(format!(
-            "theme '{}' is invalid: {}",
-            name,
-            report.errors.join("; ")
-        )));
-    }
-    report.theme.ok_or_else(|| {
-        OmniDocError::Other(format!("theme '{}' manifest could not be loaded", name))
+    Ok(if failed {
+        ValidationOutcome::Invalid
+    } else {
+        ValidationOutcome::Valid
     })
 }
 
+fn apply(
+    requested: &str,
+    requested_path: Option<String>,
+    dry_run: bool,
+    include_diff: bool,
+    json: bool,
+) -> Result<()> {
+    let project_root = path::determine_project_root(requested_path)?;
+    let _lock = (!dry_run)
+        .then(|| project_tools::acquire_project_write_lock(&project_root, "apply a theme"))
+        .transpose()?;
+    let config = load_config(Some(&project_root))?;
+    let _extension_locks =
+        acquire_extension_store_read_locks(Some(&project_root), &config, "apply a theme")?;
+    let theme = resolve_theme_request(Some(&project_root), &config, requested)?;
+    let config_path = project_root.join(".omnidoc.toml");
+    let existed = config_path.is_file();
+    let original = if existed {
+        fs::read_to_string(&config_path)?
+    } else {
+        String::new()
+    };
+    let mut document = if original.trim().is_empty() {
+        DocumentMut::new()
+    } else {
+        original.parse::<DocumentMut>().map_err(|error| {
+            OmniDocError::Config(format!(
+                "failed to parse {}: {error}",
+                config_path.display()
+            ))
+        })?
+    };
+    if !document.as_table().contains_key("theme") {
+        document
+            .as_table_mut()
+            .insert("theme", Item::Table(Table::new()));
+    }
+    let theme_table = document
+        .get_mut("theme")
+        .and_then(Item::as_table_mut)
+        .ok_or_else(|| {
+            OmniDocError::Config("configuration key 'theme' must be a table".to_string())
+        })?;
+    let previous_id = theme_table
+        .get("name")
+        .and_then(Item::as_str)
+        .map(str::to_string);
+    let previous_version = theme_table
+        .get("version")
+        .and_then(Item::as_str)
+        .map(str::to_string);
+    let previous_compatibility = theme_table
+        .get("compatibility")
+        .and_then(Item::as_str)
+        .map(str::to_string);
+    let exact_version = format!("={}", theme.version);
+    let compatibility = theme.compatibility.clone();
+    theme_table.insert("name", value(&theme.id));
+    theme_table.insert("version", value(&exact_version));
+    if let Some(compatibility) = compatibility.as_deref() {
+        theme_table.insert("compatibility", value(compatibility));
+    } else {
+        theme_table.remove("compatibility");
+    }
+    let updated = document.to_string();
+    toml::from_str::<ConfigSchema>(&updated).map_err(|error| {
+        OmniDocError::Config(format!(
+            "theme selection is not valid for {}: {error}",
+            config_path.display()
+        ))
+    })?;
+    let changed = updated != original;
+    let diff =
+        (include_diff && changed).then(|| config_diff(&config_path, existed, &original, &updated));
+    let mut report = ThemeApplyReport {
+        schema_version: 1,
+        path: config_path.to_string_lossy().to_string(),
+        id: theme.id,
+        version: exact_version,
+        compatibility,
+        previous_id,
+        previous_version,
+        previous_compatibility,
+        changed,
+        dry_run,
+        applied: false,
+        diff,
+    };
+    if changed && !dry_run {
+        crate::utils::fs::atomic_write(&config_path, updated.as_bytes())?;
+        create_config_manager(Some(&project_root), CliOverrides::new())?;
+        report.applied = true;
+    }
+    if json {
+        print_json(&report)?;
+    } else if !changed {
+        println!(
+            "Theme {}@{} is already selected in {}.",
+            report.id,
+            report.version.trim_start_matches('='),
+            report.path
+        );
+    } else if dry_run {
+        println!(
+            "Would apply theme {}@{} in {}.",
+            report.id,
+            report.version.trim_start_matches('='),
+            report.path
+        );
+        if let Some(diff) = report.diff.as_deref() {
+            print!("{diff}");
+        }
+        println!("No files were changed.");
+    } else {
+        println!(
+            "Applied theme {}@{} in {}.",
+            report.id,
+            report.version.trim_start_matches('='),
+            report.path
+        );
+    }
+    Ok(())
+}
+
 pub(crate) fn theme_diagnostic(
-    library: &Path,
-    name: &str,
+    project_root: &Path,
+    config: &MergedConfig,
     check_fonts: bool,
     check_latex: bool,
 ) -> (bool, String) {
-    let report = match load_named_theme(library, name, check_fonts, check_latex) {
-        Ok(report) => report,
+    let theme = match resolve_selected_theme(Some(project_root), config) {
+        Ok(Some(theme)) => theme,
+        Ok(None) => return (true, "no theme selected".to_string()),
         Err(error) => return (false, error.to_string()),
     };
-    let detail = if report.valid {
-        let theme = report.theme.as_ref();
-        format!(
-            "version {}; {} fonts and {} system LaTeX packages declared",
-            theme
-                .map(|theme| theme.version.as_str())
-                .unwrap_or("unknown"),
-            theme
-                .map(|theme| theme.requirements.fonts.len())
-                .unwrap_or(0),
-            theme
-                .map(|theme| theme.requirements.system_latex_packages.len())
-                .unwrap_or(0)
-        )
-    } else {
-        report.errors.join("; ")
-    };
-    (report.valid, detail)
-}
-
-fn load_theme_reports(
-    library: &Path,
-    check_fonts: bool,
-    check_latex: bool,
-) -> Result<Vec<ThemeReport>> {
-    let directory = library.join("themes");
-    if !directory.is_dir() {
-        return Ok(Vec::new());
-    }
-    let mut paths = fs::read_dir(&directory)
-        .map_err(OmniDocError::Io)?
-        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("toml"))
-        .collect::<Vec<_>>();
-    paths.sort();
-    Ok(paths
-        .iter()
-        .map(|path| inspect_manifest(library, path, check_fonts, check_latex))
-        .collect())
-}
-
-fn inspect_manifest(
-    library: &Path,
-    path: &Path,
-    check_fonts: bool,
-    check_latex: bool,
-) -> ThemeReport {
-    let relative_manifest = path
-        .strip_prefix(library)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/");
-    let mut report = ThemeReport {
-        manifest: relative_manifest,
-        theme: None,
-        compatible: None,
-        valid: false,
-        outputs: Vec::new(),
-        font_check_performed: false,
-        missing_fonts: Vec::new(),
-        latex_check_performed: false,
-        missing_latex_packages: Vec::new(),
-        errors: Vec::new(),
-    };
-    if path
-        .symlink_metadata()
-        .is_ok_and(|metadata| metadata.file_type().is_symlink())
-    {
-        report
-            .errors
-            .push("theme manifest must not be a symbolic link".to_string());
-        return report;
-    }
-    let content = match fs::read_to_string(path) {
-        Ok(content) => content,
-        Err(error) => {
-            report
-                .errors
-                .push(format!("cannot read manifest: {}", error));
-            return report;
-        }
-    };
-    let manifest = match toml::from_str::<ThemeManifest>(&content) {
-        Ok(manifest) => manifest,
-        Err(error) => {
-            report
-                .errors
-                .push(format!("invalid theme manifest: {}", error));
-            return report;
-        }
-    };
-    validate_manifest(
-        library,
-        path,
-        &manifest,
-        check_fonts,
-        check_latex,
-        &mut report,
+    let applies_to_latex = theme.supports_output("pdf") || theme.supports_output("latex");
+    let environment = check_environment(
+        &theme,
+        check_fonts && applies_to_latex,
+        check_latex && applies_to_latex,
     );
-    report.valid = report.errors.is_empty();
-    report.outputs = theme_outputs(&manifest);
-    report.theme = Some(manifest);
+    if !environment.errors.is_empty() {
+        return (false, environment.errors.join("; "));
+    }
+    (
+        true,
+        format!(
+            "version {}; {} package(s) in inheritance chain; {} fonts and {} system LaTeX packages declared",
+            theme.version,
+            theme.packages.len(),
+            theme.requirements.fonts.len(),
+            theme.requirements.system_latex_packages.len()
+        ),
+    )
+}
+
+fn check_environment(
+    theme: &ResolvedTheme,
+    check_fonts: bool,
+    check_latex: bool,
+) -> EnvironmentCheck {
+    let mut report = EnvironmentCheck::default();
+    if check_fonts && !theme.requirements.fonts.is_empty() {
+        report.font_check_performed = true;
+        for font in &theme.requirements.fonts {
+            let output = match Command::new("fc-match")
+                .args(["--format", "%{family}\n", "--", font])
+                .output()
+            {
+                Ok(output) => output,
+                Err(error) => {
+                    report.errors.push(format!(
+                        "cannot check theme fonts because fc-match failed: {error}"
+                    ));
+                    break;
+                }
+            };
+            let families = String::from_utf8_lossy(&output.stdout);
+            if !output.status.success() || !font_family_matches(font, &families) {
+                report.missing_fonts.push(font.clone());
+                report.errors.push(format!(
+                    "required font '{}' is not installed (fontconfig matched '{}')",
+                    font,
+                    families.lines().next().unwrap_or("unknown").trim()
+                ));
+            }
+        }
+    }
+    if check_latex && !theme.requirements.system_latex_packages.is_empty() {
+        report.latex_check_performed = true;
+        for package in &theme.requirements.system_latex_packages {
+            if !valid_latex_package_name(package) {
+                report
+                    .errors
+                    .push(format!("invalid system LaTeX package name: {package}"));
+                continue;
+            }
+            let file = format!("{package}.sty");
+            let output = match Command::new("kpsewhich").args(["--", &file]).output() {
+                Ok(output) => output,
+                Err(error) => {
+                    report.errors.push(format!(
+                        "cannot check LaTeX packages because kpsewhich failed: {error}"
+                    ));
+                    break;
+                }
+            };
+            if !output.status.success() || String::from_utf8_lossy(&output.stdout).trim().is_empty()
+            {
+                report.missing_latex_packages.push(package.clone());
+                report.errors.push(format!(
+                    "required system LaTeX package '{}' is not installed",
+                    package
+                ));
+            }
+        }
+    }
     report
 }
 
-fn validate_manifest(
-    library: &Path,
-    path: &Path,
-    manifest: &ThemeManifest,
-    check_fonts: bool,
-    check_latex: bool,
-    report: &mut ThemeReport,
-) {
-    if manifest.manifest_version != THEME_MANIFEST_VERSION {
-        report.errors.push(format!(
-            "unsupported manifest_version {}",
-            manifest.manifest_version
-        ));
-    }
-    let file_name = path.file_stem().and_then(|name| name.to_str());
-    if file_name != Some(manifest.name.as_str()) {
-        report.errors.push(format!(
-            "theme name '{}' does not match manifest filename",
-            manifest.name
-        ));
-    }
-    if manifest.name.trim().is_empty() || safe_relative_path(&manifest.name).is_none() {
-        report.errors.push("theme name is invalid".to_string());
-    }
-    if let Err(error) = Version::parse(&manifest.version) {
-        report
-            .errors
-            .push(format!("invalid theme version: {}", error));
-    }
-    match VersionReq::parse(&manifest.compatible_omnidoc) {
-        Ok(requirement) => match Version::parse(env!("CARGO_PKG_VERSION")) {
-            Ok(version) => {
-                let compatible = requirement.matches(&version);
-                report.compatible = Some(compatible);
-                if !compatible {
-                    report.errors.push(format!(
-                        "theme requires OmniDoc {}, installed {}",
-                        manifest.compatible_omnidoc, version
-                    ));
-                }
-            }
-            Err(error) => report
-                .errors
-                .push(format!("invalid OmniDoc version: {}", error)),
+fn resolved_theme_report(theme: &ResolvedTheme) -> ResolvedThemeReport {
+    ResolvedThemeReport {
+        id: theme.id.clone(),
+        name: theme.name.clone(),
+        version: theme.version.clone(),
+        description: theme.description.clone(),
+        category: theme.category.clone(),
+        recommended_for: theme.recommended_for.clone(),
+        compatibility: theme.compatibility.clone(),
+        outputs: theme.outputs.clone(),
+        resources: ResolvedThemeResources {
+            html_css: display_paths(&theme.resources.html_css),
+            epub_css: display_paths(&theme.resources.epub_css),
+            latex_packages: display_paths(&theme.resources.latex_packages),
+            latex_headers: display_paths(&theme.resources.latex_headers),
+            html_template: display_optional_path(theme.resources.html_template.as_deref()),
+            epub_template: display_optional_path(theme.resources.epub_template.as_deref()),
+            latex_template: display_optional_path(theme.resources.latex_template.as_deref()),
+            docx_reference_doc: display_optional_path(
+                theme.resources.docx_reference_doc.as_deref(),
+            ),
+            pptx_reference_doc: display_optional_path(
+                theme.resources.pptx_reference_doc.as_deref(),
+            ),
         },
-        Err(error) => report.errors.push(format!(
-            "invalid OmniDoc compatibility requirement: {}",
-            error
-        )),
-    }
-    if manifest
-        .compatibility
-        .as_deref()
-        .is_some_and(|profile| profile.trim().is_empty())
-    {
-        report
-            .errors
-            .push("compatibility profile must not be empty".to_string());
-    }
-    if manifest
-        .category
-        .as_deref()
-        .is_some_and(|category| category.trim().is_empty())
-    {
-        report
-            .errors
-            .push("theme category must not be empty".to_string());
-    }
-    let mut recommendations = BTreeSet::new();
-    for recommendation in &manifest.recommended_for {
-        let normalized = recommendation.trim().to_lowercase();
-        if normalized.is_empty() {
-            report
-                .errors
-                .push("theme recommendation must not be empty".to_string());
-        } else if !recommendations.insert(normalized) {
-            report.errors.push(format!(
-                "duplicate theme recommendation: {}",
-                recommendation
-            ));
-        }
-    }
-
-    if manifest.resources.html_css.is_empty()
-        && manifest.resources.epub_css.is_empty()
-        && manifest.resources.latex_packages.is_empty()
-        && manifest.resources.latex_headers.is_empty()
-        && manifest.resources.lua_filters.is_empty()
-        && manifest.resources.templates.is_empty()
-        && manifest.resources.html_template.is_none()
-        && manifest.resources.epub_template.is_none()
-        && manifest.resources.latex_template.is_none()
-        && manifest.resources.docx_reference_doc.is_none()
-        && manifest.resources.pptx_reference_doc.is_none()
-    {
-        report
-            .errors
-            .push("theme bundle must declare at least one resource".to_string());
-    }
-
-    let canonical_library = fs::canonicalize(library).ok();
-    for (kind, resources) in [
-        ("html_css", &manifest.resources.html_css),
-        ("epub_css", &manifest.resources.epub_css),
-        ("latex_packages", &manifest.resources.latex_packages),
-        ("latex_headers", &manifest.resources.latex_headers),
-        ("lua_filters", &manifest.resources.lua_filters),
-        ("templates", &manifest.resources.templates),
-    ] {
-        let mut seen = BTreeSet::new();
-        for relative in resources {
-            if !seen.insert(relative) {
-                report
-                    .errors
-                    .push(format!("duplicate {} theme resource: {}", kind, relative));
-                continue;
-            }
-            let Some(safe) = safe_relative_path(relative) else {
-                report
-                    .errors
-                    .push(format!("unsafe theme resource path: {}", relative));
-                continue;
-            };
-            let resolved = library.join(safe);
-            match resolved.symlink_metadata() {
-                Ok(metadata) if metadata.file_type().is_symlink() => report.errors.push(format!(
-                    "theme resource must not be a symbolic link: {}",
-                    relative
-                )),
-                Ok(metadata) if metadata.is_file() => {
-                    if let (Some(root), Ok(canonical_resource)) =
-                        (&canonical_library, fs::canonicalize(&resolved))
-                    {
-                        if !canonical_resource.starts_with(root) {
-                            report.errors.push(format!(
-                                "theme resource resolves outside the library: {}",
-                                relative
-                            ));
-                        }
-                    }
-                }
-                _ => report
-                    .errors
-                    .push(format!("missing theme resource: {}", relative)),
-            }
-        }
-    }
-    for (kind, resource) in [
-        ("html_template", manifest.resources.html_template.as_deref()),
-        ("epub_template", manifest.resources.epub_template.as_deref()),
-        (
-            "latex_template",
-            manifest.resources.latex_template.as_deref(),
-        ),
-        (
-            "docx_reference_doc",
-            manifest.resources.docx_reference_doc.as_deref(),
-        ),
-        (
-            "pptx_reference_doc",
-            manifest.resources.pptx_reference_doc.as_deref(),
-        ),
-    ] {
-        let Some(relative) = resource else {
-            continue;
-        };
-        let Some(safe) = safe_relative_path(relative) else {
-            report
-                .errors
-                .push(format!("unsafe theme resource path: {}", relative));
-            continue;
-        };
-        let resolved = library.join(safe);
-        match resolved.symlink_metadata() {
-            Ok(metadata) if metadata.file_type().is_symlink() => report.errors.push(format!(
-                "theme resource must not be a symbolic link: {}",
-                relative
-            )),
-            Ok(metadata) if metadata.is_file() => {
-                if let (Some(root), Ok(canonical_resource)) =
-                    (&canonical_library, fs::canonicalize(&resolved))
-                {
-                    if !canonical_resource.starts_with(root) {
-                        report.errors.push(format!(
-                            "theme resource resolves outside the library: {}",
-                            relative
-                        ));
-                    }
-                }
-            }
-            _ => report
-                .errors
-                .push(format!("missing {} theme resource: {}", kind, relative)),
-        }
-    }
-    let mut fonts = BTreeSet::new();
-    for font in &manifest.requirements.fonts {
-        if font.trim().is_empty() {
-            report
-                .errors
-                .push("font requirement must not be empty".to_string());
-        } else if !fonts.insert(font.trim().to_lowercase()) {
-            report
-                .errors
-                .push(format!("duplicate font requirement: {}", font));
-        }
-    }
-    if check_fonts && !manifest.requirements.fonts.is_empty() {
-        validate_installed_fonts(&manifest.requirements.fonts, report);
-    }
-    let mut packages = BTreeSet::new();
-    for package in &manifest.requirements.system_latex_packages {
-        let normalized = package.trim().to_ascii_lowercase();
-        if !valid_latex_package_name(package) {
-            report.errors.push(format!(
-                "invalid system LaTeX package requirement: {}",
-                package
-            ));
-        } else if !packages.insert(normalized) {
-            report.errors.push(format!(
-                "duplicate system LaTeX package requirement: {}",
-                package
-            ));
-        }
-    }
-    if check_latex && !manifest.requirements.system_latex_packages.is_empty() {
-        validate_installed_latex_packages(&manifest.requirements.system_latex_packages, report);
-    }
-    for (key, value) in &manifest.metadata.defaults {
-        if !valid_theme_metadata_key(key) {
-            report
-                .errors
-                .push(format!("invalid theme metadata default key: {}", key));
-        }
-        if value
-            .chars()
-            .any(|character| matches!(character, '\0' | '\n' | '\r'))
-        {
-            report.errors.push(format!(
-                "theme metadata default '{}' must be a single-line scalar",
-                key
-            ));
-        }
+        requirements: theme.requirements.clone(),
+        metadata: theme.metadata.clone(),
+        packages: theme.packages.iter().map(resolved_package_report).collect(),
     }
 }
 
-fn theme_outputs(manifest: &ThemeManifest) -> Vec<String> {
-    let mut outputs = Vec::new();
-    if !manifest.resources.html_css.is_empty() || manifest.resources.html_template.is_some() {
-        outputs.push("html".to_string());
+fn resolved_package_report(package: &ResolvedPackageIdentity) -> ResolvedPackageReport {
+    ResolvedPackageReport {
+        kind: package.kind,
+        scope: package.scope,
+        id: package.id.clone(),
+        version: package.version.clone(),
+        source: package.source.clone(),
+        digest: package.digest.clone(),
+        root: package.root.to_string_lossy().to_string(),
+        compatible_pandoc: package.compatible_pandoc.clone(),
     }
-    if !manifest.resources.epub_css.is_empty() || manifest.resources.epub_template.is_some() {
-        outputs.push("epub".to_string());
-    }
-    if !manifest.resources.latex_packages.is_empty()
-        || !manifest.resources.latex_headers.is_empty()
-        || manifest.resources.latex_template.is_some()
-    {
-        outputs.push("pdf".to_string());
-        outputs.push("latex".to_string());
-    }
-    if manifest.resources.docx_reference_doc.is_some() {
-        outputs.push("docx".to_string());
-    }
-    if manifest.resources.pptx_reference_doc.is_some() {
-        outputs.push("pptx".to_string());
-    }
-    outputs
 }
 
-pub(crate) fn valid_theme_metadata_key(key: &str) -> bool {
-    let mut characters = key.chars();
-    characters
-        .next()
-        .is_some_and(|character| character.is_ascii_alphanumeric() || character == '_')
-        && characters.all(|character| {
-            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
-        })
+fn matching_theme_entry<'a>(
+    catalog: &'a [ThemeCatalogEntry],
+    theme: &ResolvedTheme,
+) -> Option<&'a ThemeCatalogEntry> {
+    let package = theme.packages.last()?;
+    catalog.iter().find(|entry| {
+        entry.id == theme.id
+            && entry.version == theme.version
+            && entry.digest.as_deref() == Some(package.digest.as_str())
+    })
 }
 
-fn validate_installed_fonts(fonts: &[String], report: &mut ThemeReport) {
-    report.font_check_performed = true;
-    for font in fonts.iter().filter(|font| !font.trim().is_empty()) {
-        let output = match Command::new("fc-match")
-            .args(["--format", "%{family}\n", "--", font])
-            .output()
-        {
-            Ok(output) => output,
-            Err(error) => {
-                report.errors.push(format!(
-                    "cannot check theme fonts because fc-match failed: {}",
-                    error
-                ));
-                return;
-            }
-        };
-        if !output.status.success() {
-            report.errors.push(format!(
-                "fc-match failed while checking required font '{}'",
-                font
-            ));
-            continue;
+fn explicit_project(requested: Option<String>) -> Result<Option<PathBuf>> {
+    requested
+        .map(|path| path::determine_project_root(Some(path)))
+        .transpose()
+}
+
+fn catalog_context(requested: Option<String>) -> Result<(Option<PathBuf>, MergedConfig)> {
+    let project_root = match requested {
+        Some(path) => Some(path::determine_project_root(Some(path))?),
+        None => {
+            let current = std::env::current_dir()?;
+            path::locate_project_root(&current)
         }
-        let families = String::from_utf8_lossy(&output.stdout);
-        if !font_family_matches(font, &families) {
-            report.missing_fonts.push(font.clone());
-            report.errors.push(format!(
-                "required font '{}' is not installed (fontconfig matched '{}')",
-                font,
-                families.lines().next().unwrap_or("unknown").trim()
-            ));
-        }
-    }
+    };
+    let config = load_config(project_root.as_deref())?;
+    Ok((project_root, config))
+}
+
+fn load_config(project_root: Option<&Path>) -> Result<MergedConfig> {
+    Ok(create_config_manager(project_root, CliOverrides::new())?
+        .get_merged()
+        .clone())
+}
+
+fn display_paths(paths: &[PathBuf]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|path| path.to_string_lossy().to_string())
+        .collect()
+}
+
+fn display_optional_path(path: Option<&Path>) -> Option<String> {
+    path.map(|path| path.to_string_lossy().to_string())
+}
+
+fn config_diff(path: &Path, existed: bool, before: &str, after: &str) -> String {
+    let path = path.to_string_lossy();
+    let old_label = if existed {
+        format!("a/{path}")
+    } else {
+        "/dev/null".to_string()
+    };
+    let new_label = format!("b/{path}");
+    TextDiff::from_lines(before, after)
+        .unified_diff()
+        .header(&old_label, &new_label)
+        .to_string()
 }
 
 pub(crate) fn font_family_matches(requested: &str, families: &str) -> bool {
@@ -635,239 +715,44 @@ pub(crate) fn valid_latex_package_name(package: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
 }
 
-fn validate_installed_latex_packages(packages: &[String], report: &mut ThemeReport) {
-    report.latex_check_performed = true;
-    for package in packages
-        .iter()
-        .filter(|package| valid_latex_package_name(package))
-    {
-        let file = format!("{package}.sty");
-        let output = match Command::new("kpsewhich").args(["--", &file]).output() {
-            Ok(output) => output,
-            Err(error) => {
-                report.errors.push(format!(
-                    "cannot check LaTeX packages because kpsewhich failed: {}",
-                    error
-                ));
-                return;
-            }
-        };
-        if !output.status.success() || String::from_utf8_lossy(&output.stdout).trim().is_empty() {
-            report.missing_latex_packages.push(package.clone());
-            report.errors.push(format!(
-                "required system LaTeX package '{}' is not installed",
-                package
-            ));
-        }
+fn theme_json_mode(command: &ThemeSubcommand) -> bool {
+    match command {
+        ThemeSubcommand::Install { json, .. }
+        | ThemeSubcommand::Uninstall { json, .. }
+        | ThemeSubcommand::List { json, .. }
+        | ThemeSubcommand::Inspect { json, .. }
+        | ThemeSubcommand::Validate { json, .. }
+        | ThemeSubcommand::Apply { json, .. } => *json,
     }
 }
 
-fn safe_relative_path(relative: &str) -> Option<PathBuf> {
-    let path = Path::new(relative);
-    if path.is_absolute()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return None;
-    }
-    Some(path.to_path_buf())
-}
-
-fn print_reports(reports: &[ThemeReport], json: bool, detailed: bool) -> Result<()> {
-    if json {
-        let output = if detailed && reports.len() == 1 {
-            serde_json::to_string_pretty(&reports[0])
-        } else {
-            serde_json::to_string_pretty(reports)
-        }
-        .map_err(|error| OmniDocError::Other(error.to_string()))?;
-        println!("{}", output);
-        return Ok(());
-    }
-    if reports.is_empty() {
-        println!("No installed theme manifests found.");
-        return Ok(());
-    }
-    for report in reports {
-        let name = report
-            .theme
-            .as_ref()
-            .map(|theme| theme.name.as_str())
-            .unwrap_or(&report.manifest);
-        let version = report
-            .theme
-            .as_ref()
-            .map(|theme| theme.version.as_str())
-            .unwrap_or("unknown");
-        println!(
-            "{} {} [{}] ({}){}",
-            name,
-            version,
-            report
-                .theme
-                .as_ref()
-                .and_then(|theme| theme.category.as_deref())
-                .unwrap_or("general"),
-            if report.valid { "valid" } else { "invalid" },
-            report
-                .theme
-                .as_ref()
-                .and_then(|theme| theme.description.as_deref())
-                .map(|description| format!(" - {description}"))
-                .unwrap_or_default()
-        );
-        if !detailed && !report.outputs.is_empty() {
-            println!("  outputs: {}", report.outputs.join(", "));
-        }
-        if detailed {
-            if let Some(theme) = &report.theme {
-                println!("  manifest: {}", report.manifest);
-                println!(
-                    "  category: {}",
-                    theme.category.as_deref().unwrap_or("general")
-                );
-                println!(
-                    "  recommended for: {}",
-                    if theme.recommended_for.is_empty() {
-                        "not specified".to_string()
-                    } else {
-                        theme.recommended_for.join(", ")
-                    }
-                );
-                println!("  outputs: {}", report.outputs.join(", "));
-                println!(
-                    "  compatibility: {}",
-                    theme.compatibility.as_deref().unwrap_or("default")
-                );
-                println!("  OmniDoc: {}", theme.compatible_omnidoc);
-                println!("  HTML CSS: {}", theme.resources.html_css.join(", "));
-                println!("  EPUB CSS: {}", theme.resources.epub_css.join(", "));
-                println!(
-                    "  LaTeX packages: {}",
-                    theme.resources.latex_packages.join(", ")
-                );
-                println!(
-                    "  LaTeX headers: {}",
-                    theme.resources.latex_headers.join(", ")
-                );
-                println!("  Lua filters: {}", theme.resources.lua_filters.join(", "));
-                println!(
-                    "  HTML template: {}",
-                    theme
-                        .resources
-                        .html_template
-                        .as_deref()
-                        .unwrap_or("default")
-                );
-                println!(
-                    "  EPUB template: {}",
-                    theme
-                        .resources
-                        .epub_template
-                        .as_deref()
-                        .unwrap_or("default")
-                );
-                println!(
-                    "  LaTeX template: {}",
-                    theme
-                        .resources
-                        .latex_template
-                        .as_deref()
-                        .unwrap_or("default")
-                );
-                println!(
-                    "  DOCX reference: {}",
-                    theme
-                        .resources
-                        .docx_reference_doc
-                        .as_deref()
-                        .unwrap_or("default")
-                );
-                println!(
-                    "  PPTX reference: {}",
-                    theme
-                        .resources
-                        .pptx_reference_doc
-                        .as_deref()
-                        .unwrap_or("default")
-                );
-                println!("  fonts: {}", theme.requirements.fonts.join(", "));
-                println!(
-                    "  system LaTeX packages: {}",
-                    theme.requirements.system_latex_packages.join(", ")
-                );
-                println!(
-                    "  metadata defaults: {}",
-                    theme
-                        .metadata
-                        .defaults
-                        .iter()
-                        .map(|(key, value)| format!("{key}={value}"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-            }
-        }
-        for error in &report.errors {
-            println!("  error: {}", error);
-        }
-    }
+fn print_json(value: &impl Serialize) -> Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(value)
+            .map_err(|error| OmniDocError::Other(error.to_string()))?
+    );
     Ok(())
-}
-
-fn ensure_valid(reports: &[ThemeReport]) -> Result<()> {
-    if reports.is_empty() {
-        return Err(OmniDocError::Other(
-            "no installed theme manifests found".to_string(),
-        ));
-    }
-    if reports.iter().all(|report| report.valid) {
-        Ok(())
-    } else {
-        Err(OmniDocError::Other(
-            "theme bundle validation failed".to_string(),
-        ))
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        font_family_matches, safe_relative_path, valid_latex_package_name, valid_theme_metadata_key,
-    };
-
-    #[test]
-    fn rejects_unsafe_theme_paths() {
-        assert!(safe_relative_path("pandoc/css/theme.css").is_some());
-        assert!(safe_relative_path("../theme.css").is_none());
-        assert!(safe_relative_path("/theme.css").is_none());
-    }
+    use super::{font_family_matches, valid_latex_package_name};
 
     #[test]
     fn distinguishes_requested_fonts_from_fontconfig_fallbacks() {
         assert!(font_family_matches(
             "Noto Serif CJK SC",
-            "Noto Serif CJK SC,Noto Serif CJK SC Medium\n"
+            "Noto Serif CJK SC,Noto Serif CJK TC\n"
         ));
         assert!(!font_family_matches("OmniDoc Missing Font", "Noto Sans\n"));
     }
 
     #[test]
-    fn validates_portable_latex_package_names() {
+    fn validates_latex_package_names_before_invoking_kpsewhich() {
         assert!(valid_latex_package_name("tcolorbox"));
         assert!(valid_latex_package_name("xeCJK"));
         assert!(!valid_latex_package_name("../outside"));
         assert!(!valid_latex_package_name("package.sty"));
-    }
-
-    #[test]
-    fn validates_theme_metadata_keys() {
-        assert!(valid_theme_metadata_key("lang"));
-        assert!(valid_theme_metadata_key("link-citations"));
-        assert!(valid_theme_metadata_key("pdf.documentclass"));
-        assert!(!valid_theme_metadata_key(""));
-        assert!(!valid_theme_metadata_key("bad key"));
-        assert!(!valid_theme_metadata_key("-bad"));
     }
 }

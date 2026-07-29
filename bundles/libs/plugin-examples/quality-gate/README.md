@@ -1,13 +1,17 @@
-# Documentation quality gate
+# Quality gate plugin
 
-This example adds a `lint_rule` hook. `omnidoc lint` and strict builds scan
-Markdown sources while ignoring generated/build directories and fenced code.
+This package is a Pandoc Lua filter. It records warnings for TODO/FIXME
+markers and for documents without an H1. Set this metadata value to make the
+filter fail the build when it finds an issue:
 
-The rule reports:
+```yaml
+quality-gate-fail: true
+```
 
-- `TODO` and `FIXME` markers as warnings;
-- Markdown files that contain prose but no level-one heading as warnings.
+Install, trust, and enable it explicitly:
 
-The script only reads project sources and always emits OmniDoc's portable
-`severity:path:line:column:message` diagnostic format. Edit `scripts/lint.py`
-to add organization-specific wording, front-matter, or heading rules.
+```bash
+omnidoc plugin install-example quality-gate --project ./docs
+omnidoc plugin trust omnidoc/quality-gate@=1.0.0 --project ./docs
+omnidoc plugin enable omnidoc/quality-gate@=1.0.0 ./docs
+```

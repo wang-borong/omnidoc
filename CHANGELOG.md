@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+- Replaced the manifest-v1 lifecycle-hook plugin model with versioned
+  `omnidoc-package.toml` packages. OmniDoc no longer embeds or directly hosts
+  Lua: automatic extensions are Pandoc `--lua-filter` scripts, explicit
+  commands run through `pandoc lua`, and a plugin executes only when its exact
+  ID/version/content digest is locally trusted and the project explicitly
+  enables it.
+- Added user and project extension stores, directory/archive/pinned-HTTPS
+  installation, immutable version directories, explicit replacement and
+  uninstall flows, archive traversal/symlink/size defenses, and bundled
+  Pandoc Lua examples for quality checks, metadata stamping, and word counts.
+- Added manifest-v2 theme packages with inheritance, semantic cross-format
+  tokens, format-specific resources, project-over-user-over-builtin
+  resolution, and install/inspect/validate/apply workflows. Theme-owned Lua is
+  no longer executed.
+- Bumped cache and lock contracts to record every resolved theme inheritance
+  package and enabled plugin package by source and SHA-256 payload digest, and
+  migrated Golden Book/PDF release checks to the new portable resource names.
+- Enforced declared Pandoc compatibility at theme selection and plugin
+  enable/validation/execution time, required exact project plugin version pins,
+  and replaced basename-derived plugin depfiles with explicit globally unique
+  dependency keys.
+- Hardened extension installation and identity handling with portable UTF-8
+  archive paths, case-insensitive collision and store-symlink rejection,
+  all-hop HTTPS enforcement, transaction directories outside package discovery,
+  one-root-manifest/canonical-layout enforcement, exact SemVer build-metadata
+  pins, and an unambiguous payload digest that covers files and empty
+  directories while excluding only the installation receipt.
+- Serialized extension-store mutation against builds, validation, trust, and
+  command execution; made trust-file updates concurrency-safe; and allowed
+  exact uninstall recovery for packages with missing resources or malformed
+  manifests.
+- Added deterministic interrupted-replacement recovery, preserving both the
+  promoted payload and backup when their digests conflict instead of guessing.
+- Made Lua syntax validation compile scripts without executing their top-level
+  code, exposed installable LaTeX packages through Tectonic search paths or
+  `TEXINPUTS`, and taught watch mode to refresh configuration, library,
+  extension-store, trust-file, and external-dependency watches after builds
+  without treating reads as changes or repeatedly re-arming stable roots.
+- Made explicit child theme output lists, including an empty list, override
+  inherited capabilities and validate the fully resolved inheritance chain
+  before a theme can be selected.
+
 ## 1.8.1 - 2026-07-29
 
 - Preserved project `header-includes` from Pandoc metadata files and configured

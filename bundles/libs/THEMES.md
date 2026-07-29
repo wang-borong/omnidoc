@@ -39,8 +39,28 @@ OmniDoc resolves the selected theme's resources for each build target:
   `pandoc.reference_doc` explicitly.
 - PPTX receives a theme-specific reference deck unless the project sets
   `pandoc.pptx_reference_doc` or `pandoc.reference_doc` explicitly.
-- Lua filters and every selected resource are recorded in the dependency graph,
+- Core/plugin Lua filters and every selected theme resource are recorded in the dependency graph,
   cache input, report, and lock file.
+
+For installable manifest-v2 themes, an explicit `theme.outputs` list is
+authoritative. Resources and generated token assets are applied only to those
+writers; validation rejects resource/output mismatches. If `theme.outputs` is
+omitted, OmniDoc infers it from the declared resources and semantic tokens. An
+explicit child list replaces its inherited output set; an omitted child list
+inherits and extends the parent's capabilities. OmniDoc validates the fully
+resolved chain before applying it.
+
+Installable themes use the canonical
+`<store>/themes/<ID segments>/<VERSION>/omnidoc-package.toml` layout with one
+root manifest. Package IDs, versions, archive paths, case collisions, and
+symbolic links are checked for cross-platform safety. Replacement is
+transactional and automatically recovered by the next mutating extension
+command; digest conflicts preserve the backup for inspection.
+
+For PDF builds, directories containing declared installable
+`theme.resources.latex_packages` are searched child-first. Tectonic receives
+`-Zsearch-path`; XeLaTeX, LuaLaTeX, and pdfLaTeX receive a prepended
+`TEXINPUTS` while retaining the existing/default TeX search path.
 
 All bundled themes use CJK-aware Noto font families. Run environment checks
 when producing release artifacts:

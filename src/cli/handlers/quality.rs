@@ -4,8 +4,9 @@ use crate::cli::handlers::build::{build_project_outputs, BuildRunOptions};
 use crate::cli::handlers::common::{create_config_manager, create_config_manager_default};
 use crate::cli::handlers::lib::library_diagnostic;
 use crate::cli::handlers::theme::theme_diagnostic;
-use crate::config::CliOverrides;
+use crate::config::{CliOverrides, MergedConfig};
 use crate::error::{OmniDocError, Result};
+use crate::extensions::{acquire_extension_store_read_locks, ExtensionStoreReadLocks};
 use crate::project_tools;
 use crate::utils::path;
 use serde::Serialize;
@@ -28,6 +29,7 @@ pub fn handle_doctor(
     let project_path = path::determine_project_context(path)?;
     let config_manager = create_config_manager_default(Some(&project_path))?;
     let config = config_manager.get_merged().clone();
+    let _extension_locks = configured_extension_locks(&project_path, &config, "run diagnostics")?;
     let mut checks = Vec::new();
     let executor = BuildExecutor::new(config.tool_paths.clone());
     let entry_is_latex = detect_project_type(&config, &project_path) == ProjectType::Latex;
@@ -81,31 +83,23 @@ pub fn handle_doctor(
             ok,
             detail,
         });
-        if let Some(theme) = config.theme_name.as_deref() {
-            let tectonic = resolved_pdf_engine
-                .as_ref()
-                .is_some_and(ResolvedLatexEngine::is_tectonic);
-            let (ok, detail) =
-                theme_diagnostic(Path::new(lib_path), theme, has_pdf, has_pdf && !tectonic);
-            checks.push(DoctorCheck {
-                name: format!("theme:{theme}"),
-                ok,
-                detail,
-            });
-        }
     } else {
         checks.push(DoctorCheck {
             name: "omnidoc-libs".to_string(),
             ok: false,
             detail: "library path is not configured".to_string(),
         });
-        if let Some(theme) = config.theme_name.as_deref() {
-            checks.push(DoctorCheck {
-                name: format!("theme:{theme}"),
-                ok: false,
-                detail: "theme cannot be resolved without a configured library path".to_string(),
-            });
-        }
+    }
+    if let Some(theme) = config.theme_name.as_deref() {
+        let tectonic = resolved_pdf_engine
+            .as_ref()
+            .is_some_and(ResolvedLatexEngine::is_tectonic);
+        let (ok, detail) = theme_diagnostic(&project_path, &config, has_pdf, has_pdf && !tectonic);
+        checks.push(DoctorCheck {
+            name: format!("theme:{theme}"),
+            ok,
+            detail,
+        });
     }
 
     let issues = project_tools::validate_config(&project_path, &config);
@@ -232,7 +226,10 @@ fn doctor_tool(executor: &BuildExecutor, key: &str, name: &str) -> DoctorCheck {
 pub fn handle_config_validate(path: Option<String>) -> Result<()> {
     let project_path = path::determine_project_root(path)?;
     let config_manager = create_config_manager_default(Some(&project_path))?;
-    let issues = project_tools::validate_config(&project_path, config_manager.get_merged());
+    let config = config_manager.get_merged();
+    let _extension_locks =
+        configured_extension_locks(&project_path, config, "validate configuration")?;
+    let issues = project_tools::validate_config(&project_path, config);
     project_tools::print_issues(&issues);
     if project_tools::has_errors(&issues) {
         return Err(OmniDocError::Config(
@@ -245,12 +242,10 @@ pub fn handle_config_validate(path: Option<String>) -> Result<()> {
 pub fn handle_lint(path: Option<String>, strict: bool) -> Result<()> {
     let project_path = path::determine_project_root(path)?;
     let config_manager = create_config_manager_default(Some(&project_path))?;
-    let mut issues = project_tools::validate_config(&project_path, config_manager.get_merged());
+    let config = config_manager.get_merged();
+    let _extension_locks = configured_extension_locks(&project_path, config, "lint project")?;
+    let mut issues = project_tools::validate_config(&project_path, config);
     issues.extend(project_tools::lint_project(&project_path));
-    issues.extend(project_tools::run_plugin_lint_rules(
-        &project_path,
-        config_manager.get_merged(),
-    ));
     project_tools::print_issues(&issues);
     if (strict && project_tools::has_warnings_or_errors(&issues))
         || project_tools::has_errors(&issues)
@@ -263,7 +258,17 @@ pub fn handle_lint(path: Option<String>, strict: bool) -> Result<()> {
 pub fn handle_deps(path: Option<String>, json: bool) -> Result<()> {
     let project_path = path::determine_project_root(path)?;
     let config_manager = create_config_manager_default(Some(&project_path))?;
-    let graph = project_tools::dependency_graph(&project_path, config_manager.get_merged());
+    let config = config_manager.get_merged();
+    let _extension_locks =
+        configured_extension_locks(&project_path, config, "inspect dependencies")?;
+    let issues = project_tools::validate_config(&project_path, config);
+    if project_tools::has_errors(&issues) {
+        project_tools::print_issues(&issues);
+        return Err(OmniDocError::Config(
+            "configuration validation failed".to_string(),
+        ));
+    }
+    let graph = project_tools::dependency_graph(&project_path, config);
 
     if json {
         let content = serde_json::to_string_pretty(&graph)
@@ -305,8 +310,20 @@ pub fn handle_ci(path: Option<String>, outputs: Vec<String>) -> Result<()> {
 
 pub fn handle_lock(path: Option<String>, check: bool, update: bool) -> Result<()> {
     let project_path = path::determine_project_root(path)?;
+    let _project_lock = (!check)
+        .then(|| project_tools::acquire_project_write_lock(&project_path, "update lock file"))
+        .transpose()?;
     let base_manager = create_config_manager_default(Some(&project_path))?;
     let base_config = base_manager.get_merged();
+    let _extension_locks = configured_extension_locks(
+        &project_path,
+        base_config,
+        if check {
+            "check the project lock"
+        } else {
+            "write the project lock"
+        },
+    )?;
     let outputs = if base_config.outputs.is_empty() {
         vec![base_config.to.clone().unwrap_or_else(|| "pdf".to_string())]
     } else {
@@ -320,6 +337,13 @@ pub fn handle_lock(path: Option<String>, check: bool, update: bool) -> Result<()
                 CliOverrides::new().with_to(Some(output.clone())),
             )?;
             let config = manager.get_merged().clone();
+            let issues = project_tools::validate_config(&project_path, &config);
+            if project_tools::has_errors(&issues) {
+                project_tools::print_issues(&issues);
+                return Err(OmniDocError::Config(
+                    "configuration validation failed".to_string(),
+                ));
+            }
             let graph = project_tools::dependency_graph(&project_path, &config);
             Ok((output, config, graph))
         })
@@ -349,9 +373,17 @@ pub fn handle_lock(path: Option<String>, check: bool, update: bool) -> Result<()
         println!("omnidoc.lock already exists; use --update to rewrite it");
         return Ok(());
     }
-    let _project_lock =
-        project_tools::acquire_project_write_lock(&project_path, "update lock file")?;
     project_tools::write_lock_targets(&project_path, &inputs)?;
     println!("Wrote {}", project_path.join("omnidoc.lock").display());
     Ok(())
+}
+
+fn configured_extension_locks(
+    project_path: &Path,
+    config: &MergedConfig,
+    operation: &str,
+) -> Result<Option<ExtensionStoreReadLocks>> {
+    (config.theme_name.is_some() || !config.plugins_enabled.is_empty())
+        .then(|| acquire_extension_store_read_locks(Some(project_path), config, operation))
+        .transpose()
 }

@@ -33,6 +33,12 @@ impl ProjectConfig {
     pub fn from_file(path: &Path) -> Result<Self> {
         use crate::utils::fs;
         let content = fs::read_to_string(path)?;
+        crate::config::schema::validate_plugin_configuration(&content).map_err(|error| {
+            OmniDocError::Config(format!("Failed to parse project config: {error}"))
+        })?;
+        crate::config::schema::validate_project_extension_scope(&content).map_err(|error| {
+            OmniDocError::Config(format!("Failed to parse project config: {error}"))
+        })?;
 
         let config: ConfigSchema = toml::from_str(&content)
             .map_err(|e| OmniDocError::Config(format!("Failed to parse project config: {}", e)))?;
@@ -139,5 +145,22 @@ mod tests {
             .expect("project config");
 
         assert_eq!(config.path(), project.path().join(".omnidoc.toml"));
+    }
+
+    #[test]
+    fn obsolete_plugin_hooks_fail_project_loading() {
+        let project = tempfile::tempdir().expect("project");
+        let config_path = project.path().join(".omnidoc.toml");
+        fs::write(
+            &config_path,
+            "[project]\nentry = 'main.md'\n[plugins]\npre_build = ['legacy']\n",
+        )
+        .expect("project config");
+
+        let error = match ProjectConfig::from_file(&config_path) {
+            Ok(_) => panic!("obsolete plugin hooks must fail loading"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("pre_build"));
     }
 }

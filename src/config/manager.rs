@@ -7,7 +7,7 @@ use crate::utils::directories::data_local_dir;
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// 统一配置管理器
 /// 处理配置合并：命令行 > 项目配置 > 全局配置
@@ -42,6 +42,9 @@ pub struct MergedConfig {
     pub theme_name: Option<String>,
     pub theme_version: Option<String>,
     pub theme_compatibility: Option<String>,
+    pub extension_path: Option<String>,
+    pub plugins_enabled: Vec<String>,
+    pub project_root: Option<String>,
     pub pandoc_toc: bool,
     pub pandoc_options: Vec<String>,
     pub pandoc_format_options: BTreeMap<String, Vec<String>>,
@@ -245,6 +248,20 @@ impl ConfigManager {
         let theme_version = selected_theme.and_then(|theme| theme.version.clone());
         let theme_compatibility = selected_theme.and_then(|theme| theme.compatibility.clone());
 
+        let extension_path = global_config
+            .and_then(|config| config.extensions.as_ref())
+            .and_then(|config| config.extensions.as_ref())
+            .and_then(|config| config.path.as_deref())
+            .map(|path| resolve_global_config_path(global.path(), path));
+        let plugins_enabled = project_config
+            .and_then(|config| config.plugins.as_ref())
+            .and_then(|config| config.plugins.as_ref())
+            .and_then(|config| config.enabled.clone())
+            .unwrap_or_default();
+        let project_root = project
+            .and_then(|project| project.path().parent())
+            .map(|path| path.to_string_lossy().to_string());
+
         // 合并 Pandoc 配置
         let pandoc_config = project_config
             .and_then(|c| c.pandoc.as_ref())
@@ -347,6 +364,9 @@ impl ConfigManager {
             theme_name,
             theme_version,
             theme_compatibility,
+            extension_path,
+            plugins_enabled,
+            project_root,
             pandoc_toc,
             pandoc_options,
             pandoc_format_options,
@@ -529,11 +549,25 @@ fn merge_path_config(
     paths
 }
 
+fn resolve_global_config_path(config_file: &Path, configured: &str) -> String {
+    let path = PathBuf::from(configured);
+    let resolved = if path.is_absolute() {
+        path
+    } else {
+        config_file
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(path)
+    };
+    resolved.to_string_lossy().to_string()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{merge_path_config, merge_tool_paths};
+    use super::{merge_path_config, merge_tool_paths, resolve_global_config_path};
     use crate::config::schema::ConfigSchema;
     use std::collections::HashMap;
+    use std::path::PathBuf;
 
     #[test]
     fn project_tools_override_global_tools() {
@@ -571,5 +605,25 @@ mod tests {
         assert_eq!(paths.build_dir, "project-build");
         assert_eq!(paths.main_md, "content/main.md");
         assert_eq!(paths.biblio_dir, "shared-biblio");
+    }
+
+    #[test]
+    fn relative_extension_store_is_resolved_from_the_global_config_directory() {
+        let root = tempfile::tempdir().expect("config root");
+        let config_dir = root.path().join("config");
+        let config = config_dir.join("omnidoc.toml");
+        let absolute_store = root.path().join("absolute-extensions");
+
+        assert_eq!(
+            PathBuf::from(resolve_global_config_path(&config, "extensions")),
+            config_dir.join("extensions")
+        );
+        assert_eq!(
+            PathBuf::from(resolve_global_config_path(
+                &config,
+                &absolute_store.to_string_lossy()
+            )),
+            absolute_store
+        );
     }
 }

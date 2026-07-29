@@ -103,7 +103,8 @@ if [[ "$pdf_engine" == "tectonic" ]]; then
   "$bin" theme validate engineering-book --check-fonts --json > "$work/theme.json"
   jq -e '
     .[0]
-    | .valid == true
+    | .package.valid == true
+      and .resolved == true
       and .font_check_performed == true
       and (.missing_fonts | length == 0)
       and .latex_check_performed == false
@@ -112,7 +113,8 @@ else
   "$bin" theme validate engineering-book --check-fonts --check-latex --json > "$work/theme.json"
   jq -e '
     .[0]
-    | .valid == true
+    | .package.valid == true
+      and .resolved == true
       and .font_check_performed == true
       and (.missing_fonts | length == 0)
       and .latex_check_performed == true
@@ -214,8 +216,18 @@ lock_text = lock_path.read_text(encoding="utf-8")
 if str(lock_path.parent.parent) in lock_text:
     raise SystemExit("lock contains a machine-specific temporary path")
 lock = tomllib.loads(lock_text)
-if lock.get("lock_version") != 4:
-    raise SystemExit("expected lock schema v4")
+if lock.get("lock_version") != 5:
+    raise SystemExit("expected lock schema v5")
+packages = lock.get("packages", [])
+if not any(
+    package.get("kind") == "theme"
+    and package.get("id") == "engineering-book"
+    and package.get("version") == "1.1.0"
+    and package.get("source") == "builtin"
+    and package.get("digest", "").startswith("sha256:")
+    for package in packages
+):
+    raise SystemExit("missing locked engineering-book theme package")
 target = lock.get("targets", {}).get("pdf")
 if target is None:
     raise SystemExit("missing PDF lock target")
@@ -258,9 +270,9 @@ for expected in {
         raise SystemExit(f"missing PDF dependency: {expected}")
 resources = {resource["logical_name"] for resource in target.get("resources", [])}
 for expected in {
-    "theme-manifest:engineering-book",
-    "theme-latex-header:pandoc/headers/engineering-book.tex",
-    "theme-latex-package:texmf/tex/common/omni-engineering-book.sty",
+    "theme-package:engineering-book@1.1.0:themes/engineering-book.toml",
+    "theme-latex-header:engineering-book@1.1.0:pandoc/headers/engineering-book.tex",
+    "theme-latex-package:engineering-book@1.1.0:texmf/tex/common/omni-engineering-book.sty",
 }:
     if expected not in resources:
         raise SystemExit(f"missing PDF resource: {expected}")

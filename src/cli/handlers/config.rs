@@ -249,6 +249,26 @@ pub fn handle_config_set(
         dry_run || diff,
         diff,
         json,
+        false,
+    )
+}
+
+pub(crate) fn handle_project_config_set_locked(
+    key: String,
+    value: String,
+    project_root: &Path,
+    json: bool,
+) -> Result<()> {
+    handle_config_write(
+        ConfigWriteOperation::Set,
+        key,
+        Some(value),
+        Some(project_root.to_string_lossy().to_string()),
+        ConfigWriteScope::Project,
+        false,
+        false,
+        json,
+        true,
     )
 }
 
@@ -269,6 +289,7 @@ pub fn handle_config_unset(
         dry_run || diff,
         diff,
         json,
+        false,
     )
 }
 
@@ -282,6 +303,7 @@ fn handle_config_write(
     dry_run: bool,
     include_diff: bool,
     json: bool,
+    project_lock_held: bool,
 ) -> Result<()> {
     let result = (|| {
         let key = key.trim().to_string();
@@ -302,16 +324,20 @@ fn handle_config_write(
         )?;
 
         if !dry_run && plan.report.changed {
-            let _project_lock = target
-                .project_root
-                .as_deref()
-                .map(|root| {
-                    crate::project_tools::acquire_project_write_lock(
-                        root,
-                        "update project configuration",
-                    )
-                })
-                .transpose()?;
+            let _project_lock = if project_lock_held {
+                None
+            } else {
+                target
+                    .project_root
+                    .as_deref()
+                    .map(|root| {
+                        crate::project_tools::acquire_project_write_lock(
+                            root,
+                            "update project configuration",
+                        )
+                    })
+                    .transpose()?
+            };
 
             if target.project_root.is_some() {
                 plan = plan_config_write(
@@ -570,6 +596,12 @@ fn toml_document_json(content: &str, path: &Path) -> Result<Value> {
 }
 
 fn validate_config_schema(content: &str, path: &Path, key: &str) -> Result<ConfigSchema> {
+    crate::config::schema::validate_plugin_configuration(content).map_err(|error| {
+        OmniDocError::Config(format!(
+            "Value for '{key}' is not valid in {}: {error}",
+            path.display()
+        ))
+    })?;
     let config = toml::from_str::<ConfigSchema>(content).map_err(|error| {
         OmniDocError::Config(format!(
             "Value for '{key}' is not valid in {}: {error}",
@@ -758,6 +790,8 @@ fn is_known_write_root(root: &str) -> bool {
             | "figure"
             | "pandoc"
             | "theme"
+            | "extensions"
+            | "plugins"
             | "tools"
             | "tectonic"
             | "paths"
@@ -777,6 +811,8 @@ fn section_child_example(segments: &[&str]) -> Option<&'static str> {
         ["pandoc"] => Some("pandoc.toc"),
         ["pandoc", "format_options"] => Some("pandoc.format_options.html"),
         ["theme"] => Some("theme.name"),
+        ["extensions"] => Some("extensions.path"),
+        ["plugins"] => Some("plugins.enabled"),
         ["tools"] => Some("tools.pandoc"),
         ["tectonic"] => Some("tectonic.only_cached"),
         ["paths"] => Some("paths.build_dir"),
@@ -789,7 +825,15 @@ fn key_allowed_in_scope(segments: &[&str], scope: ConfigWriteScope) -> bool {
     match scope {
         ConfigWriteScope::Global => matches!(
             root,
-            "author" | "lib" | "env" | "theme" | "tools" | "tectonic" | "paths" | "template_dir"
+            "author"
+                | "lib"
+                | "env"
+                | "theme"
+                | "extensions"
+                | "tools"
+                | "tectonic"
+                | "paths"
+                | "template_dir"
         ),
         ConfigWriteScope::Project => matches!(
             root,
@@ -799,6 +843,7 @@ fn key_allowed_in_scope(segments: &[&str], scope: ConfigWriteScope) -> bool {
                 | "figure"
                 | "pandoc"
                 | "theme"
+                | "plugins"
                 | "tools"
                 | "tectonic"
                 | "paths"

@@ -57,7 +57,7 @@ rg -q 'id="本章小结-1"|id="本章小结-2"' "$html"
 rg -q '<html[^>]+lang="zh-CN"' "$html"
 rg -q 'omnidoc-base-css' "$lock"
 rg -q 'lua-filter:display-math.lua' "$lock"
-rg -q 'theme-manifest:engineering-book' "$lock"
+rg -q 'theme-package:engineering-book@1.1.0:themes/engineering-book.toml' "$lock"
 rg -q 'chapters/chapter-one.md' "$include_depfile"
 rg -q 'chapters/nested/details.md' "$include_depfile"
 rg -q 'assets/example.rs' "$include_code_depfile"
@@ -83,8 +83,8 @@ import tomllib
 
 lock = tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 package = tomllib.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
-if lock.get("lock_version") != 4:
-    raise SystemExit("expected lock schema v4")
+if lock.get("lock_version") != 5:
+    raise SystemExit("expected lock schema v5")
 library = lock.get("library", {})
 if library.get("version") != package["package"]["version"]:
     raise SystemExit(f"unexpected omnidoc-libs version: {library.get('version')}")
@@ -92,6 +92,16 @@ if not library.get("manifest_digest", "").startswith("blake3:"):
     raise SystemExit("missing omnidoc-libs manifest digest")
 if not library.get("checksums_digest", "").startswith("blake3:"):
     raise SystemExit("missing omnidoc-libs checksum digest")
+packages = lock.get("packages", [])
+if not any(
+    package.get("kind") == "theme"
+    and package.get("id") == "engineering-book"
+    and package.get("version") == "1.1.0"
+    and package.get("source") == "builtin"
+    and package.get("digest", "").startswith("sha256:")
+    for package in packages
+):
+    raise SystemExit("missing locked engineering-book theme package")
 targets = lock.get("targets", {})
 if set(targets) != {"html", "epub"}:
     raise SystemExit(f"unexpected lock targets: {sorted(targets)}")
@@ -176,7 +186,7 @@ jq -e '
   .reports[0]
   | .skipped == false
     and .cache_reason == "input_digest_changed"
-    and any(.cache_details[]; startswith("resource_changed:omnidoc-libs:theme-manifest"))
+    and any(.cache_details[]; startswith("resource_changed:omnidoc-libs:theme-package:engineering-book@1.1.0:themes/engineering-book.toml"))
 ' "$report" >/dev/null
 
 if command -v epubcheck >/dev/null; then

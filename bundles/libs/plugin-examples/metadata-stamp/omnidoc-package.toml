@@ -1,0 +1,16 @@
+manifest_version = 2
+kind = "plugin"
+id = "omnidoc/metadata-stamp"
+name = "Metadata Stamp"
+version = "1.0.0"
+description = "Adds deterministic OmniDoc generator metadata through a Pandoc Lua filter"
+compatible_omnidoc = ">=1.8.0,<2.0.0"
+compatible_pandoc = ">=3.0,<4.0"
+
+[plugin]
+api_version = 1
+
+[[plugin.filters]]
+script = "filters/metadata-stamp.lua"
+formats = ["pdf", "html", "epub", "docx", "pptx", "latex"]
+order = 700

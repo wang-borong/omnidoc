@@ -64,7 +64,7 @@ related tools by workflow:
 omnidoc check --help       # diagnostics, validation, dependencies, locks, CI
 omnidoc convert --help     # standalone Markdown conversion
 omnidoc template --help    # template discovery and validation
-omnidoc plugin --help      # plugin discovery and validation
+omnidoc plugin --help      # install, trust, enable, and run Pandoc Lua plugins
 omnidoc lib --help         # managed library lifecycle
 ```
 
@@ -220,7 +220,7 @@ template selector; pass `--type <KEY>` or `--defaults` explicitly.
    resolved resource digests, and detected Pandoc/pandoc-crossref/LaTeX
    toolchain versions. Cache details identify added, removed, or changed
    dependencies, resources, configuration fields, and toolchain components.
-   Cache schema v6 stores these component fingerprints locally; older cache
+   Cache schema v7 stores these component fingerprints locally; older cache
    records are rebuilt automatically and reported as `cache_schema_changed`.
 
    The Markdown and code include filters emit authoritative depfiles under
@@ -288,8 +288,11 @@ template selector; pass `--type <KEY>` or `--defaults` explicitly.
 
    [theme]
    name = "engineering-book"
-   version = "1"
+   version = "=1.0.0"
    compatibility = "readium"
+
+   [plugins]
+   enabled = ["acme/document-tools@=1.2.0"]
 
    [pandoc]
    toc = true
@@ -331,10 +334,11 @@ template selector; pass `--type <KEY>` or `--defaults` explicitly.
    are recorded in
    [ADR 0001](docs/decisions/0001-tectonic-engine-policy.md).
 
-   A selected theme supplies default HTML/EPUB CSS and required Lua filters.
-   Explicit `[pandoc]` resource settings retain higher priority. The selected
-   theme manifest and every resource actually consumed by the output are part
-   of the lock/cache input digest; changing the bundle invalidates the cache.
+   A selected theme supplies semantic tokens and format-specific CSS, LaTeX,
+   template, and reference-document resources. Themes never execute Lua.
+   Explicit `[pandoc]` resource settings retain higher priority. The complete
+   resolved inheritance chain and every enabled plugin package are part of the
+   lock/cache input digest; changing any package payload invalidates the cache.
 
    `compatibility = "readium"` activates the versioned Readium EPUB profile.
    Every EPUB build then validates the ZIP/mimetype contract, normalized and
@@ -364,6 +368,17 @@ template selector; pass `--type <KEY>` or `--defaults` explicitly.
    watcher keeps running. With `--once`, the initial build result is returned
    directly, including a non-zero exit status on failure. There is no polling
    fallback.
+
+   The watch set is refreshed after every build. It includes the project and
+   global configuration, the managed library, user/project extension stores,
+   the plugin trust file, theme/plugin payloads, and resolved dependencies
+   outside the project. Parent directories are watched as needed so atomic
+   replacement or first-time creation of one of those paths is not missed.
+   Read-only filesystem access notifications are ignored, and an external
+   recursive watch is re-armed only when its root or an ancestor is replaced,
+   avoiding build feedback loops while ordinary payload edits remain watched.
+   Extension transaction staging and the store lock file are ignored without
+   hiding identically named files inside an installed package.
 
 5. **Publish generated artifacts**
 
@@ -571,24 +586,61 @@ template selector; pass `--type <KEY>` or `--defaults` explicitly.
    A custom `[lib].path` can select a local bundle such as `bundles/libs` for
    development; Git clone installation is no longer supported.
 
-13. **Inspect versioned theme bundles**
+13. **Install and select versioned theme packages**
 
-   Theme bundles are declared by `themes/<name>.toml` inside the installed
-   OmniDoc library bundle and
-   can bind matching HTML CSS, EPUB CSS, LaTeX packages, DOCX/PPTX reference
-   documents, Lua filters, font
-   requirements, metadata defaults, and an OmniDoc compatibility range:
+   User and project themes use the common `omnidoc-package.toml` manifest.
+   Project packages under `.omnidoc/extensions/themes` override user packages;
+   legacy themes bundled with `omnidoc-libs` remain the lowest-precedence
+   built-ins. Themes can bind semantic tokens, HTML/EPUB CSS, LaTeX resources,
+   DOCX/PPTX reference documents, requirements, and metadata defaults, but
+   cannot execute Lua:
 
    ```bash
+   omnidoc theme install ./corporate-theme
+   omnidoc theme install ./corporate-theme --project ./docs
    omnidoc theme list
-   omnidoc theme inspect corporate-docs
-   omnidoc theme validate corporate-docs
-   omnidoc theme apply corporate-docs ./docs
-   omnidoc theme apply modern-slides ./talk --dry-run
-   omnidoc theme validate corporate-docs --check-fonts
-   omnidoc theme validate corporate-docs --check-fonts --check-latex
+   omnidoc theme inspect acme/corporate@^2 --project ./docs
+   omnidoc theme apply acme/corporate@=2.1.0 ./docs
+   omnidoc theme validate acme/corporate@^2 --check-fonts --check-latex
    omnidoc theme validate --json       # validate every installed theme
    ```
+
+   `theme install` and `plugin install` accept a package directory, the
+   package's `omnidoc-package.toml`, `.zip`/`.odpkg`, `.tar.gz`/`.tgz`, or an
+   HTTPS URL. Remote installs require `--sha256 <64-hex-digest>`; downloads are
+   size-limited, time-limited, and every redirect hop must remain on HTTPS.
+   Archive and directory entries must use portable UTF-8 paths; traversal,
+   symbolic links, Windows-reserved names, and case-insensitive collisions are
+   rejected. The default user store can be replaced in the global
+   configuration only:
+
+   ```toml
+   [extensions]
+   path = "/srv/omnidoc/extensions"
+   ```
+
+   A relative `extensions.path` is resolved from the directory containing the
+   global `omnidoc.toml`, never from the shell's current directory.
+
+   Passing `--project ./docs` instead installs into the versioned,
+   project-local `.omnidoc/extensions` store.
+
+   Installed packages always use the canonical
+   `<store>/themes/<ID segments>/<VERSION>` or
+   `<store>/plugins/<ID segments>/<VERSION>` layout and contain exactly one
+   root `omnidoc-package.toml`. IDs are lower-case portable path segments;
+   semantic-version-shaped ID segments, Windows-reserved names, and empty or
+   trailing-punctuation segments are rejected. Versions are lower-case
+   portable SemVer strings. An exact `@=VERSION` request includes SemVer build
+   metadata, so `=1.0.0+linux` cannot resolve `1.0.0+windows`.
+
+   Replacement is transactional. On the next mutating extension command,
+   OmniDoc restores an interrupted old payload or confirms that the intended
+   new digest was already promoted. If the destination has an unexpected
+   digest, it refuses to guess and retains both the destination, backup, and
+   transaction record for manual inspection. Package digests cover files,
+   paths, and empty directories while excluding only OmniDoc's installation
+   receipt.
 
    Bundled profiles cover engineering textbooks (`engineering-book`), company
    manuals and developer guides (`corporate-docs`), long-form books
@@ -599,39 +651,75 @@ template selector; pass `--type <KEY>` or `--defaults` explicitly.
    `--diff`, and `--json`.
 
    ```toml
-   manifest_version = 1
-   name = "engineering-book"
-   version = "1.0.0"
-   compatible_omnidoc = ">=1.3.0,<2.0.0"
+   manifest_version = 2
+   kind = "theme"
+   id = "acme/corporate"
+   name = "Corporate Documents"
+   version = "2.1.0"
+   compatible_omnidoc = ">=1.8,<2"
+   compatible_pandoc = ">=3,<4"
+
+   [theme]
+   api_version = 1
+   extends = "acme/base@^2"
+   outputs = ["pdf", "html", "epub", "docx"]
    compatibility = "readium"
 
-   [resources]
-   html_css = ["pandoc/css/engineering-book.css"]
-   epub_css = ["pandoc/css/engineering-book.css"]
-   latex_packages = ["texmf/tex/common/omni-engineering-book.sty"]
-   latex_headers = ["pandoc/headers/engineering-book.tex"]
-   latex_template = "pandoc/data/templates/pantext.latex"
-   docx_reference_doc = "pandoc/data/reference-docs/engineering-book.docx"
-   pptx_reference_doc = "pandoc/data/reference-docs/engineering-slides.pptx"
-   lua_filters = ["pandoc/data/filters/admonition.lua"]
+   [theme.tokens.color]
+   text = "#202124"
+   accent = "#1455A0"
+   link = "#1455A0"
 
-   [requirements]
-   fonts = ["Noto Serif CJK SC"]
-   system_latex_packages = ["fontspec", "xeCJK", "tcolorbox"]
+   [theme.tokens.typography]
+   body = "Noto Serif CJK SC"
+   heading = "Noto Sans CJK SC"
+   base_size_pt = 11
+   line_height = 1.45
 
-   [metadata.defaults]
+   [theme.tokens.page]
+   size = "a4"
+   margin_top_mm = 22
+   margin_right_mm = 20
+   margin_bottom_mm = 22
+   margin_left_mm = 20
+
+   [theme.resources]
+   html_css = ["styles/document.css"]
+   epub_css = ["styles/epub.css"]
+   latex_headers = ["latex/header.tex"]
+   docx_reference_doc = "reference/document.docx"
+
+   [theme.requirements]
+   fonts = ["Noto Serif CJK SC", "Noto Sans CJK SC"]
+   system_latex_packages = ["fontspec", "xeCJK", "geometry"]
+
+   [theme.metadata.defaults]
    lang = "zh-CN"
    ```
 
+   `theme.outputs` is authoritative: OmniDoc applies the resolved theme only to
+   those writers, and validation rejects declared outputs with no matching
+   resource as well as resources omitted from the output list. When the field
+   is absent, supported outputs are inferred from tokens and resources. In an
+   inheritance chain, an explicit child `outputs` list replaces the inherited
+   output set; an omitted child list extends the parent's inferred/resolved
+   capabilities. The fully merged chain is validated before selection.
+
    Validation rejects incompatible versions, missing or duplicate resources,
-   unsafe paths, and symbolic links in the bundle contract. `--check-fonts`
+   unsafe paths, and symbolic links in the bundle contract. If a package
+   declares `compatible_pandoc`, OmniDoc checks the configured Pandoc
+   executable before the theme can be selected. `--check-fonts`
    additionally resolves every declared font family with fontconfig and rejects
    silent fallback matches; the Golden PDF gate requires this environment
    check. `--check-latex` resolves every declared system package with
    `kpsewhich`. PDF lock/cache entries include the TeX distribution identity
    plus each resolved `.sty` version, file name, and BLAKE3 digest.
+   Installable `theme.resources.latex_packages` are also made visible to the
+   actual PDF engine: Tectonic receives ordered `-Zsearch-path` options, while
+   XeLaTeX, LuaLaTeX, and pdfLaTeX receive a prepended `TEXINPUTS` that preserves
+   the user's existing value and TeX's default trailing search component.
 
-   Theme metadata defaults are applied by a managed Lua filter only when the
+   Theme metadata defaults are applied by OmniDoc's managed core filter only when the
    document did not already define the same key. Front matter, an authoritative
    `build.metadata_file`, explicit `pandoc.lang`, and user-supplied Pandoc
    options therefore retain priority. The build target remains an artifact
@@ -705,12 +793,17 @@ The graph merges project references with the latest include-filter depfiles;
 external included files are recorded as content-digested resources rather
 than machine-specific project paths.
 
-Every active Lua filter also receives
-`omnidoc-depfile-<normalized-filter-stem>` metadata pointing at its own `.d`
-file under `.omnidoc-cache`. A third-party filter can write the
-`# omnidoc-depfile-v1` header followed by each file it actually read. Only
-depfiles belonging to filters active for the current output are consumed, so
-stale or unrelated filter data cannot pollute the target dependency graph.
+Core filters and filters configured directly under `[pandoc].lua_filters`
+receive `omnidoc-depfile-<normalized-filter-stem>` metadata pointing at their
+own `.d` file under `.omnidoc-cache`. Plugin filters opt into dynamic
+dependency tracking with a globally unique manifest `dependency_key`; they
+receive `omnidoc-plugin-depfile-<dependency-key>` and write
+`plugin-<dependency-key>.d`. A filter writes the `# omnidoc-depfile-v1` header
+followed by each file it actually read. Only depfiles belonging to filters
+active for the current output are consumed, and conflicting keys or file names
+are rejected instead of silently sharing dependency state. Active depfiles are
+cleared immediately before Pandoc runs, so a participating filter must always
+write a fresh header, even when it read zero external files.
 
 Create or refresh the lock file:
 
@@ -721,7 +814,7 @@ omnidoc check lock --check
 ```
 
 `lock --check` exits with an error when `omnidoc.lock` is missing or stale.
-Lock schema v4 uses BLAKE3 content digests and stores dependencies and resolved
+Lock schema v5 uses BLAKE3 content digests and stores dependencies and resolved
 resources separately for every configured output target. It also records the
 selected OmniDoc library release/content digest and detected Pandoc,
 pandoc-crossref, LaTeX engine, and PDF theme font identities. Font identities
@@ -813,46 +906,74 @@ python3 scripts/check-library-contract.py
 The ordered tag, release-archive, packaged-install, and EPUB reader acceptance
 procedure is maintained in [`release/CHECKLIST.md`](release/CHECKLIST.md).
 
-List discovered local plugins and external template manifests:
+Install, inspect, trust, enable, and explicitly run plugin packages:
 
 ```bash
-omnidoc plugin examples
-omnidoc plugin add quality-gate [PATH]
-omnidoc plugin add asset-index [PATH] --dry-run
-omnidoc plugin list [PATH]
+omnidoc plugin install ./my-plugin
+omnidoc plugin install-example quality-gate --project ./docs
+omnidoc plugin list --project ./docs
 omnidoc plugin list --json
-omnidoc plugin validate [PATH]
-omnidoc plugin validate --json
+omnidoc plugin validate omnidoc/quality-gate@=1.0.0 --project ./docs --check-lua
+omnidoc plugin trust omnidoc/quality-gate@=1.0.0 --project ./docs
+omnidoc plugin enable omnidoc/quality-gate@=1.0.0 ./docs
+omnidoc plugin run omnidoc/word-count word-count --project ./docs -- main.md
 ```
 
-Bundled examples are inert until `plugin add` copies one into the selected
-project's `plugins/` directory. Installation is transactional, refuses to
-overwrite an existing plugin, supports side-effect-free `--dry-run`, and emits
-a stable report with `--json`. The included examples provide a documentation
-quality gate (`lint_rule`), a generated asset inventory (`asset_provider`), and
-a structured build lifecycle journal (`pre_build`/`post_build`). See
-[`bundles/libs/PLUGINS.md`](bundles/libs/PLUGINS.md) for their behavior and
-customization points. Files belonging to active hook plugins are included in
-dependency graphs, cache identities, reports, and lock files.
+Installation alone never executes code. Automatic filters require two explicit
+steps: the exact ID/version/content digest must be trusted locally, and the
+project must list the exact package under `[plugins].enabled`. Replacing package
+content changes its digest and invalidates trust. Project configuration cannot
+grant trust. Ranges and unversioned entries are rejected in
+`[plugins].enabled`; `plugin enable` always writes an exact `@=VERSION` pin.
+Explicit commands also require trust but do not need to be enabled.
 
-`plugin validate` parses discovered `manifest.toml` files and checks template
-plugin fields such as `language` and `template_file`. `plugin list --json` and
-`plugin validate --json` also report declared hooks, and validation checks local
-hook command paths when the command contains a path separator. The previous
-flat `omnidoc plugin [PATH] --validate` form remains supported for scripts.
-Plugin manifests use schema version 1 and may declare their OmniDoc compatibility:
+Extension stores use process-shared read locks and exclusive mutation locks,
+so a build, validation, trust decision, or explicit command cannot observe a
+package halfway through replacement or removal. If an installed package is
+damaged, `plugin uninstall`/`theme uninstall` can still remove its deterministic
+`ID/VERSION` directory even when the manifest no longer parses.
+
+OmniDoc has no host Lua VM and no generic lifecycle hooks. Filters are passed to
+Pandoc with `--lua-filter`; declared commands run as `pandoc lua SCRIPT`. Core
+filters run first, followed by plugin filters ordered by numeric `order`, plugin
+ID, and script path. See [`bundles/libs/PLUGINS.md`](bundles/libs/PLUGINS.md).
+
+Plugin manifests use package schema version 2:
 
 ```toml
-manifest_version = 1
-key = "project-lint"
-version = "1.0.0"
-compatible_omnidoc = ">=1.3.0,<2.0.0"
+manifest_version = 2
+kind = "plugin"
+id = "acme/document-tools"
+version = "1.2.0"
+compatible_omnidoc = ">=1.8,<2"
+compatible_pandoc = ">=3,<4"
+
+[plugin]
+api_version = 1
+
+[[plugin.filters]]
+script = "filters/normalize.lua"
+formats = ["pdf", "html", "epub", "docx"]
+order = 500
+# Optional. Required only when this filter reads files that must participate
+# in cache and lock invalidation; it must be globally unique among enabled plugins.
+dependency_key = "acme-document-tools-inputs"
+
+[[plugin.commands]]
+name = "word-count"
+script = "commands/word-count.lua"
 ```
 
-For compatibility with existing local plugins, an omitted `manifest_version`
-is interpreted as version 1. Unsupported schema versions, invalid compatibility
-ranges, and plugins incompatible with the running OmniDoc version fail
-`plugin --validate`. Hook processes receive `OMNIDOC_PLUGIN_MANIFEST_VERSION`.
+`compatible_pandoc` is mandatory for plugin packages. OmniDoc evaluates it
+against the configured `tools.pandoc --version` before enabling, validating,
+automatically loading, or explicitly running the plugin. Pandoc's occasional
+four-component versions (for example `3.1.11.1`) are normalized to their first
+three components for the semver comparison.
+
+`plugin validate --check-lua` asks `pandoc lua -e` to call `loadfile` for each
+script through an environment path. The script is compiled for syntax only and
+is never passed as Pandoc's executable positional script, so validation does
+not run plugin top-level code.
 
 ### Document Formatting Commands
 
@@ -1223,40 +1344,11 @@ description = "A minimal markdown doc template"  # optional
 language = "markdown"             # "markdown" | "latex"
 template_file = "template.md"     # relative to manifest directory
 file_name = "main.md"             # optional; defaults: markdown->main.md, latex->main.tex
-
-[hooks]
-# Commands are executed without a shell. Use an array when arguments are needed.
-asset_provider = ["scripts/assets.sh"]
-pre_build = ["scripts/pre-build.sh"]
-post_build = ["scripts/post-build.sh"]
-lint_rule = ["scripts/lint.sh"]
 ```
 
 `template_file` and `file_name` must be safe relative paths. Absolute paths and
 `..` traversal are rejected by validation and cannot be used during project
 creation. Nested entry paths such as `docs/index.md` are supported.
-
-Hook environment variables:
-
-- `OMNIDOC_PROJECT_DIR`
-- `OMNIDOC_PLUGIN_DIR`
-- `OMNIDOC_PLUGIN_KEY`
-- `OMNIDOC_PLUGIN_MANIFEST_VERSION`
-- `OMNIDOC_HOOK`
-- `OMNIDOC_OUTPUT`
-- `OMNIDOC_TARGET`
-
-Hook argument arrays also support `{plugin_dir}`, `{project_dir}`, `{output}`,
-and `{target}` substitutions without invoking a shell. Use `{python}` as the
-program for a portable Python 3 launcher; OmniDoc checks `OMNIDOC_PYTHON`,
-`python3`, `python`, and Windows `py -3` in that order.
-
-`lint_rule` commands can print diagnostics in this format:
-
-```text
-warning:main.md:12:5:message from plugin
-error:chapter.md:3:1:another message
-```
 
 ### Template files
 

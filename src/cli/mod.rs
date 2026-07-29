@@ -8,7 +8,7 @@ use clap::{Command, CommandFactory};
 use clap_complete::{generate, Generator};
 use commands::{
     CheckSubcommand, Commands, ConfigSubcommand, ConvertSubcommand, LibSubcommand, OmniCli,
-    PluginSubcommand, TemplateSubcommand,
+    TemplateSubcommand,
 };
 use handlers::*;
 use std::env;
@@ -242,23 +242,7 @@ pub fn cli() -> Result<()> {
         } => {
             handle_lock(path, check, update)?;
         }
-        Commands::Plugin {
-            subcommand,
-            path,
-            json,
-            validate,
-        } => match subcommand {
-            Some(PluginSubcommand::Examples { path, json }) => handle_plugin_examples(path, json)?,
-            Some(PluginSubcommand::Add {
-                preset,
-                path,
-                dry_run,
-                json,
-            }) => handle_plugin_add(preset, path, dry_run, json)?,
-            Some(PluginSubcommand::List { path, json }) => handle_plugin(path, json, false)?,
-            Some(PluginSubcommand::Validate { path, json }) => handle_plugin(path, json, true)?,
-            None => handle_plugin(path, json, validate)?,
-        },
+        Commands::Plugin { subcommand } => handle_plugin(subcommand)?,
         Commands::Status { path, json } => {
             handle_status(path, json)?;
         }

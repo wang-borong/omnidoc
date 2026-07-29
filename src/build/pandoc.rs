@@ -3,10 +3,13 @@ use crate::build::pandoc_policy::PandocOutputKind;
 use crate::build::pipeline::{BuildPipeline, ProjectType};
 use crate::build::source_map::locate_markdown_error;
 use crate::build::tectonic;
-use crate::cli::handlers::theme::{load_theme_manifest, ThemeManifest};
 use crate::config::MergedConfig;
 use crate::constants::pandoc;
 use crate::error::{OmniDocError, Result};
+use crate::extensions::{
+    acquire_extension_store_read_locks, materialize_theme_tokens, plugin_filters_for_output,
+    resolve_selected_theme, ExtensionStoreReadLocks, GeneratedThemeAssets, ResolvedTheme,
+};
 use crate::latex_recorder;
 use crate::project_tools::{
     filter_depfile_metadata_key, filter_depfile_name, INCLUDE_CODE_DEPFILE, INCLUDE_DEPFILE,
@@ -14,7 +17,8 @@ use crate::project_tools::{
 };
 use crate::utils::directories::data_local_dir;
 use crate::utils::fs;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 // Keep the private metadata wire format compatible with the released v1.8.0
@@ -30,7 +34,8 @@ const USER_LATEX_HEADER_OFFSET: usize = 2000;
 pub struct PandocBuilder {
     executor: BuildExecutor,
     config: MergedConfig,
-    theme: Option<ThemeManifest>,
+    theme: Option<ResolvedTheme>,
+    _extension_locks: Option<ExtensionStoreReadLocks>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -62,6 +67,35 @@ impl PandocCommandProfile {
 }
 
 impl PandocBuilder {
+    fn theme_for_output(&self, output_kind: PandocOutputKind) -> Option<&ResolvedTheme> {
+        self.theme
+            .as_ref()
+            .filter(|theme| theme.supports_output(output_kind.config_key()))
+    }
+
+    fn theme_latex_search_paths(&self, output_kind: PandocOutputKind) -> Vec<PathBuf> {
+        let Some(theme) = self.theme_for_output(output_kind) else {
+            return Vec::new();
+        };
+        let mut paths = Vec::new();
+        let mut seen = BTreeSet::new();
+        // Child resources are appended after parent resources during theme
+        // inheritance. Search in reverse order so an extending theme can
+        // intentionally replace a package with the same TeX-visible name.
+        for package in theme.resources.latex_packages.iter().rev() {
+            let Some(parent) = package.parent() else {
+                continue;
+            };
+            let parent = parent
+                .canonicalize()
+                .unwrap_or_else(|_| parent.to_path_buf());
+            if seen.insert(parent.clone()) {
+                paths.push(parent);
+            }
+        }
+        paths
+    }
+
     fn push_latex_header_metadata(options: &mut Vec<String>, ordinal: usize, header: &str) {
         options.push(pandoc::FLAG_METADATA.to_string());
         options.push(format!(
@@ -71,11 +105,18 @@ impl PandocBuilder {
 
     pub fn new(config: MergedConfig) -> Result<Self> {
         let executor = BuildExecutor::new(config.tool_paths.clone());
-        let theme = load_selected_theme(&config)?;
+        let project_root = config.project_root.as_deref().map(Path::new);
+        let extension_locks = (config.theme_name.is_some() || !config.plugins_enabled.is_empty())
+            .then(|| {
+                acquire_extension_store_read_locks(project_root, &config, "build with extensions")
+            })
+            .transpose()?;
+        let theme = resolve_selected_theme(project_root, &config)?;
         Ok(Self {
             executor,
             config,
             theme,
+            _extension_locks: extension_locks,
         })
     }
 
@@ -109,7 +150,7 @@ impl PandocBuilder {
         }
 
         let omnidoc_lib = self.get_omnidoc_lib_path();
-        self.push_lua_filters(&mut options, output_kind, &omnidoc_lib);
+        self.push_lua_filters(&mut options, output_kind, &omnidoc_lib, project_path)?;
 
         options.push(pandoc::FLAG_METADATA.to_string());
         let python_path = self
@@ -147,8 +188,22 @@ impl PandocBuilder {
                 .resolve_latex_engine(LatexEnginePreference::Markdown)?;
             options.push(latex_engine.executable.clone());
             if latex_engine.is_tectonic() {
-                for argument in tectonic::build_options(&self.config, project_path).arguments {
+                let tectonic_options = tectonic::build_options(&self.config, project_path);
+                let mut search_paths = tectonic_options
+                    .search_paths
+                    .iter()
+                    .map(|path| path.canonicalize().unwrap_or_else(|_| path.clone()))
+                    .collect::<BTreeSet<_>>();
+                for argument in tectonic_options.arguments {
                     options.push(format!("--pdf-engine-opt={argument}"));
+                }
+                for path in self.theme_latex_search_paths(output_kind) {
+                    if search_paths.insert(path.clone()) {
+                        options.push(format!(
+                            "--pdf-engine-opt=-Zsearch-path={}",
+                            path.to_string_lossy()
+                        ));
+                    }
                 }
             }
         }
@@ -210,13 +265,25 @@ impl PandocBuilder {
         };
         options.push(resource_path);
 
-        self.push_template(&mut options, output_kind, &omnidoc_lib);
+        let generated_theme_assets = self
+            .theme_for_output(output_kind)
+            .map(|theme| materialize_theme_tokens(theme, project_path))
+            .transpose()?
+            .unwrap_or_default();
+
+        self.push_template(&mut options, output_kind);
         self.push_default_latex_headers(&mut options, output_kind, &omnidoc_lib);
-        self.push_theme_latex_headers(&mut options, output_kind, &omnidoc_lib);
-        self.push_css(&mut options, output_kind, &omnidoc_lib, profile);
+        self.push_theme_latex_headers(&mut options, output_kind, &generated_theme_assets);
+        self.push_css(
+            &mut options,
+            output_kind,
+            &omnidoc_lib,
+            profile,
+            &generated_theme_assets,
+        );
         self.push_format_assets(&mut options, output_kind, &omnidoc_lib);
         self.push_math_output(&mut options, output_kind);
-        self.push_metadata(&mut options, &omnidoc_lib, profile);
+        self.push_metadata(&mut options, output_kind, &omnidoc_lib, profile);
 
         self.push_configured_options(&mut options, output_kind);
 
@@ -232,7 +299,8 @@ impl PandocBuilder {
         options: &mut Vec<String>,
         output_kind: PandocOutputKind,
         omnidoc_lib: &str,
-    ) {
+        project_path: &Path,
+    ) -> Result<()> {
         let mut added = std::collections::BTreeSet::new();
         for filter in output_kind.filters(&self.config) {
             options.push("--lua-filter".to_string());
@@ -240,15 +308,15 @@ impl PandocBuilder {
             added.insert(path.clone());
             options.push(path.to_string_lossy().to_string());
         }
-        if let Some(theme) = &self.theme {
-            for relative in &theme.resources.lua_filters {
-                let path = join_portable_relative(omnidoc_lib, relative);
-                if added.insert(path.clone()) {
-                    options.push("--lua-filter".to_string());
-                    options.push(path.to_string_lossy().to_string());
-                }
+        for filter in
+            plugin_filters_for_output(project_path, &self.config, output_kind.config_key())?
+        {
+            if added.insert(filter.script.clone()) {
+                options.push("--lua-filter".to_string());
+                options.push(filter.script.to_string_lossy().to_string());
             }
         }
+        Ok(())
     }
 
     fn push_configured_options(&self, options: &mut Vec<String>, output_kind: PandocOutputKind) {
@@ -300,19 +368,20 @@ impl PandocBuilder {
         &self,
         options: &mut Vec<String>,
         output_kind: PandocOutputKind,
-        omnidoc_lib: &str,
+        generated: &GeneratedThemeAssets,
     ) {
         if !output_kind.uses_latex_defaults() {
             return;
         }
-        if let Some(theme) = &self.theme {
-            for (index, relative) in theme.resources.latex_headers.iter().enumerate() {
-                let header = join_portable_relative(omnidoc_lib, relative);
-                Self::push_latex_header_metadata(
-                    options,
-                    THEME_LATEX_HEADER_OFFSET + index + 1,
-                    &header.to_string_lossy(),
-                );
+        let mut ordinal = THEME_LATEX_HEADER_OFFSET;
+        if let Some(header) = generated.latex_header.as_deref() {
+            ordinal += 1;
+            Self::push_latex_header_metadata(options, ordinal, &header.to_string_lossy());
+        }
+        if let Some(theme) = self.theme_for_output(output_kind) {
+            for header in &theme.resources.latex_headers {
+                ordinal += 1;
+                Self::push_latex_header_metadata(options, ordinal, &header.to_string_lossy());
             }
         }
     }
@@ -341,25 +410,18 @@ impl PandocBuilder {
         }
     }
 
-    fn push_template(
-        &self,
-        options: &mut Vec<String>,
-        output_kind: PandocOutputKind,
-        omnidoc_lib: &str,
-    ) {
-        let theme_template = self.theme.as_ref().and_then(|theme| match output_kind {
-            PandocOutputKind::Pdf | PandocOutputKind::Latex => {
-                theme.resources.latex_template.as_ref()
-            }
-            PandocOutputKind::Html => theme.resources.html_template.as_ref(),
-            PandocOutputKind::Epub => theme.resources.epub_template.as_ref(),
-            PandocOutputKind::Docx | PandocOutputKind::Pptx => None,
-        });
-        let theme_template = theme_template.map(|relative| {
-            join_portable_relative(omnidoc_lib, relative)
-                .to_string_lossy()
-                .to_string()
-        });
+    fn push_template(&self, options: &mut Vec<String>, output_kind: PandocOutputKind) {
+        let theme_template =
+            self.theme_for_output(output_kind)
+                .and_then(|theme| match output_kind {
+                    PandocOutputKind::Pdf | PandocOutputKind::Latex => {
+                        theme.resources.latex_template.as_ref()
+                    }
+                    PandocOutputKind::Html => theme.resources.html_template.as_ref(),
+                    PandocOutputKind::Epub => theme.resources.epub_template.as_ref(),
+                    PandocOutputKind::Docx | PandocOutputKind::Pptx => None,
+                });
+        let theme_template = theme_template.map(|path| path.to_string_lossy().to_string());
         let template = match output_kind {
             PandocOutputKind::Pdf | PandocOutputKind::Latex => self
                 .config
@@ -394,6 +456,7 @@ impl PandocBuilder {
         output_kind: PandocOutputKind,
         omnidoc_lib: &str,
         profile: &PandocCommandProfile,
+        generated: &GeneratedThemeAssets,
     ) {
         if !matches!(output_kind, PandocOutputKind::Html | PandocOutputKind::Epub) {
             return;
@@ -403,6 +466,10 @@ impl PandocBuilder {
         if base_css.exists() {
             options.push(pandoc::FLAG_CSS.to_string());
             options.push(base_css.to_string_lossy().to_string());
+        }
+
+        if let Some(css) = generated.css.as_ref() {
+            push_existing_css(options, css.clone());
         }
 
         if output_kind == PandocOutputKind::Epub {
@@ -422,9 +489,9 @@ impl PandocBuilder {
                 pandoc::LIB_PANDOC_CSS_DEFAULT,
             );
             push_existing_css(options, css_path);
-        } else if let Some(theme) = &self.theme {
-            for relative in &theme.resources.html_css {
-                push_existing_css(options, join_portable_relative(omnidoc_lib, relative));
+        } else if let Some(theme) = self.theme_for_output(output_kind) {
+            for css in &theme.resources.html_css {
+                push_existing_css(options, css.clone());
             }
         } else {
             push_existing_css(
@@ -442,14 +509,9 @@ impl PandocBuilder {
     ) {
         if output_kind == PandocOutputKind::Docx {
             let reference_doc = self.config.pandoc_reference_doc.clone().or_else(|| {
-                self.theme
-                    .as_ref()
+                self.theme_for_output(output_kind)
                     .and_then(|theme| theme.resources.docx_reference_doc.as_ref())
-                    .map(|relative| {
-                        join_portable_relative(omnidoc_lib, relative)
-                            .to_string_lossy()
-                            .to_string()
-                    })
+                    .map(|path| path.to_string_lossy().to_string())
             });
             if let Some(reference_doc) = reference_doc {
                 options.push("--reference-doc".to_string());
@@ -464,14 +526,9 @@ impl PandocBuilder {
                 .as_ref()
                 .or(self.config.pandoc_reference_doc.as_ref());
             let reference_doc = configured.cloned().or_else(|| {
-                self.theme
-                    .as_ref()
+                self.theme_for_output(output_kind)
                     .and_then(|theme| theme.resources.pptx_reference_doc.as_ref())
-                    .map(|relative| {
-                        join_portable_relative(omnidoc_lib, relative)
-                            .to_string_lossy()
-                            .to_string()
-                    })
+                    .map(|path| path.to_string_lossy().to_string())
             });
             if let Some(reference_doc) = reference_doc {
                 options.push("--reference-doc".to_string());
@@ -491,9 +548,9 @@ impl PandocBuilder {
                     options,
                     resolve_css_path(Some(&configured_css), omnidoc_lib, "pandoc/data/epub.css"),
                 );
-            } else if let Some(theme) = &self.theme {
-                for relative in &theme.resources.epub_css {
-                    push_existing_css(options, join_portable_relative(omnidoc_lib, relative));
+            } else if let Some(theme) = self.theme_for_output(output_kind) {
+                for css in &theme.resources.epub_css {
+                    push_existing_css(options, css.clone());
                 }
             } else {
                 push_existing_css(
@@ -520,6 +577,7 @@ impl PandocBuilder {
     fn push_metadata(
         &self,
         options: &mut Vec<String>,
+        output_kind: PandocOutputKind,
         omnidoc_lib: &str,
         profile: &PandocCommandProfile,
     ) {
@@ -555,7 +613,7 @@ impl PandocBuilder {
         }
 
         if !has_metadata_file {
-            self.push_theme_metadata_defaults(options);
+            self.push_theme_metadata_defaults(options, output_kind);
         }
 
         if let Some(crossref_yaml) = self.config.pandoc_crossref_yaml.as_deref() {
@@ -585,8 +643,12 @@ impl PandocBuilder {
         }
     }
 
-    fn push_theme_metadata_defaults(&self, options: &mut Vec<String>) {
-        let Some(theme) = self.theme.as_ref() else {
+    fn push_theme_metadata_defaults(
+        &self,
+        options: &mut Vec<String>,
+        output_kind: PandocOutputKind,
+    ) {
+        let Some(theme) = self.theme_for_output(output_kind) else {
             return;
         };
         for (key, value) in &theme.metadata.defaults {
@@ -625,50 +687,6 @@ impl PandocBuilder {
     }
 }
 
-pub(crate) fn load_selected_theme(config: &MergedConfig) -> Result<Option<ThemeManifest>> {
-    let Some(name) = config.theme_name.as_deref() else {
-        return Ok(None);
-    };
-    let library = config
-        .lib_path
-        .as_ref()
-        .map(PathBuf::from)
-        .or_else(|| data_local_dir().map(|path| path.join("omnidoc")))
-        .ok_or_else(|| OmniDocError::Config("OmniDoc library path is unavailable".to_string()))?;
-    let theme = load_theme_manifest(&library, name)?;
-    if let Some(requested) = config.theme_version.as_deref() {
-        let requirement = semver::VersionReq::parse(requested).map_err(|error| {
-            OmniDocError::Config(format!(
-                "Invalid theme.version requirement '{}': {}",
-                requested, error
-            ))
-        })?;
-        let installed = semver::Version::parse(&theme.version).map_err(|error| {
-            OmniDocError::Config(format!(
-                "Invalid installed theme version '{}': {}",
-                theme.version, error
-            ))
-        })?;
-        if !requirement.matches(&installed) {
-            return Err(OmniDocError::Config(format!(
-                "Theme '{}' version {} does not satisfy {}",
-                name, installed, requested
-            )));
-        }
-    }
-    if let Some(requested) = config.theme_compatibility.as_deref() {
-        if theme.compatibility.as_deref() != Some(requested) {
-            return Err(OmniDocError::Config(format!(
-                "Theme '{}' compatibility '{}' does not match requested '{}'",
-                name,
-                theme.compatibility.as_deref().unwrap_or("default"),
-                requested
-            )));
-        }
-    }
-    Ok(Some(theme))
-}
-
 fn resolve_css_path(configured: Option<&str>, omnidoc_lib: &str, fallback: &str) -> PathBuf {
     let Some(configured) = configured else {
         return join_portable_relative(omnidoc_lib, fallback);
@@ -693,6 +711,34 @@ fn push_existing_css(options: &mut Vec<String>, css_path: PathBuf) {
         options.push(pandoc::FLAG_CSS.to_string());
         options.push(css_path.to_string_lossy().to_string());
     }
+}
+
+fn push_depfile_metadata(
+    options: &mut Vec<String>,
+    cache_dir: &Path,
+    keys: &mut BTreeMap<String, String>,
+    names: &mut BTreeMap<String, String>,
+    key: String,
+    file: String,
+    origin: String,
+) -> Result<()> {
+    if let Some(existing) = keys.get(&key) {
+        return Err(OmniDocError::Config(format!(
+            "active Lua filters '{}' and '{}' use the same depfile metadata key '{}'",
+            existing, origin, key
+        )));
+    }
+    if let Some(existing) = names.get(&file) {
+        return Err(OmniDocError::Config(format!(
+            "active Lua filters '{}' and '{}' use the same depfile '{}'",
+            existing, origin, file
+        )));
+    }
+    keys.insert(key.clone(), origin.clone());
+    names.insert(file.clone(), origin);
+    options.push(pandoc::FLAG_METADATA.to_string());
+    options.push(format!("{}={}", key, cache_dir.join(file).display()));
+    Ok(())
 }
 
 fn join_portable_relative(root: &str, relative: &str) -> PathBuf {
@@ -762,7 +808,8 @@ impl BuildPipeline for PandocBuilder {
             options.push(pandoc::FLAG_METADATA.to_string());
             options.push(format!("{}={}", key, cache_dir.join(file).display()));
         }
-        let mut generic_depfiles = BTreeSet::new();
+        let mut depfile_keys = BTreeMap::new();
+        let mut depfile_names = BTreeMap::new();
         for filter in output_kind.filters(&self.config) {
             let Some(key) = filter_depfile_metadata_key(filter) else {
                 continue;
@@ -770,14 +817,48 @@ impl BuildPipeline for PandocBuilder {
             let Some(file) = filter_depfile_name(filter) else {
                 continue;
             };
-            if generic_depfiles.insert(key.clone()) {
-                options.push(pandoc::FLAG_METADATA.to_string());
-                options.push(format!("{}={}", key, cache_dir.join(file).display()));
+            push_depfile_metadata(
+                &mut options,
+                &cache_dir,
+                &mut depfile_keys,
+                &mut depfile_names,
+                key,
+                file,
+                filter.to_string(),
+            )?;
+        }
+        for filter in
+            plugin_filters_for_output(project_path, &self.config, output_kind.config_key())?
+        {
+            let (Some(key), Some(file)) = (filter.depfile_metadata_key(), filter.depfile_name())
+            else {
+                continue;
+            };
+            push_depfile_metadata(
+                &mut options,
+                &cache_dir,
+                &mut depfile_keys,
+                &mut depfile_names,
+                key,
+                file,
+                format!(
+                    "{}@{}:{}",
+                    filter.plugin_id,
+                    filter.plugin_version,
+                    filter.script.display()
+                ),
+            )?;
+        }
+        for file in depfile_names.keys() {
+            let path = cache_dir.join(file);
+            if path.exists() {
+                fs::remove_file(path)?;
             }
         }
 
         let mut recorder_environment = Vec::new();
         if output_kind == PandocOutputKind::Pdf {
+            let theme_latex_search_paths = self.theme_latex_search_paths(output_kind);
             let depfile = cache_dir.join(LATEX_INPUT_DEPFILE);
             let real_engine = self
                 .executor
@@ -820,6 +901,9 @@ impl BuildPipeline for PandocBuilder {
                         fs::remove_file(&depfile)?;
                     }
                 }
+            }
+            if let Some(texinputs) = prepend_path_list("TEXINPUTS", &theme_latex_search_paths)? {
+                recorder_environment.push(texinputs);
             }
         }
 
@@ -870,12 +954,36 @@ impl BuildPipeline for PandocBuilder {
     }
 }
 
+fn prepend_path_list(variable: &str, prefixes: &[PathBuf]) -> Result<Option<(OsString, OsString)>> {
+    if prefixes.is_empty() {
+        return Ok(None);
+    }
+    let mut paths = prefixes.to_vec();
+    if let Some(existing) = std::env::var_os(variable) {
+        paths.extend(std::env::split_paths(&existing));
+    } else {
+        // An empty trailing component preserves the TeX engine's standard
+        // search path when no TEXINPUTS value was configured by the user.
+        paths.push(PathBuf::new());
+    }
+    let value = std::env::join_paths(paths).map_err(|error| {
+        OmniDocError::Config(format!(
+            "cannot add theme LaTeX packages to {variable}: {error}"
+        ))
+    })?;
+    Ok(Some((OsString::from(variable), value)))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{join_portable_relative, resolve_css_path};
+    use super::{
+        join_portable_relative, prepend_path_list, push_depfile_metadata, resolve_css_path,
+    };
     use crate::build::pandoc::{PandocBuilder, PandocCommandProfile};
     use crate::build::pandoc_policy::PandocOutputKind;
+    use crate::build::pipeline::BuildPipeline;
     use crate::config::MergedConfig;
+    use crate::extensions::GeneratedThemeAssets;
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;
@@ -896,6 +1004,215 @@ mod tests {
             ),
             expected
         );
+    }
+
+    #[test]
+    fn theme_latex_paths_preserve_the_default_tex_search_path() {
+        let root = tempfile::tempdir().expect("theme package");
+        let package_dir = root.path().join("latex");
+        fs::create_dir_all(&package_dir).expect("package directory");
+        let variable = "OMNIDOC_TEST_THEME_TEXINPUTS";
+        let original = std::env::var_os(variable);
+        std::env::remove_var(variable);
+
+        let (_, value) = prepend_path_list(variable, std::slice::from_ref(&package_dir))
+            .expect("TEXINPUTS")
+            .expect("environment override");
+        let paths = std::env::split_paths(&value).collect::<Vec<_>>();
+
+        assert_eq!(paths.first(), Some(&package_dir));
+        assert_eq!(paths.last(), Some(&PathBuf::new()));
+        match original {
+            Some(value) => std::env::set_var(variable, value),
+            None => std::env::remove_var(variable),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pdf_build_exports_installable_theme_packages_through_texinputs() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("fixture");
+        let project = root.path().join("project");
+        let store = root.path().join("extensions");
+        let package = store.join("themes/acme/latex-theme/1.0.0");
+        let latex = package.join("latex");
+        fs::create_dir_all(&project).expect("project");
+        fs::create_dir_all(&latex).expect("theme LaTeX directory");
+        fs::write(project.join("main.md"), "# Manual\n").expect("entry");
+        fs::write(latex.join("acme-theme.sty"), "% package\n").expect("theme package");
+        fs::write(latex.join("header.tex"), "\\usepackage{acme-theme}\n").expect("theme header");
+        fs::write(
+            package.join("omnidoc-package.toml"),
+            r#"manifest_version = 2
+kind = "theme"
+id = "acme/latex-theme"
+version = "1.0.0"
+compatible_omnidoc = ">=1.8,<2"
+
+[theme]
+api_version = 1
+outputs = ["pdf"]
+
+[theme.resources]
+latex_packages = ["latex/acme-theme.sty"]
+latex_headers = ["latex/header.tex"]
+"#,
+        )
+        .expect("theme manifest");
+
+        let capture = root.path().join("captured-texinputs.txt");
+        let fake_pandoc = root.path().join("pandoc");
+        fs::write(
+            &fake_pandoc,
+            format!(
+                "#!/bin/sh\nprintf '%s' \"${{TEXINPUTS-}}\" > '{}'\n",
+                capture.display()
+            ),
+        )
+        .expect("fake pandoc");
+        let fake_engine = root.path().join("custom-latex-engine");
+        fs::write(&fake_engine, "#!/bin/sh\necho 'custom latex engine 1.0'\n")
+            .expect("fake LaTeX engine");
+        for executable in [&fake_pandoc, &fake_engine] {
+            let mut permissions = fs::metadata(executable).expect("metadata").permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(executable, permissions).expect("permissions");
+        }
+
+        let existing_texinputs = std::env::var_os("TEXINPUTS");
+        let builder = PandocBuilder::new(MergedConfig {
+            lib_path: Some(root.path().join("library").to_string_lossy().to_string()),
+            entry: Some("main.md".to_string()),
+            to: Some("pdf".to_string()),
+            target: Some("manual".to_string()),
+            outdir: Some("build".to_string()),
+            theme_name: Some("acme/latex-theme".to_string()),
+            theme_version: Some("=1.0.0".to_string()),
+            extension_path: Some(store.to_string_lossy().to_string()),
+            project_root: Some(project.to_string_lossy().to_string()),
+            tool_paths: std::collections::HashMap::from([
+                (
+                    "pandoc".to_string(),
+                    Some(fake_pandoc.to_string_lossy().to_string()),
+                ),
+                (
+                    "latex_engine".to_string(),
+                    Some(fake_engine.to_string_lossy().to_string()),
+                ),
+            ]),
+            ..Default::default()
+        })
+        .expect("themed builder");
+
+        builder.build(&project, false).expect("fake PDF build");
+
+        let captured = fs::read_to_string(capture).expect("captured TEXINPUTS");
+        let paths = std::env::split_paths(&captured).collect::<Vec<_>>();
+        assert_eq!(
+            paths.first(),
+            Some(&latex.canonicalize().expect("canonical theme directory"))
+        );
+        let expected_tail = existing_texinputs
+            .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+            .unwrap_or_else(|| vec![PathBuf::new()]);
+        assert_eq!(&paths[1..], expected_tail.as_slice());
+    }
+
+    #[test]
+    fn installable_theme_latex_packages_extend_tectonic_search_paths() {
+        let root = tempfile::tempdir().expect("fixture");
+        let project = root.path().join("project");
+        let store = root.path().join("extensions");
+        let package = store.join("themes/acme/latex-theme/1.0.0");
+        let latex = package.join("latex");
+        fs::create_dir_all(&project).expect("project");
+        fs::create_dir_all(&latex).expect("theme LaTeX directory");
+        fs::write(latex.join("acme-theme.sty"), "% package\n").expect("theme package");
+        fs::write(latex.join("header.tex"), "\\usepackage{acme-theme}\n").expect("theme header");
+        fs::write(
+            package.join("omnidoc-package.toml"),
+            r#"manifest_version = 2
+kind = "theme"
+id = "acme/latex-theme"
+version = "1.0.0"
+compatible_omnidoc = ">=1.8,<2"
+
+[theme]
+api_version = 1
+outputs = ["pdf"]
+
+[theme.resources]
+latex_packages = ["latex/acme-theme.sty"]
+latex_headers = ["latex/header.tex"]
+"#,
+        )
+        .expect("theme manifest");
+        let engine = root.path().join(if cfg!(windows) {
+            "tectonic.exe"
+        } else {
+            "tectonic"
+        });
+        fs::write(&engine, "fixture engine\n").expect("fake engine");
+
+        let builder = PandocBuilder::new(MergedConfig {
+            to: Some("pdf".to_string()),
+            theme_name: Some("acme/latex-theme".to_string()),
+            theme_version: Some("=1.0.0".to_string()),
+            extension_path: Some(store.to_string_lossy().to_string()),
+            project_root: Some(project.to_string_lossy().to_string()),
+            tool_paths: std::collections::HashMap::from([(
+                "latex_engine".to_string(),
+                Some(engine.to_string_lossy().to_string()),
+            )]),
+            ..Default::default()
+        })
+        .expect("themed builder");
+        let options = builder
+            .build_command_options(
+                &project,
+                &project.join("main.md"),
+                &project.join("build/manual.pdf"),
+                PandocOutputKind::Pdf,
+                &PandocCommandProfile::Project,
+            )
+            .expect("Pandoc options");
+        let latex = latex.canonicalize().expect("canonical LaTeX directory");
+
+        assert!(options.iter().any(|option| {
+            option == &format!("--pdf-engine-opt=-Zsearch-path={}", latex.to_string_lossy())
+        }));
+    }
+
+    #[test]
+    fn active_filter_depfile_collisions_are_rejected() {
+        let cache = PathBuf::from(".omnidoc-cache");
+        let mut options = Vec::new();
+        let mut keys = BTreeMap::new();
+        let mut names = BTreeMap::new();
+        push_depfile_metadata(
+            &mut options,
+            &cache,
+            &mut keys,
+            &mut names,
+            "omnidoc-depfile-first".to_string(),
+            "shared.d".to_string(),
+            "filters/first.lua".to_string(),
+        )
+        .expect("first depfile");
+
+        let error = push_depfile_metadata(
+            &mut options,
+            &cache,
+            &mut keys,
+            &mut names,
+            "omnidoc-depfile-second".to_string(),
+            "shared.d".to_string(),
+            "filters/second.lua".to_string(),
+        )
+        .expect_err("shared depfile must fail");
+        assert!(error.to_string().contains("use the same depfile"));
     }
 
     #[test]
@@ -1073,7 +1390,7 @@ mod tests {
         };
         let html_builder = PandocBuilder::new(html_config).expect("html builder");
         let mut html_options = Vec::new();
-        html_builder.push_template(&mut html_options, PandocOutputKind::Html, "/tmp/omnidoc");
+        html_builder.push_template(&mut html_options, PandocOutputKind::Html);
         assert_eq!(
             html_options,
             vec!["--template".to_string(), "html-template.html".to_string()]
@@ -1086,7 +1403,7 @@ mod tests {
         };
         let epub_builder = PandocBuilder::new(epub_config).expect("epub builder");
         let mut epub_options = Vec::new();
-        epub_builder.push_template(&mut epub_options, PandocOutputKind::Epub, "/tmp/omnidoc");
+        epub_builder.push_template(&mut epub_options, PandocOutputKind::Epub);
         assert_eq!(
             epub_options,
             vec!["--template".to_string(), "epub-template.html".to_string()]
@@ -1098,11 +1415,11 @@ mod tests {
         };
         let docx_builder = PandocBuilder::new(docx_config).expect("docx builder");
         let mut docx_options = Vec::new();
-        docx_builder.push_template(&mut docx_options, PandocOutputKind::Docx, "/tmp/omnidoc");
+        docx_builder.push_template(&mut docx_options, PandocOutputKind::Docx);
         assert!(docx_options.is_empty());
 
         let mut pptx_options = Vec::new();
-        docx_builder.push_template(&mut pptx_options, PandocOutputKind::Pptx, "/tmp/omnidoc");
+        docx_builder.push_template(&mut pptx_options, PandocOutputKind::Pptx);
         assert!(pptx_options.is_empty());
     }
 
@@ -1141,6 +1458,7 @@ mod tests {
             PandocOutputKind::Epub,
             library.to_str().expect("library path"),
             &PandocCommandProfile::Project,
+            &GeneratedThemeAssets::default(),
         );
         builder.push_format_assets(
             &mut options,
@@ -1241,6 +1559,7 @@ documentclass = "scrbook"
             PandocOutputKind::Html,
             library.to_str().expect("library path"),
             &PandocCommandProfile::Project,
+            &GeneratedThemeAssets::default(),
         );
         assert_eq!(
             html_options,
@@ -1256,7 +1575,7 @@ documentclass = "scrbook"
         builder.push_theme_latex_headers(
             &mut latex_options,
             PandocOutputKind::Pdf,
-            library.to_str().expect("library path"),
+            &GeneratedThemeAssets::default(),
         );
         assert_eq!(
             latex_options,
@@ -1293,11 +1612,7 @@ documentclass = "scrbook"
             ]
         );
         let mut template_options = Vec::new();
-        builder.push_template(
-            &mut template_options,
-            PandocOutputKind::Pdf,
-            library.to_str().expect("library path"),
-        );
+        builder.push_template(&mut template_options, PandocOutputKind::Pdf);
         assert_eq!(
             template_options,
             vec![
@@ -1313,11 +1628,7 @@ documentclass = "scrbook"
         })
         .expect("explicit template builder");
         let mut explicit_template_options = Vec::new();
-        explicit_template.push_template(
-            &mut explicit_template_options,
-            PandocOutputKind::Pdf,
-            library.to_str().expect("library path"),
-        );
+        explicit_template.push_template(&mut explicit_template_options, PandocOutputKind::Pdf);
         assert_eq!(
             explicit_template_options,
             vec![
@@ -1329,6 +1640,7 @@ documentclass = "scrbook"
         let mut metadata_options = Vec::new();
         builder.push_metadata(
             &mut metadata_options,
+            PandocOutputKind::Pdf,
             library.to_str().expect("library path"),
             &PandocCommandProfile::Project,
         );
@@ -1351,6 +1663,7 @@ documentclass = "scrbook"
         let mut explicit_options = Vec::new();
         explicit_lang.push_metadata(
             &mut explicit_options,
+            PandocOutputKind::Pdf,
             library.to_str().expect("library path"),
             &PandocCommandProfile::Project,
         );
@@ -1371,6 +1684,7 @@ documentclass = "scrbook"
         let mut file_options = Vec::new();
         metadata_file.push_metadata(
             &mut file_options,
+            PandocOutputKind::Pdf,
             library.to_str().expect("library path"),
             &PandocCommandProfile::Project,
         );
@@ -1420,6 +1734,7 @@ documentclass = "scrbook"
 
         builder.push_metadata(
             &mut options,
+            PandocOutputKind::Pdf,
             "/tmp/omnidoc-libs",
             &PandocCommandProfile::Project,
         );
@@ -1449,6 +1764,7 @@ documentclass = "scrbook"
 
         builder.push_metadata(
             &mut options,
+            PandocOutputKind::Pdf,
             "/tmp/omnidoc-libs",
             &PandocCommandProfile::Project,
         );
@@ -1530,6 +1846,7 @@ documentclass = "scrbook"
         let mut chinese = Vec::new();
         builder.push_metadata(
             &mut chinese,
+            PandocOutputKind::Pdf,
             "/tmp/omnidoc-libs",
             &PandocCommandProfile::StandalonePdf { use_cn: true },
         );
@@ -1540,6 +1857,7 @@ documentclass = "scrbook"
         let mut english = Vec::new();
         builder.push_metadata(
             &mut english,
+            PandocOutputKind::Pdf,
             "/tmp/omnidoc-libs",
             &PandocCommandProfile::StandalonePdf { use_cn: false },
         );

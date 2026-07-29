@@ -25,7 +25,6 @@ impl Fixture {
         let env_root = base.join("env");
         let home = env_root.join("home");
         fs::create_dir_all(project.join("build")).expect("project build dir");
-        fs::create_dir_all(project.join("plugins").join("sample")).expect("plugin dir");
         fs::create_dir_all(&home).expect("fake home dir");
         fs::create_dir_all(
             home.join("Library")
@@ -53,24 +52,6 @@ outputs = ["html"]
         fs::write(project.join("main.md"), "# Smoke\n\nA small document.\n").expect("main md");
         fs::write(project.join("build").join("smoke.html"), "<h1>Smoke</h1>\n")
             .expect("html output");
-        fs::write(
-            project.join("plugins").join("sample").join("manifest.toml"),
-            r#"manifest_version = 1
-key = "sample"
-name = "Sample Plugin"
-version = "0.1.0"
-compatible_omnidoc = ">=1.3.0,<2.0.0"
-kind = "template"
-language = "markdown"
-template_file = "template.md"
-"#,
-        )
-        .expect("plugin manifest");
-        fs::write(
-            project.join("plugins").join("sample").join("template.md"),
-            "# {{ title }}\n",
-        )
-        .expect("plugin template");
 
         Self { project, env_root }
     }
@@ -231,10 +212,13 @@ fn help_prioritizes_workflows_and_keeps_legacy_commands_out_of_the_main_list() {
     assert!(!config_help.contains("-o, --outdir <OUTDIR>"));
 
     let plugin_help = assert_success(fixture.command(&["plugin", "--help"]));
-    assert!(plugin_help.contains("  examples  "));
-    assert!(plugin_help.contains("  add       "));
-    assert!(plugin_help.contains("  list      "));
-    assert!(plugin_help.contains("  validate  "));
+    assert!(plugin_help.contains("  install          "));
+    assert!(plugin_help.contains("  install-example  "));
+    assert!(plugin_help.contains("  list             "));
+    assert!(plugin_help.contains("  validate         "));
+    assert!(plugin_help.contains("  enable           "));
+    assert!(plugin_help.contains("  trust            "));
+    assert!(plugin_help.contains("  run              "));
     assert!(!plugin_help.contains("\n      --validate"));
 
     let theme_help = assert_success(fixture.command(&["theme", "--help"]));
@@ -265,7 +249,13 @@ fn grouped_library_status_matches_the_legacy_form() {
 fn grouped_plugin_json_errors_remain_machine_readable() {
     let fixture = Fixture::new("plugin-json-error");
     let missing = fixture.base().join("missing-project");
-    let output = fixture.command(&["plugin", "list", &missing.display().to_string(), "--json"]);
+    let output = fixture.command(&[
+        "plugin",
+        "list",
+        "--project",
+        &missing.display().to_string(),
+        "--json",
+    ]);
     let stdout = assert_failure(output);
     let error: serde_json::Value =
         serde_json::from_str(&stdout).expect("structured plugin error JSON");
@@ -1116,9 +1106,18 @@ fn quality_commands_work_on_minimal_project() {
     assert_success(fixture.command(&["lock", "--update", &project]));
     assert_success(fixture.command(&["lock", "--check", &project]));
 
-    let plugins = assert_success(fixture.command(&["plugin", "--json", "--validate", &project]));
-    assert!(plugins.contains("sample"));
-    assert!(plugins.contains("\"valid\": true"));
+    let plugins =
+        assert_success(fixture.command(&["plugin", "list", "--project", &project, "--json"]));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&plugins).expect("plugin list JSON"),
+        serde_json::json!([])
+    );
+    let validation =
+        assert_success(fixture.command(&["plugin", "validate", "--project", &project, "--json"]));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&validation).expect("plugin validation JSON"),
+        serde_json::json!([])
+    );
 }
 
 #[test]
@@ -1138,8 +1137,17 @@ fn project_quality_and_publish_commands_resolve_nested_invocations() {
     assert!(fixture.project.join("omnidoc.lock").is_file());
     assert!(!nested.join("omnidoc.lock").exists());
 
-    let plugins = assert_success(fixture.command_in(&nested, &["plugin", "--json", "--validate"]));
-    assert!(plugins.contains("sample"));
+    let plugins = assert_success(fixture.command_in(&nested, &["plugin", "list", "--json"]));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&plugins).expect("nested plugin list JSON"),
+        serde_json::json!([])
+    );
+    let validation = assert_success(fixture.command_in(&nested, &["plugin", "validate", "--json"]));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&validation)
+            .expect("nested plugin validation JSON"),
+        serde_json::json!([])
+    );
 
     assert_success(fixture.command_in(
         &nested,
@@ -1541,8 +1549,12 @@ outputs = ["html"]
         "--json",
     ]));
     let preview: serde_json::Value = serde_json::from_str(&preview).expect("theme apply JSON");
-    assert_eq!(preview["key"], "theme.name");
-    assert_eq!(preview["value"], "engineering-book");
+    assert_eq!(preview["id"], "engineering-book");
+    assert_eq!(preview["version"], "=1.0.0");
+    assert_eq!(preview["compatibility"], "readium");
+    assert_eq!(preview["previous_compatibility"], serde_json::Value::Null);
+    assert_eq!(preview["changed"], true);
+    assert_eq!(preview["dry_run"], true);
     assert_eq!(preview["applied"], false);
     assert_eq!(
         fs::read_to_string(fixture.project.join(".omnidoc.toml")).expect("preview config"),
@@ -1552,12 +1564,21 @@ outputs = ["html"]
     let selected = fs::read_to_string(fixture.project.join(".omnidoc.toml")).expect("selected");
     assert!(selected.contains("[theme]"));
     assert!(selected.contains("name = \"engineering-book\""));
+    assert!(selected.contains("compatibility = \"readium\""));
     assert_success(fixture.command(&["config-validate", &fixture.project_arg()]));
 
     fs::remove_file(library.join("pandoc/css/engineering-book.css")).expect("remove css");
-    let failed =
-        assert_failure(fixture.command(&["theme", "validate", "engineering-book", "--json"]));
-    assert!(failed.contains("missing theme resource"));
+    let failed = assert_failure(fixture.command(&["theme", "validate", "--json"]));
+    let failed: serde_json::Value =
+        serde_json::from_str(&failed).expect("single theme validation JSON document");
+    assert_eq!(failed[0]["package"]["valid"], false);
+    assert!(failed[0]["errors"].as_array().is_some_and(|errors| {
+        errors.iter().any(|error| {
+            error
+                .as_str()
+                .is_some_and(|error| error.contains("missing built-in theme resource"))
+        })
+    }));
 }
 
 #[test]
@@ -1595,79 +1616,166 @@ fn bundled_theme_and_plugin_example_catalogs_are_complete() {
         .is_some_and(|themes| themes.iter().all(|theme| theme["valid"] == true)));
     assert_success(fixture.command(&["theme", "validate", "--json"]));
 
-    let examples = assert_success(fixture.command(&["plugin", "examples", "--json"]));
-    let examples: serde_json::Value =
-        serde_json::from_str(&examples).expect("plugin examples JSON");
-    let presets = examples
+    let project = fixture.project_arg();
+    for preset in ["quality-gate", "metadata-stamp", "word-count"] {
+        let installed = assert_success(fixture.command(&[
+            "plugin",
+            "install-example",
+            preset,
+            "--project",
+            &project,
+            "--json",
+        ]));
+        let installed: serde_json::Value =
+            serde_json::from_str(&installed).expect("plugin example installation JSON");
+        assert_eq!(installed["installed"], true);
+        assert_eq!(installed["scope"], "project");
+    }
+    let plugins =
+        assert_success(fixture.command(&["plugin", "list", "--project", &project, "--json"]));
+    let plugins: serde_json::Value = serde_json::from_str(&plugins).expect("plugin catalog JSON");
+    let ids = plugins
         .as_array()
-        .expect("example array")
+        .expect("plugin array")
         .iter()
-        .filter_map(|example| example["preset"].as_str())
+        .filter_map(|plugin| plugin["id"].as_str())
         .collect::<Vec<_>>();
-    assert_eq!(presets, ["asset-index", "build-journal", "quality-gate"]);
-    assert!(examples
-        .as_array()
-        .is_some_and(|examples| examples.iter().all(|example| example["valid"] == true)));
+    assert_eq!(
+        ids,
+        [
+            "omnidoc/metadata-stamp",
+            "omnidoc/quality-gate",
+            "omnidoc/word-count"
+        ]
+    );
+    assert!(plugins.as_array().is_some_and(|plugins| plugins
+        .iter()
+        .all(|plugin| plugin["valid"] == true
+            && plugin["enabled"] == false
+            && plugin["trusted"] == false)));
 }
 
 #[test]
-fn plugin_examples_install_transactionally_with_dry_run_and_conflict_protection() {
+fn plugin_examples_install_idempotently_and_require_explicit_replace() {
     let fixture = Fixture::new("plugin-add");
     let example = fixture
         .env_root
         .join("data/omnidoc/plugin-examples/quality-gate");
-    fs::create_dir_all(example.join("scripts")).expect("example scripts");
+    fs::create_dir_all(example.join("filters")).expect("example filters");
     fs::write(
-        example.join("manifest.toml"),
-        r#"manifest_version = 1
-key = "quality-gate"
+        example.join("omnidoc-package.toml"),
+        r#"manifest_version = 2
+kind = "plugin"
+id = "fixture/quality-gate"
 name = "Quality Gate"
 version = "1.0.0"
-compatible_omnidoc = ">=1.7.0,<2.0.0"
+compatible_omnidoc = ">=1.8.0,<2.0.0"
+compatible_pandoc = "*"
 description = "Fixture quality checks"
-kind = "plugin"
 
-[hooks]
-lint_rule = ["lint-tool"]
+[plugin]
+api_version = 1
+
+[[plugin.filters]]
+script = "filters/quality-gate.lua"
+formats = ["html", "pdf"]
+order = 900
 "#,
     )
     .expect("example manifest");
-    fs::write(example.join("scripts/rules.txt"), "fixture rules\n").expect("example file");
+    fs::write(example.join("filters/quality-gate.lua"), "return {}\n").expect("example filter");
 
     let project = fixture.project_arg();
-    let examples = assert_success(fixture.command(&["plugin", "examples", &project, "--json"]));
-    let examples: serde_json::Value = serde_json::from_str(&examples).expect("examples JSON");
-    assert_eq!(examples[0]["preset"], "quality-gate");
-    assert_eq!(examples[0]["hooks"], serde_json::json!(["lint_rule"]));
-
-    let destination = fixture.project.join("plugins/quality-gate");
-    let preview = assert_success(fixture.command(&[
+    let destination = fixture
+        .project
+        .join(".omnidoc/extensions/plugins/fixture/quality-gate/1.0.0");
+    let installed = assert_success(fixture.command(&[
         "plugin",
         "add",
-        "quality_gate",
+        "quality-gate",
+        "--project",
         &project,
-        "--dry-run",
         "--json",
     ]));
-    let preview: serde_json::Value = serde_json::from_str(&preview).expect("preview JSON");
-    assert_eq!(preview["dry_run"], true);
-    assert_eq!(preview["installed"], false);
-    assert!(!destination.exists());
-
-    let installed =
-        assert_success(fixture.command(&["plugin", "add", "quality-gate", &project, "--json"]));
     let installed: serde_json::Value = serde_json::from_str(&installed).expect("install JSON");
     assert_eq!(installed["installed"], true);
-    assert!(destination.join("manifest.toml").is_file());
+    assert_eq!(installed["replaced"], false);
+    assert_eq!(installed["id"], "fixture/quality-gate");
+    assert!(destination.join("omnidoc-package.toml").is_file());
     assert_eq!(
-        fs::read_to_string(destination.join("scripts/rules.txt")).expect("installed file"),
-        "fixture rules\n"
+        fs::read_to_string(destination.join("filters/quality-gate.lua")).expect("installed filter"),
+        "return {}\n"
     );
-    assert_success(fixture.command(&["plugin", "validate", &project, "--json"]));
-    assert_failure(fixture.command(&["plugin", "add", "quality-gate", &project]));
 
-    let missing =
-        assert_failure(fixture.command(&["plugin", "add", "missing", &project, "--json"]));
+    let repeated = assert_success(fixture.command(&[
+        "plugin",
+        "install-example",
+        "quality-gate",
+        "--project",
+        &project,
+        "--json",
+    ]));
+    let repeated: serde_json::Value = serde_json::from_str(&repeated).expect("repeat JSON");
+    assert_eq!(repeated["installed"], false);
+    assert_eq!(repeated["replaced"], false);
+
+    fs::write(
+        example.join("filters/quality-gate.lua"),
+        "return { Pandoc = function(doc) return doc end }\n",
+    )
+    .expect("changed example filter");
+    let conflict = assert_failure(fixture.command(&[
+        "plugin",
+        "install-example",
+        "quality-gate",
+        "--project",
+        &project,
+        "--json",
+    ]));
+    let conflict: serde_json::Value = serde_json::from_str(&conflict).expect("conflict error JSON");
+    assert!(conflict["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("different digest")));
+
+    let replaced = assert_success(fixture.command(&[
+        "plugin",
+        "install-example",
+        "quality-gate",
+        "--project",
+        &project,
+        "--replace",
+        "--json",
+    ]));
+    let replaced: serde_json::Value = serde_json::from_str(&replaced).expect("replace JSON");
+    assert_eq!(replaced["installed"], true);
+    assert_eq!(replaced["replaced"], true);
+    assert_success(fixture.command(&[
+        "plugin",
+        "validate",
+        "fixture/quality-gate@=1.0.0",
+        "--project",
+        &project,
+        "--json",
+    ]));
+
+    fs::remove_file(destination.join("filters/quality-gate.lua")).expect("remove installed filter");
+    let invalid =
+        assert_failure(fixture.command(&["plugin", "validate", "--project", &project, "--json"]));
+    let invalid: serde_json::Value =
+        serde_json::from_str(&invalid).expect("single plugin validation JSON document");
+    assert_eq!(invalid[0]["package"]["valid"], false);
+    assert!(invalid[0]["errors"]
+        .as_array()
+        .is_some_and(|errors| !errors.is_empty()));
+
+    let missing = assert_failure(fixture.command(&[
+        "plugin",
+        "add",
+        "missing",
+        "--project",
+        &project,
+        "--json",
+    ]));
     let missing: serde_json::Value = serde_json::from_str(&missing).expect("error JSON");
     assert!(missing["error"]["message"]
         .as_str()
@@ -2171,46 +2279,207 @@ fn failed_publish_preserves_existing_release_directory() {
         .any(|entry| entry.file_name().to_string_lossy().contains(".staging.")));
 }
 
-#[cfg(unix)]
 #[test]
-fn plugin_lint_rule_runs_from_cli() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let fixture = Fixture::new("plugin-lint");
-    let plugin_dir = fixture.project.join("plugins").join("sample");
-    let lint_script = plugin_dir.join("lint.sh");
+fn plugin_install_trust_and_enable_flow_is_explicit() {
+    let fixture = Fixture::new("plugin-state");
+    let source = fixture.base().join("plugin-package");
+    fs::create_dir_all(source.join("filters")).expect("plugin filters");
     fs::write(
-        &lint_script,
-        "#!/bin/sh\nprintf 'warning:main.md:2:1:plugin warning\\n'\n",
-    )
-    .expect("lint hook");
-    let mut permissions = fs::metadata(&lint_script).expect("metadata").permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&lint_script, permissions).expect("permissions");
-    fs::write(
-        plugin_dir.join("manifest.toml"),
-        r#"manifest_version = 1
-key = "sample"
+        source.join("omnidoc-package.toml"),
+        r#"manifest_version = 2
+kind = "plugin"
+id = "fixture/sample"
 name = "Sample Plugin"
 version = "0.1.0"
-compatible_omnidoc = ">=1.3.0,<2.0.0"
-kind = "template"
-language = "markdown"
-template_file = "template.md"
+compatible_omnidoc = ">=1.8.0,<2.0.0"
+compatible_pandoc = "*"
 
-[hooks]
-lint_rule = ["lint.sh"]
+[plugin]
+api_version = 1
+
+[[plugin.filters]]
+script = "filters/sample.lua"
+formats = ["html"]
+order = 500
+"#,
+    )
+    .expect("plugin manifest");
+    fs::write(source.join("filters/sample.lua"), "return {}\n").expect("plugin filter");
+
+    let project = fixture.project_arg();
+    let source = source.display().to_string();
+    let installed = assert_success(fixture.command(&[
+        "plugin",
+        "install",
+        &source,
+        "--project",
+        &project,
+        "--json",
+    ]));
+    let installed: serde_json::Value = serde_json::from_str(&installed).expect("install JSON");
+    assert_eq!(installed["installed"], true);
+
+    let list =
+        assert_success(fixture.command(&["plugin", "list", "--project", &project, "--json"]));
+    let list: serde_json::Value = serde_json::from_str(&list).expect("plugin list JSON");
+    assert_eq!(list[0]["id"], "fixture/sample");
+    assert_eq!(list[0]["enabled"], false);
+    assert_eq!(list[0]["trusted"], false);
+
+    assert_success(fixture.command(&[
+        "plugin",
+        "enable",
+        "fixture/sample@=0.1.0",
+        &project,
+        "--json",
+    ]));
+    let enabled =
+        assert_success(fixture.command(&["plugin", "list", "--project", &project, "--json"]));
+    let enabled: serde_json::Value = serde_json::from_str(&enabled).expect("enabled list JSON");
+    assert_eq!(enabled[0]["enabled"], true);
+    assert_eq!(enabled[0]["trusted"], false);
+
+    let trusted = assert_success(fixture.command(&[
+        "plugin",
+        "trust",
+        "fixture/sample@=0.1.0",
+        "--project",
+        &project,
+        "--json",
+    ]));
+    let trusted: serde_json::Value = serde_json::from_str(&trusted).expect("trust JSON");
+    assert_eq!(trusted["trusted"], true);
+    assert_eq!(trusted["changed"], true);
+    let active =
+        assert_success(fixture.command(&["plugin", "list", "--project", &project, "--json"]));
+    let active: serde_json::Value = serde_json::from_str(&active).expect("active list JSON");
+    assert_eq!(active[0]["enabled"], true);
+    assert_eq!(active[0]["trusted"], true);
+
+    assert_success(fixture.command(&["lock", "--update", &project]));
+    let lock = fs::read_to_string(fixture.project.join("omnidoc.lock")).expect("plugin lock");
+    assert!(lock.contains("id = \"fixture/sample\""));
+    assert!(lock.contains("source = \"project\""));
+    assert!(!lock.contains(&source));
+
+    assert_success(fixture.command(&["plugin", "disable", "fixture/sample", &project, "--json"]));
+    assert_success(fixture.command(&[
+        "plugin",
+        "untrust",
+        "fixture/sample@=0.1.0",
+        "--project",
+        &project,
+        "--json",
+    ]));
+    let inactive =
+        assert_success(fixture.command(&["plugin", "list", "--project", &project, "--json"]));
+    let inactive: serde_json::Value = serde_json::from_str(&inactive).expect("inactive list JSON");
+    assert_eq!(inactive[0]["enabled"], false);
+    assert_eq!(inactive[0]["trusted"], false);
+}
+
+#[test]
+fn relative_user_extension_store_is_anchored_to_the_global_config() {
+    let fixture = Fixture::new("relative-extension-store");
+    fs::write(
+        fixture.env_root.join("config/omnidoc.toml"),
+        "[extensions]\npath = 'relative-extensions'\n",
+    )
+    .expect("global config");
+    let source = fixture.base().join("relative-plugin");
+    fs::create_dir_all(source.join("commands")).expect("plugin commands");
+    fs::write(source.join("commands/tool.lua"), "return true\n").expect("plugin command");
+    fs::write(
+        source.join("omnidoc-package.toml"),
+        r#"manifest_version = 2
+kind = "plugin"
+id = "fixture/relative-store"
+version = "1.0.0"
+compatible_omnidoc = ">=1.8,<2"
+compatible_pandoc = "*"
+
+[plugin]
+api_version = 1
+
+[[plugin.commands]]
+name = "tool"
+script = "commands/tool.lua"
 "#,
     )
     .expect("plugin manifest");
 
+    let source = source.to_string_lossy().to_string();
+    let installed = assert_success(fixture.command(&["plugin", "install", &source, "--json"]));
+    let installed: serde_json::Value = serde_json::from_str(&installed).expect("install JSON");
+    let expected = fixture
+        .env_root
+        .join("config/relative-extensions/plugins/fixture/relative-store/1.0.0");
+    assert_same_existing_path(
+        installed["destination"]
+            .as_str()
+            .expect("installation destination"),
+        expected,
+    );
+}
+
+#[test]
+fn incompatible_or_unavailable_pandoc_blocks_plugin_enable_without_editing_config() {
+    let fixture = Fixture::new("plugin-pandoc-compatibility");
+    let missing_pandoc = fixture.base().join("missing-pandoc");
+    fs::write(
+        fixture.env_root.join("config/omnidoc.toml"),
+        format!("[tools]\npandoc = {:?}\n", missing_pandoc.to_string_lossy()),
+    )
+    .expect("global config");
+    let source = fixture.base().join("compatible-plugin");
+    fs::create_dir_all(source.join("filters")).expect("plugin filters");
+    fs::write(source.join("filters/main.lua"), "return {}\n").expect("plugin filter");
+    fs::write(
+        source.join("omnidoc-package.toml"),
+        r#"manifest_version = 2
+kind = "plugin"
+id = "fixture/requires-pandoc"
+version = "1.0.0"
+compatible_omnidoc = ">=1.8,<2"
+compatible_pandoc = ">=3,<4"
+
+[plugin]
+api_version = 1
+
+[[plugin.filters]]
+script = "filters/main.lua"
+formats = ["html"]
+"#,
+    )
+    .expect("plugin manifest");
     let project = fixture.project_arg();
-    let lint = assert_success(fixture.command(&["lint", &project]));
-    assert!(lint.contains("Plugin sample: plugin warning"));
+    let source = source.to_string_lossy().to_string();
+    assert_success(fixture.command(&[
+        "plugin",
+        "install",
+        &source,
+        "--project",
+        &project,
+        "--json",
+    ]));
+    let before = fs::read_to_string(fixture.project.join(".omnidoc.toml"))
+        .expect("project config before enable");
 
-    let listed = assert_success(fixture.command(&["plugin", "list", &project, "--json"]));
-    assert!(listed.contains("\"lint_rule\""));
-
-    let plugins = assert_success(fixture.command(&["plugin", "validate", &project, "--json"]));
-    assert!(plugins.contains("\"lint_rule\""));
+    let failed = assert_failure(fixture.command(&[
+        "plugin",
+        "enable",
+        "fixture/requires-pandoc@=1.0.0",
+        &project,
+        "--json",
+    ]));
+    let failed: serde_json::Value =
+        serde_json::from_str(&failed).expect("single JSON error document");
+    assert!(failed["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("cannot check extension Pandoc compatibility")));
+    assert_eq!(
+        fs::read_to_string(fixture.project.join(".omnidoc.toml"))
+            .expect("project config after enable"),
+        before
+    );
 }

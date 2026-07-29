@@ -1,0 +1,16 @@
+manifest_version = 2
+kind = "plugin"
+id = "omnidoc/quality-gate"
+name = "Documentation Quality Gate"
+version = "1.0.0"
+description = "Reports TODO/FIXME markers and documents without a level-one heading"
+compatible_omnidoc = ">=1.8.0,<2.0.0"
+compatible_pandoc = ">=3.0,<4.0"
+
+[plugin]
+api_version = 1
+
+[[plugin.filters]]
+script = "filters/quality-gate.lua"
+formats = ["pdf", "html", "epub", "docx", "pptx", "latex"]
+order = 900
