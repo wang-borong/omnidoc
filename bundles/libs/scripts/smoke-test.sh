@@ -187,8 +187,8 @@ Header smoke.
 EOF
 pandoc "$work/header-smoke.md" \
   --metadata-file="$work/header-metadata.yaml" \
-  --metadata omnidoc-latex-header-0001="$work/managed-header.tex" \
-  --metadata omnidoc-user-latex-header-0001="$work/user-header.tex" \
+  --metadata omnidoc-theme-latex-header-0001="$work/managed-header.tex" \
+  --metadata omnidoc-theme-latex-header-2001="$work/user-header.tex" \
   --lua-filter="$root/pandoc/data/filters/metadata-defaults.lua" \
   --lua-filter="$root/pandoc/data/filters/latex-headers.lua" \
   --standalone -t latex -o "$work/header-smoke.tex"

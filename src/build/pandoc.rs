@@ -17,6 +17,14 @@ use crate::utils::fs;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+// Keep the private metadata wire format compatible with the released v1.8.0
+// omnidoc-libs sidecar. Its latex-headers.lua recognizes only this namespace.
+// Number ranges preserve deterministic append order without requiring a new
+// sidecar: built-in headers, selected-theme headers, then user headers.
+const LATEX_HEADER_METADATA_PREFIX: &str = "omnidoc-theme-latex-header";
+const THEME_LATEX_HEADER_OFFSET: usize = 1000;
+const USER_LATEX_HEADER_OFFSET: usize = 2000;
+
 /// Pandoc 构建器
 /// 实现 markdown 项目的多格式构建功能
 pub struct PandocBuilder {
@@ -54,6 +62,13 @@ impl PandocCommandProfile {
 }
 
 impl PandocBuilder {
+    fn push_latex_header_metadata(options: &mut Vec<String>, ordinal: usize, header: &str) {
+        options.push(pandoc::FLAG_METADATA.to_string());
+        options.push(format!(
+            "{LATEX_HEADER_METADATA_PREFIX}-{ordinal:04}={header}"
+        ));
+    }
+
     pub fn new(config: MergedConfig) -> Result<Self> {
         let executor = BuildExecutor::new(config.tool_paths.clone());
         let theme = load_selected_theme(&config)?;
@@ -254,10 +269,11 @@ impl PandocBuilder {
                 .or_else(|| option.strip_prefix("-H").filter(|value| !value.is_empty()));
             if let Some(header) = inline_header.filter(|value| !value.is_empty()) {
                 header_index += 1;
-                options.push(pandoc::FLAG_METADATA.to_string());
-                options.push(format!(
-                    "omnidoc-user-latex-header-{header_index:04}={header}"
-                ));
+                Self::push_latex_header_metadata(
+                    options,
+                    USER_LATEX_HEADER_OFFSET + header_index,
+                    header,
+                );
                 index += 1;
                 continue;
             }
@@ -265,10 +281,11 @@ impl PandocBuilder {
             if option == pandoc::FLAG_INCLUDE_IN_HEADER || option == "-H" {
                 if let Some(header) = configured.get(index + 1).filter(|value| !value.is_empty()) {
                     header_index += 1;
-                    options.push(pandoc::FLAG_METADATA.to_string());
-                    options.push(format!(
-                        "omnidoc-user-latex-header-{header_index:04}={header}"
-                    ));
+                    Self::push_latex_header_metadata(
+                        options,
+                        USER_LATEX_HEADER_OFFSET + header_index,
+                        header,
+                    );
                     index += 2;
                     continue;
                 }
@@ -290,12 +307,12 @@ impl PandocBuilder {
         }
         if let Some(theme) = &self.theme {
             for (index, relative) in theme.resources.latex_headers.iter().enumerate() {
-                options.push(pandoc::FLAG_METADATA.to_string());
-                options.push(format!(
-                    "omnidoc-theme-latex-header-{:04}={}",
-                    index + 1,
-                    join_portable_relative(omnidoc_lib, relative).display()
-                ));
+                let header = join_portable_relative(omnidoc_lib, relative);
+                Self::push_latex_header_metadata(
+                    options,
+                    THEME_LATEX_HEADER_OFFSET + index + 1,
+                    &header.to_string_lossy(),
+                );
             }
         }
     }
@@ -318,12 +335,8 @@ impl PandocBuilder {
         .enumerate()
         {
             if filters.contains(&filter) {
-                options.push(pandoc::FLAG_METADATA.to_string());
-                options.push(format!(
-                    "omnidoc-latex-header-{:04}={}",
-                    index + 1,
-                    join_portable_relative(omnidoc_lib, relative).display()
-                ));
+                let header = join_portable_relative(omnidoc_lib, relative);
+                Self::push_latex_header_metadata(options, index + 1, &header.to_string_lossy());
             }
         }
     }
@@ -956,12 +969,12 @@ mod tests {
             pdf_options,
             [
                 "--metadata",
-                "omnidoc-user-latex-header-0001=common.tex",
+                "omnidoc-theme-latex-header-2001=common.tex",
                 "--toc-depth=1",
                 "--metadata",
-                "omnidoc-user-latex-header-0002=short.tex",
+                "omnidoc-theme-latex-header-2002=short.tex",
                 "--metadata",
-                "omnidoc-user-latex-header-0003=format.tex",
+                "omnidoc-theme-latex-header-2003=format.tex",
             ]
         );
 
@@ -993,12 +1006,12 @@ mod tests {
             vec![
                 "--metadata".to_string(),
                 format!(
-                    "omnidoc-latex-header-0001={}",
+                    "omnidoc-theme-latex-header-0001={}",
                     library.join("pandoc/headers/emoji.tex").display()
                 ),
                 "--metadata".to_string(),
                 format!(
-                    "omnidoc-latex-header-0002={}",
+                    "omnidoc-theme-latex-header-0002={}",
                     library.join("pandoc/headers/semantic-blocks.tex").display()
                 ),
             ]
@@ -1249,7 +1262,7 @@ documentclass = "scrbook"
             latex_options,
             vec![
                 "--metadata".to_string(),
-                format!("omnidoc-theme-latex-header-0001={}", header.display())
+                format!("omnidoc-theme-latex-header-1001={}", header.display())
             ]
         );
 

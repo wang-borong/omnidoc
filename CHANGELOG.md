@@ -5,7 +5,8 @@
 - Preserved project `header-includes` from Pandoc metadata files and configured
   `--include-in-header` options when adding OmniDoc-managed emoji,
   semantic-block, and theme headers, preventing themed link colors and other
-  project LaTeX definitions from disappearing in PDF builds.
+  project LaTeX definitions from disappearing in PDF builds; the transport
+  remains compatible with the originally released v1.8.0 library sidecar.
 
 ## 1.8.0 - 2026-07-28
 
