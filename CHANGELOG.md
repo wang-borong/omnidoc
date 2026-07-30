@@ -43,6 +43,9 @@
 - Made explicit child theme output lists, including an empty list, override
   inherited capabilities and validate the fully resolved inheritance chain
   before a theme can be selected.
+- Fixed `convert pdf -l cn` for Markdown files that already contain YAML front
+  matter by applying the CLI language independently of template synthesis and
+  supplying non-overriding Noto CJK font defaults to Pandoc's LaTeX writer.
 
 ## 1.8.1 - 2026-07-29
 

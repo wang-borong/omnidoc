@@ -27,7 +27,8 @@ To use this tool, you need to learn how to write in [Pandoc markdown](https://pa
 
   CJK document fonts are system resources and are not embedded in the OmniDoc
   package. Install Noto CJK fonts (for example `fonts-noto-cjk` on Debian or
-  `noto-fonts-cjk` on Arch Linux) when using the engineering-book theme.
+  `noto-fonts-cjk` on Arch Linux) when using `convert pdf -l cn` or a CJK PDF
+  theme.
 
   TeX Live remains an optional compatibility dependency for raw LaTeX
   projects that require `latexmkrc`, Biber, specialized TeX utilities, or a

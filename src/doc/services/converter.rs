@@ -1,5 +1,5 @@
 use crate::build::executor::BuildExecutor;
-use crate::build::pandoc::{PandocBuilder, PandocCommandProfile};
+use crate::build::pandoc::{PandocBuilder, PandocCommandProfile, StandalonePdfLanguage};
 use crate::build::pandoc_policy::PandocOutputKind;
 use crate::config::MergedConfig;
 use crate::constants::{file_names, pandoc};
@@ -41,6 +41,42 @@ fn resolve_from(base: &Path, path: &Path) -> PathBuf {
     }
 }
 
+fn has_yaml_frontmatter(content: &str) -> bool {
+    let trimmed = content
+        .trim_start_matches(|character: char| character.is_whitespace() || character == '\u{feff}');
+    trimmed.starts_with("---\n") || trimmed.starts_with("---\r\n")
+}
+
+fn resolve_pdf_language(
+    language: Option<&str>,
+    has_frontmatter: bool,
+) -> Result<StandalonePdfLanguage> {
+    let Some(language) = language.map(str::trim) else {
+        return Ok(if has_frontmatter {
+            StandalonePdfLanguage::Document
+        } else {
+            StandalonePdfLanguage::Chinese
+        });
+    };
+
+    if ["cn", "zh", "zh-cn", "zh_cn"]
+        .iter()
+        .any(|candidate| language.eq_ignore_ascii_case(candidate))
+    {
+        return Ok(StandalonePdfLanguage::Chinese);
+    }
+    if ["en", "en-us", "en_us"]
+        .iter()
+        .any(|candidate| language.eq_ignore_ascii_case(candidate))
+    {
+        return Ok(StandalonePdfLanguage::English);
+    }
+
+    Err(OmniDocError::UnsupportedLanguage(format!(
+        "'{language}'; expected cn or en"
+    )))
+}
+
 /// 格式转换服务
 /// 提供 md2pdf 和 md2html 功能
 pub struct ConverterService {
@@ -75,23 +111,19 @@ impl ConverterService {
             out
         };
 
+        let content = fs::read_to_string(&input).ok();
+        let has_frontmatter = content.as_deref().is_some_and(has_yaml_frontmatter);
+        let language = resolve_pdf_language(lang, has_frontmatter)?;
+
         // 如果输入 Markdown 没有 YAML 前言（--- 开头），则基于内置模板生成元数据头，
         // 写入临时文件：元数据头 + 原始内容，然后以该临时文件作为 Pandoc 输入
-        let mut use_cn = false;
-        let temporary_input = if let Ok(content) = fs::read_to_string(&input) {
-            let trimmed = content.trim_start();
-            let has_frontmatter = trimmed.starts_with("---\n") || trimmed.starts_with("---\r\n");
+        let temporary_input = if let Some(content) = content {
             if !has_frontmatter {
                 let title = crate::utils::path::file_stem_str(&input).unwrap_or("document");
                 let author = self.config.author.as_deref().unwrap_or("Unknown Author");
 
                 // 语言：默认中文（保持与 Python 默认一致）；英文时使用更简洁的头部
-                use_cn = match lang {
-                    Some(l) => l.eq_ignore_ascii_case("cn") || l.eq_ignore_ascii_case("zh"),
-                    None => true,
-                };
-
-                let header = if use_cn {
+                let header = if language == StandalonePdfLanguage::Chinese {
                     // 使用 CTEXMD 模板生成与 Python 版本相近的元数据头
                     generate_markdown_template(title, author, TemplateDocType::CTEXMD)
                 } else {
@@ -140,7 +172,7 @@ impl ConverterService {
             effective_input,
             &output_path,
             PandocOutputKind::Pdf,
-            &PandocCommandProfile::StandalonePdf { use_cn },
+            &PandocCommandProfile::StandalonePdf { language },
         )?;
 
         // 执行转换
@@ -203,7 +235,8 @@ impl ConverterService {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_from, TemporaryInput};
+    use super::{has_yaml_frontmatter, resolve_from, resolve_pdf_language, TemporaryInput};
+    use crate::build::pandoc::StandalonePdfLanguage;
     use std::fs;
     use std::path::Path;
 
@@ -215,6 +248,37 @@ mod tests {
             resolve_from(base, Path::new("docs/manual.md")),
             base.join("docs/manual.md")
         );
+    }
+
+    #[test]
+    fn explicit_pdf_language_is_independent_of_frontmatter() {
+        assert_eq!(
+            resolve_pdf_language(Some("cn"), true).expect("Chinese language"),
+            StandalonePdfLanguage::Chinese
+        );
+        assert_eq!(
+            resolve_pdf_language(Some("en"), true).expect("English language"),
+            StandalonePdfLanguage::English
+        );
+        assert_eq!(
+            resolve_pdf_language(None, true).expect("document language"),
+            StandalonePdfLanguage::Document
+        );
+        assert_eq!(
+            resolve_pdf_language(None, false).expect("default language"),
+            StandalonePdfLanguage::Chinese
+        );
+    }
+
+    #[test]
+    fn recognizes_frontmatter_after_a_utf8_bom() {
+        assert!(has_yaml_frontmatter("\u{feff}---\ntitle: Manual\n---\n"));
+    }
+
+    #[test]
+    fn rejects_unsupported_pdf_languages() {
+        let error = resolve_pdf_language(Some("fr"), true).expect_err("unsupported language");
+        assert!(error.to_string().contains("expected cn or en"));
     }
 
     #[test]

@@ -28,6 +28,11 @@ use std::path::{Path, PathBuf};
 const LATEX_HEADER_METADATA_PREFIX: &str = "omnidoc-theme-latex-header";
 const THEME_LATEX_HEADER_OFFSET: usize = 1000;
 const USER_LATEX_HEADER_OFFSET: usize = 2000;
+const STANDALONE_CJK_FONT_DEFAULTS: [(&str, &str); 3] = [
+    ("CJKmainfont", "Noto Serif CJK SC"),
+    ("CJKsansfont", "Noto Sans CJK SC"),
+    ("CJKmonofont", "Noto Sans Mono CJK SC"),
+];
 
 /// Pandoc 构建器
 /// 实现 markdown 项目的多格式构建功能
@@ -38,12 +43,19 @@ pub struct PandocBuilder {
     _extension_locks: Option<ExtensionStoreReadLocks>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StandalonePdfLanguage {
+    Document,
+    Chinese,
+    English,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) enum PandocCommandProfile {
     #[default]
     Project,
     StandalonePdf {
-        use_cn: bool,
+        language: StandalonePdfLanguage,
     },
     StandaloneHtml {
         css: Option<PathBuf>,
@@ -582,17 +594,31 @@ impl PandocBuilder {
         profile: &PandocCommandProfile,
     ) {
         match profile {
-            PandocCommandProfile::StandalonePdf { use_cn: true } => {
+            PandocCommandProfile::StandalonePdf {
+                language: StandalonePdfLanguage::Chinese,
+            } => {
                 self.push_crossref_yaml(options, omnidoc_lib, pandoc::LIB_PANDOC_CROSSREF_YAML);
+                options.push(pandoc::FLAG_META_SHORT.to_string());
+                options.push("lang=zh-CN".to_string());
+                // The metadata-defaults filter fills these only when the
+                // document did not select its own CJK fonts.
+                for (key, value) in STANDALONE_CJK_FONT_DEFAULTS {
+                    options.push(pandoc::FLAG_META_SHORT.to_string());
+                    options.push(format!("omnidoc-default-{key}={value}"));
+                }
                 return;
             }
-            PandocCommandProfile::StandalonePdf { use_cn: false } => {
+            PandocCommandProfile::StandalonePdf { language } => {
                 options.push(pandoc::FLAG_META_SHORT.to_string());
                 options.push(format!(
                     "omnidoc-zh-crossref-yaml={}/{}",
                     omnidoc_lib,
                     pandoc::LIB_PANDOC_CROSSREF_YAML
                 ));
+                if *language == StandalonePdfLanguage::English {
+                    options.push(pandoc::FLAG_META_SHORT.to_string());
+                    options.push("lang=en".to_string());
+                }
                 return;
             }
             PandocCommandProfile::StandaloneHtml { .. } => {
@@ -979,7 +1005,7 @@ mod tests {
     use super::{
         join_portable_relative, prepend_path_list, push_depfile_metadata, resolve_css_path,
     };
-    use crate::build::pandoc::{PandocBuilder, PandocCommandProfile};
+    use crate::build::pandoc::{PandocBuilder, PandocCommandProfile, StandalonePdfLanguage};
     use crate::build::pandoc_policy::PandocOutputKind;
     use crate::build::pipeline::BuildPipeline;
     use crate::config::MergedConfig;
@@ -1841,31 +1867,62 @@ documentclass = "scrbook"
     }
 
     #[test]
-    fn standalone_pdf_profile_controls_crossref_metadata() {
+    fn standalone_pdf_profile_controls_language_fonts_and_crossref_metadata() {
         let builder = PandocBuilder::new(MergedConfig::default()).expect("builder");
         let mut chinese = Vec::new();
         builder.push_metadata(
             &mut chinese,
             PandocOutputKind::Pdf,
             "/tmp/omnidoc-libs",
-            &PandocCommandProfile::StandalonePdf { use_cn: true },
+            &PandocCommandProfile::StandalonePdf {
+                language: StandalonePdfLanguage::Chinese,
+            },
         );
         assert!(chinese
             .iter()
             .any(|option| option.contains("pandoc/crossref.yaml")));
+        assert!(chinese
+            .windows(2)
+            .any(|pair| pair == ["-M".to_string(), "lang=zh-CN".to_string()]));
+        for expected in [
+            "omnidoc-default-CJKmainfont=Noto Serif CJK SC",
+            "omnidoc-default-CJKsansfont=Noto Sans CJK SC",
+            "omnidoc-default-CJKmonofont=Noto Sans Mono CJK SC",
+        ] {
+            assert!(chinese.iter().any(|option| option == expected));
+        }
 
         let mut english = Vec::new();
         builder.push_metadata(
             &mut english,
             PandocOutputKind::Pdf,
             "/tmp/omnidoc-libs",
-            &PandocCommandProfile::StandalonePdf { use_cn: false },
+            &PandocCommandProfile::StandalonePdf {
+                language: StandalonePdfLanguage::English,
+            },
         );
         assert!(english
             .iter()
             .any(|option| option.starts_with("omnidoc-zh-crossref-yaml=")));
+        assert!(english
+            .windows(2)
+            .any(|pair| pair == ["-M".to_string(), "lang=en".to_string()]));
         assert!(!english
             .iter()
             .any(|option| option.starts_with("crossrefYaml=")));
+        assert!(!english.iter().any(|option| option.contains("CJKmainfont")));
+
+        let mut document = Vec::new();
+        builder.push_metadata(
+            &mut document,
+            PandocOutputKind::Pdf,
+            "/tmp/omnidoc-libs",
+            &PandocCommandProfile::StandalonePdf {
+                language: StandalonePdfLanguage::Document,
+            },
+        );
+        assert!(!document
+            .iter()
+            .any(|option| option == "lang=en" || option == "lang=zh-CN"));
     }
 }
