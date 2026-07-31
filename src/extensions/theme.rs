@@ -803,12 +803,20 @@ fn write_if_changed(path: &Path, content: &[u8]) -> Result<()> {
 fn resolve_resource_list(root: &Path, resources: &[String]) -> Vec<PathBuf> {
     resources
         .iter()
-        .map(|resource| root.join(resource))
+        .map(|resource| resolve_resource_path(root, resource))
         .collect()
 }
 
 fn resolve_optional_resource(root: &Path, resource: &Option<String>) -> Option<PathBuf> {
-    resource.as_ref().map(|resource| root.join(resource))
+    resource
+        .as_ref()
+        .map(|resource| resolve_resource_path(root, resource))
+}
+
+fn resolve_resource_path(root: &Path, resource: &str) -> PathBuf {
+    safe_relative_path(resource)
+        .map(|relative| root.join(relative))
+        .unwrap_or_else(|| root.join(resource))
 }
 
 fn append_unique_paths(target: &mut Vec<PathBuf>, values: Vec<PathBuf>) {

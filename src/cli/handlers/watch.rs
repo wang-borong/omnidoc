@@ -225,7 +225,7 @@ impl WatchContext {
             external_files.push(plugin_trust_path()?);
         }
 
-        let normalized_project = normalize_path(project_path.to_path_buf());
+        let normalized_project = absolute_watch_path(project_path, project_path);
         for resource in resource_paths {
             if resource.starts_with(&normalized_project) {
                 tracked_files.insert(resource);
@@ -270,7 +270,24 @@ fn absolute_watch_path(base: &Path, path: &Path) -> PathBuf {
     } else {
         base.join(path)
     };
-    path.canonicalize().unwrap_or_else(|_| normalize_path(path))
+    canonicalize_with_missing_tail(&path).unwrap_or_else(|| normalize_path(path))
+}
+
+fn canonicalize_with_missing_tail(path: &Path) -> Option<PathBuf> {
+    let normalized = normalize_path(path.to_path_buf());
+    let mut candidate = normalized.as_path();
+    let mut missing = Vec::new();
+
+    loop {
+        if let Ok(mut canonical) = candidate.canonicalize() {
+            for component in missing.iter().rev() {
+                canonical.push(component);
+            }
+            return Some(normalize_path(canonical));
+        }
+        missing.push(PathBuf::from(candidate.file_name()?));
+        candidate = candidate.parent()?;
+    }
 }
 
 fn watch_registrations(filter: &WatchFilter) -> BTreeSet<WatchRegistration> {
@@ -479,7 +496,7 @@ impl WatchFilter {
         external_roots: Vec<PathBuf>,
         external_files: Vec<PathBuf>,
     ) -> Result<Self> {
-        let project_path = normalize_path(project_path.to_path_buf());
+        let project_path = absolute_watch_path(project_path, project_path);
         let outdir = normalize_path(output_directory(&project_path, config));
         let figure_output_name = config
             .figure_output
@@ -512,7 +529,7 @@ impl WatchFilter {
 
         let tracked_files = tracked_files
             .into_iter()
-            .map(normalize_path)
+            .map(|path| absolute_watch_path(&project_path, &path))
             .collect::<BTreeSet<_>>();
         let mut extension_roots = extension_roots
             .into_iter()
@@ -685,7 +702,8 @@ fn compact_changed_paths(filter: &WatchFilter, paths: &[PathBuf]) -> Vec<String>
 #[cfg(test)]
 mod tests {
     use super::{
-        recursive_roots_requiring_rearm, should_rebuild_for_event, watch_registrations, WatchFilter,
+        absolute_watch_path, recursive_roots_requiring_rearm, should_rebuild_for_event,
+        watch_registrations, WatchFilter,
     };
     use crate::config::MergedConfig;
     use notify::{Event, EventKind};
@@ -803,6 +821,40 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn missing_extension_descendants_follow_canonical_store_aliases() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().expect("workspace");
+        let project = workspace.path().join("project");
+        let real_parent = workspace.path().join("real");
+        let real_store = real_parent.join("extensions");
+        let alias_parent = workspace.path().join("alias");
+        let alias_store = alias_parent.join("extensions");
+        fs::create_dir_all(&project).expect("project");
+        fs::create_dir_all(&real_store).expect("extension store");
+        symlink(&real_parent, &alias_parent).expect("store alias");
+        let filter = WatchFilter::with_dependencies(
+            &project,
+            &MergedConfig::default(),
+            &["html".into()],
+            BTreeSet::new(),
+            vec![alias_store.clone()],
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("extension watch filter");
+
+        assert_eq!(
+            filter.extension_roots,
+            vec![absolute_watch_path(&project, &real_store)]
+        );
+        assert!(!filter.should_watch_path(
+            &alias_store.join(".transactions/installing/payload/filters/main.lua")
+        ));
+    }
+
     #[test]
     fn explicitly_tracked_inputs_are_watched_regardless_of_extension() {
         let project = tempfile::tempdir().expect("project");
@@ -858,10 +910,11 @@ mod tests {
         )
         .expect("external file filter");
         let registrations = watch_registrations(&filter);
+        let canonical_existing = absolute_watch_path(&project, &existing);
 
-        assert!(registrations
-            .iter()
-            .any(|registration| registration.path == existing && !registration.recursive));
+        assert!(registrations.iter().any(|registration| {
+            registration.path == canonical_existing && !registration.recursive
+        }));
         assert!(filter.should_watch_path(&existing.join("nested")));
         assert!(filter.should_watch_path(&missing_file));
     }
@@ -909,17 +962,22 @@ mod tests {
             Vec::new(),
         )
         .expect("extension watch filter");
+        let canonical_store = filter
+            .extension_roots
+            .first()
+            .expect("canonical extension root")
+            .clone();
 
         assert_eq!(
             recursive_roots_requiring_rearm(&filter, std::slice::from_ref(&store)),
-            BTreeSet::from([store.clone()])
+            BTreeSet::from([canonical_store.clone()])
         );
         assert_eq!(
             recursive_roots_requiring_rearm(
                 &filter,
                 &[store.parent().expect("store parent").to_path_buf()],
             ),
-            BTreeSet::from([store])
+            BTreeSet::from([canonical_store])
         );
     }
 
@@ -940,9 +998,10 @@ mod tests {
         )
         .expect("extension watch filter");
         let registrations = watch_registrations(&filter);
+        let canonical_workspace = absolute_watch_path(&project, workspace.path());
 
         assert!(registrations.iter().any(|registration| {
-            registration.path == workspace.path() && !registration.recursive
+            registration.path == canonical_workspace && !registration.recursive
         }));
         assert!(filter.should_watch_path(&workspace.path().join("managed")));
         assert!(filter.should_watch_path(&store));

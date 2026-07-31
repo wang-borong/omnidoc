@@ -46,6 +46,10 @@
 - Fixed `convert pdf -l cn` for Markdown files that already contain YAML front
   matter by applying the CLI language independently of template synthesis and
   supplying non-overriding Noto CJK font defaults to Pandoc's LaTeX writer.
+- Canonicalized watch paths through their nearest existing ancestor so macOS
+  and Windows path aliases do not leak extension transaction events or break
+  recursive watch rearming, and resolved theme resources with native path
+  components on Windows.
 
 ## 1.8.1 - 2026-07-29
 

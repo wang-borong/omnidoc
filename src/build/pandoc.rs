@@ -1338,6 +1338,11 @@ latex_headers = ["latex/header.tex"]
     fn transports_managed_headers_without_overriding_project_metadata() {
         let builder = PandocBuilder::new(MergedConfig::default()).expect("pandoc builder");
         let library = PathBuf::from("/tmp/omnidoc");
+        let emoji_header = library.join("pandoc").join("headers").join("emoji.tex");
+        let semantic_blocks_header = library
+            .join("pandoc")
+            .join("headers")
+            .join("semantic-blocks.tex");
         let mut pdf_options = Vec::new();
         builder.push_default_latex_headers(
             &mut pdf_options,
@@ -1348,14 +1353,11 @@ latex_headers = ["latex/header.tex"]
             pdf_options,
             vec![
                 "--metadata".to_string(),
-                format!(
-                    "omnidoc-theme-latex-header-0001={}",
-                    library.join("pandoc/headers/emoji.tex").display()
-                ),
+                format!("omnidoc-theme-latex-header-0001={}", emoji_header.display()),
                 "--metadata".to_string(),
                 format!(
                     "omnidoc-theme-latex-header-0002={}",
-                    library.join("pandoc/headers/semantic-blocks.tex").display()
+                    semantic_blocks_header.display()
                 ),
             ]
         );
