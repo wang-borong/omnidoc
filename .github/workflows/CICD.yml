@@ -452,6 +452,8 @@ jobs:
           mkdir -p "$staging"
           cp "${{ steps.bin.outputs.path }}" "$staging/"
           cp README.md CHANGELOG.md LICENSE THIRD_PARTY_LICENSES.md release/omnidoc-libs.toml "$staging/"
+          mkdir -p "$staging/assets"
+          cp assets/omnidoc-icon.png "$staging/assets/"
           mkdir -p "$staging/docs/decisions"
           cp docs/decisions/0001-tectonic-engine-policy.md "$staging/docs/decisions/"
           scripts/fetch-tectonic.sh "${{ matrix.job.target }}" "$staging/engines"
@@ -480,6 +482,8 @@ jobs:
           rm -rf "$deb_root"
           install -Dm755 "${{ steps.bin.outputs.path }}" "$deb_root/usr/bin/${{ steps.bin.outputs.name }}"
           install -Dm644 README.md "$deb_root/usr/share/doc/${package_name}/README.md"
+          install -Dm644 assets/omnidoc-icon.png \
+            "$deb_root/usr/share/doc/${package_name}/assets/omnidoc-icon.png"
           install -Dm644 CHANGELOG.md "$deb_root/usr/share/doc/${package_name}/CHANGELOG.md"
           install -Dm644 LICENSE "$deb_root/usr/share/doc/${package_name}/copyright"
           install -Dm644 THIRD_PARTY_LICENSES.md "$deb_root/usr/share/doc/${package_name}/THIRD_PARTY_LICENSES.md"

@@ -31,6 +31,7 @@ fi
 test -s "$(dirname "$bin")/omnidoc-libs.toml"
 test -s "$(dirname "$bin")/CHANGELOG.md"
 test -s "$(dirname "$bin")/THIRD_PARTY_LICENSES.md"
+test -s "$(dirname "$bin")/assets/omnidoc-icon.png"
 test -s "$(dirname "$bin")/docs/decisions/0001-tectonic-engine-policy.md"
 
 engine="$(dirname "$bin")/engines/tectonic"

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.9.0 - 2026-07-31
+
 - Replaced the manifest-v1 lifecycle-hook plugin model with versioned
   `omnidoc-package.toml` packages. OmniDoc no longer embeds or directly hosts
   Lua: automatic extensions are Pandoc `--lua-filter` scripts, explicit
@@ -50,6 +52,8 @@
   and Windows path aliases do not leak extension transaction events or break
   recursive watch rearming, and resolved theme resources with native path
   components on Windows.
+- Added a new OmniDoc visual identity and concise product-focused README, and
+  included the application icon in release archives and Debian documentation.
 
 ## 1.8.1 - 2026-07-29
 

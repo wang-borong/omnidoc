@@ -1,8 +1,9 @@
 [package]
 name = "omnidoc"
-version = "1.8.1"
+version = "1.9.0"
 edition = "2021"
 authors = ["Jason Wang <wang_borong@163.com>"]
+description = "An extensible, reproducible publishing system for Markdown and LaTeX"
 homepage = "https://github.com/wang-borong/omnidoc"
 license = "MIT"
 rust-version = "1.88"
