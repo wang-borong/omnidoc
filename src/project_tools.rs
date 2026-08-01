@@ -671,6 +671,18 @@ pub fn dependency_graph(project_path: &Path, config: &MergedConfig) -> Dependenc
         &mut pending,
     );
 
+    if detect_project_type(config, project_path) == ProjectType::Latex {
+        for latexmkrc in [".latexmkrc", "latexmkrc"] {
+            track_dependency(
+                project_path,
+                project_path,
+                Path::new(latexmkrc),
+                &mut files,
+                &mut pending,
+            );
+        }
+    }
+
     for configured in [
         config.entry.as_ref(),
         config.metadata_file.as_ref(),
@@ -2872,6 +2884,36 @@ mod tests {
             latex_engine_preference(project.path(), &MergedConfig::default()),
             LatexEnginePreference::Latex
         );
+    }
+
+    #[test]
+    fn native_latex_dependency_graph_tracks_project_latexmkrc_files() {
+        let project = tempfile::tempdir().expect("project");
+        fs::write(
+            project.path().join("main.tex"),
+            "\\documentclass{article}\n",
+        )
+        .expect("entry");
+        fs::write(project.path().join(".latexmkrc"), "$pdf_mode = 5;\n").expect("dot latexmkrc");
+        fs::write(project.path().join("latexmkrc"), "$silent = 1;\n").expect("plain latexmkrc");
+        let config = MergedConfig {
+            entry: Some("main.tex".to_string()),
+            ..Default::default()
+        };
+
+        let before_graph = dependency_graph(project.path(), &config);
+        assert!(before_graph.files.contains(&".latexmkrc".to_string()));
+        assert!(before_graph.files.contains(&"latexmkrc".to_string()));
+        let before = build_input_digest(project.path(), &before_graph, &config, "pdf")
+            .expect("initial PDF digest");
+
+        fs::write(project.path().join(".latexmkrc"), "$pdf_mode = 4;\n")
+            .expect("updated dot latexmkrc");
+        let after_graph = dependency_graph(project.path(), &config);
+        let after = build_input_digest(project.path(), &after_graph, &config, "pdf")
+            .expect("updated PDF digest");
+
+        assert_ne!(before, after);
     }
 
     #[test]
