@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.9.1 - 2026-08-01
+
+- Added project `.latexmkrc` and `latexmkrc` files to native LaTeX dependency
+  graphs so configuration changes invalidate build caches and lock inputs.
+
 ## 1.9.0 - 2026-07-31
 
 - Replaced the manifest-v1 lifecycle-hook plugin model with versioned
