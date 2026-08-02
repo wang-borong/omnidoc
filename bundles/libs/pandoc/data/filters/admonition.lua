@@ -11,6 +11,7 @@
 local is_latex = FORMAT:match('latex') or FORMAT:match('beamer')
 local utils = pandoc.utils
 local language = 'en'
+local title_format = 'markdown+tex_math_dollars-raw_attribute-raw_html-raw_tex'
 
 local kinds = {
   'note', 'tip', 'important', 'warning', 'error', 'question', 'answer',
@@ -61,13 +62,40 @@ local function kind_for(el)
   return 'note'
 end
 
-local function escape_latex(value)
-  local replacements = {
-    ['\\'] = '\\textbackslash{}', ['{'] = '\\{', ['}'] = '\\}',
-    ['#'] = '\\#', ['$'] = '\\$', ['%'] = '\\%', ['&'] = '\\&',
-    ['_'] = '\\_', ['^'] = '\\textasciicircum{}', ['~'] = '\\textasciitilde{}',
+local function literal_title(value)
+  return pandoc.Inlines({pandoc.Str(value)})
+end
+
+local function parse_title(value)
+  local ok, document = pcall(pandoc.read, value, title_format)
+  if not ok or #document.blocks ~= 1 then
+    return literal_title(value)
+  end
+
+  local block = document.blocks[1]
+  if block.t ~= 'Plain' and block.t ~= 'Para' then
+    return literal_title(value)
+  end
+
+  for _, inline in ipairs(block.content) do
+    if inline.t == 'Math' and inline.mathtype == 'DisplayMath' then
+      return literal_title(value)
+    end
+  end
+  return block.content
+end
+
+local function latex_title_block(kind, title)
+  local inlines = {
+    pandoc.RawInline('latex', string.format(
+      '\\begin{OmniAdmonition}{%s}{', kind
+    )),
   }
-  return (value:gsub('[\\{}#$%%&_^~]', replacements))
+  for _, inline in ipairs(title) do
+    table.insert(inlines, inline)
+  end
+  table.insert(inlines, pandoc.RawInline('latex', '}'))
+  return pandoc.Plain(inlines)
 end
 
 local function append_latex_package(meta)
@@ -99,14 +127,13 @@ function Div(el)
     return nil
   end
 
-  local title = el.attributes.title or titles[language][kind]
+  local title_source = el.attributes.title or titles[language][kind]
+  local title = parse_title(title_source)
   el.attributes.title = nil
 
   if is_latex then
     local blocks = {
-      pandoc.RawBlock('latex', string.format(
-        '\\begin{OmniAdmonition}{%s}{%s}', kind, escape_latex(title)
-      )),
+      latex_title_block(kind, title),
     }
     for _, block in ipairs(el.content) do
       table.insert(blocks, block)
@@ -125,9 +152,13 @@ function Div(el)
   for _, class in ipairs(retained) do
     el.classes:insert(class)
   end
-  el.attributes['data-title'] = title
+  el.attributes['data-title'] = title_source
   el.attributes['data-kind'] = kind
   el.attributes['data-mark'] = marks[kind]
+  el.content:insert(1, pandoc.Div(
+    {pandoc.Plain(title)},
+    pandoc.Attr('', {'admonition-title'})
+  ))
   return el
 end
 

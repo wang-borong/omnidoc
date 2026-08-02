@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.9.2 - 2026-08-02
+
+- Added single-line inline Markdown titles for semantic admonitions, including
+  MathML formulas in HTML/EPUB and native LaTeX formulas in PDF output, while
+  preserving existing plain-text titles and title metadata.
+
 ## 1.9.1 - 2026-08-01
 
 - Added project `.latexmkrc` and `latexmkrc` files to native LaTeX dependency

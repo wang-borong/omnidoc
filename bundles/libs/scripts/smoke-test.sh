@@ -43,21 +43,43 @@ pandoc "$root/tests/blocks-showcase.md" \
   --data-dir="$root/pandoc/data" \
   --lua-filter="$root/pandoc/data/filters/admonition.lua" \
   "${block_css_args[@]}" \
-  --standalone --embed-resources -t html5 -o "$work/blocks-showcase.html"
+  --mathml --standalone --embed-resources -t html5 -o "$work/blocks-showcase.html"
 for kind in note tip important warning error question answer example exercise solution; do
   rg -q "class=\"admonition $kind\"" "$work/blocks-showcase.html"
   rg -q "data-kind=\"$kind\"" "$work/blocks-showcase.html"
 done
+rg -q 'class="admonition-title"' "$work/blocks-showcase.html"
+rg -Fq 'data-title="工程速算：把 $g_m$ 翻成一把 $1/g_m$ 电阻尺"' \
+  "$work/blocks-showcase.html"
+rg -Fq '<annotation encoding="application/x-tex">g_m</annotation>' \
+  "$work/blocks-showcase.html"
+rg -Fq '<annotation encoding="application/x-tex">1/g_m</annotation>' \
+  "$work/blocks-showcase.html"
+rg -q '\.admonition > \.admonition-title' "$work/blocks-showcase.html"
 
 pandoc "$root/tests/blocks-showcase.md" \
   --data-dir="$root/pandoc/data" \
   --lua-filter="$root/pandoc/data/filters/admonition.lua" \
   "${block_css_args[@]}" \
-  --standalone -t epub3 -o "$work/blocks-showcase.epub"
+  --mathml --standalone -t epub3 -o "$work/blocks-showcase.epub"
 test -s "$work/blocks-showcase.epub"
 if command -v unzip >/dev/null; then
   unzip -tqq "$work/blocks-showcase.epub"
+  unzip -p "$work/blocks-showcase.epub" 'EPUB/text/*.xhtml' \
+    >"$work/blocks-showcase-epub.xhtml"
+  rg -q 'class="admonition-title"' "$work/blocks-showcase-epub.xhtml"
+  rg -Fq '<annotation encoding="application/x-tex">g_m</annotation>' \
+    "$work/blocks-showcase-epub.xhtml"
+  rg -Fq '<annotation encoding="application/x-tex">1/g_m</annotation>' \
+    "$work/blocks-showcase-epub.xhtml"
 fi
+
+pandoc "$root/tests/blocks-showcase.md" \
+  --data-dir="$root/pandoc/data" \
+  --lua-filter="$root/pandoc/data/filters/admonition.lua" \
+  --wrap=none --standalone -t latex -o "$work/blocks-showcase.tex"
+rg -Fq '\begin{OmniAdmonition}{tip}{工程速算：把 \(g_m\) 翻成一把 \(1/g_m\) 电阻尺}' \
+  "$work/blocks-showcase.tex"
 
 cat >"$work/fake-omnidoc" <<'EOF'
 #!/usr/bin/env bash

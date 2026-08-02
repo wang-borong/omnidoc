@@ -14,7 +14,7 @@ geometry: margin=20mm
 - 第二项
 :::
 
-::: {.admonition .tip title="设计提示"}
+::: {.admonition .tip title="工程速算：把 $g_m$ 翻成一把 $1/g_m$ 电阻尺"}
 优先画出小信号等效模型，再判断哪些电容在目标频段可以视为短路。
 :::
 

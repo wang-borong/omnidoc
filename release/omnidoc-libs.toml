@@ -1,10 +1,10 @@
 contract_version = 1
-omnidoc_version = "1.9.1"
+omnidoc_version = "1.9.2"
 
 [library]
-version = "1.9.1"
-revision = "v1.9.1"
+version = "1.9.2"
+revision = "v1.9.2"
 repository = "https://github.com/wang-borong/omnidoc"
-archive_url = "https://github.com/wang-borong/omnidoc/releases/download/v1.9.1/omnidoc-libs-v1.9.1.tar.gz"
+archive_url = "https://github.com/wang-borong/omnidoc/releases/download/v1.9.2/omnidoc-libs-v1.9.2.tar.gz"
 checksum_algorithm = "sha256"
-checksum_url = "https://github.com/wang-borong/omnidoc/releases/download/v1.9.1/omnidoc-libs-v1.9.1.tar.gz.sha256"
+checksum_url = "https://github.com/wang-borong/omnidoc/releases/download/v1.9.2/omnidoc-libs-v1.9.2.tar.gz.sha256"

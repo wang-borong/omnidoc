@@ -15,7 +15,7 @@
   page-break-inside: avoid;
 }
 
-.admonition::before {
+.admonition > .admonition-title {
   display: block;
   margin: -0.1em 0 0.55em;
   color: var(--block-frame);
@@ -23,7 +23,6 @@
   font-size: 0.94em;
   font-weight: 700;
   letter-spacing: 0.08em;
-  content: attr(data-title);
 }
 
 .admonition::after {
@@ -54,7 +53,7 @@
 .admonition.exercise { --block-frame: #9a6b27; --block-back: #fbf7ef; }
 .admonition.solution { --block-frame: #477a70; --block-back: #f1f8f6; }
 
-.admonition > :first-child { margin-top: 0; }
+.admonition > :first-child:not(.admonition-title) { margin-top: 0; }
 .admonition > :last-child { margin-bottom: 0; }
 .admonition p { text-indent: 0; }
 
@@ -66,5 +65,5 @@
     border-left-color: var(--block-frame);
     background: #18242d;
   }
-  .admonition::before { color: var(--block-frame); }
+  .admonition > .admonition-title { color: var(--block-frame); }
 }
