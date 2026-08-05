@@ -98,6 +98,7 @@ impl PandocOutputKind {
             "include-code-files.lua",
             "diagram-generator.lua",
             "admonition.lua",
+            "listings-language-aliases.lua",
             "latex-patch.lua",
             "emoji.lua",
             "fonts-and-alignment.lua",
@@ -222,6 +223,9 @@ mod tests {
         assert!(PandocOutputKind::Pdf
             .default_filters()
             .contains(&"emoji.lua"));
+        assert!(PandocOutputKind::Pdf
+            .default_filters()
+            .contains(&"listings-language-aliases.lua"));
         assert!(!PandocOutputKind::Html
             .default_filters()
             .contains(&"emoji.lua"));

@@ -47,6 +47,24 @@ printf '%s\n' \
   '{"messages":[{"role":"user","content":"extract contract clauses and return a schema with currency, payment_amount, payment_method, payment_due_days, and penalty_rate without inventing missing values"}]}' \
   '```' \
   '' \
+  '```yaml' \
+  'enabled: true' \
+  'output: "report.pdf"' \
+  '```' \
+  '' \
+  '```markdown' \
+  '# Generated heading' \
+  '**important** and `inline`' \
+  '```' \
+  '' \
+  '```c' \
+  'int main(void) { return 0; }' \
+  '```' \
+  '' \
+  '```bash' \
+  'printf "%s\\n" "ready"' \
+  '```' \
+  '' \
   '| Feature | Contract |' \
   '|---|---|' \
   '| Template | Pandoc built-in |' \
@@ -72,6 +90,7 @@ TEXMFHOME="$root/texmf//:" pandoc "$work/probe.md" \
   --syntax-highlighting=idiomatic \
   --variable=listings=true \
   --filter=pandoc-crossref \
+  --lua-filter="$root/pandoc/data/filters/listings-language-aliases.lua" \
   --lua-filter="$root/pandoc/data/filters/latex-patch.lua" \
   --lua-filter="$root/pandoc/data/filters/emoji.lua" \
   --include-in-header="$root/pandoc/headers/emoji.tex" \
@@ -91,11 +110,18 @@ pdfinfo "$work/blocks-showcase.pdf" | rg -q '^Pages:[[:space:]]+[1-9][0-9]*$'
 
 TEXMFHOME="$root/texmf//:" pandoc "$work/probe.md" \
   --standalone \
+  --syntax-highlighting=idiomatic \
+  --variable=listings=true \
+  --lua-filter="$root/pandoc/data/filters/listings-language-aliases.lua" \
   --lua-filter="$root/pandoc/data/filters/emoji.lua" \
   --include-in-header="$root/pandoc/headers/emoji.tex" \
   -t latex \
   -o "$work/probe.tex"
 rg -Fq '\omnidocEmoji{1f31f}{1f31f}' "$work/probe.tex"
 ! rg -Fq '🌟' "$work/probe.tex"
+rg -Fq '\begin{lstlisting}[language=YAML]' "$work/probe.tex"
+rg -Fq '\begin{lstlisting}[language=Markdown]' "$work/probe.tex"
+rg -Fq '\begin{lstlisting}[language=C]' "$work/probe.tex"
+rg -Fq '\begin{lstlisting}[language=bash]' "$work/probe.tex"
 
 echo "Pandoc built-in LaTeX template contract passed"

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.9.3 - 2026-08-05
+
+- Added idiomatic LaTeX listings language aliases for YAML, Markdown, and
+  shell fenced blocks while preserving Pandoc's native C and Bash mappings.
+- Added shared YAML and Markdown language definitions plus a restrained
+  semantic code palette for identifiers, keywords, commands, constants,
+  strings, comments, numbers, and operators across the built-in PDF themes.
+- Fixed straight double-quote rendering in the common listings configuration
+  and expanded the Pandoc/LaTeX contract probe to compile YAML, Markdown, C,
+  and Bash examples.
+
 ## 1.9.2 - 2026-08-02
 
 - Added single-line inline Markdown titles for semantic admonitions, including

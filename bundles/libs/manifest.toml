@@ -1,6 +1,6 @@
 manifest_version = 1
-version = "1.9.2"
-compatible_omnidoc = "=1.9.2"
+version = "1.9.3"
+compatible_omnidoc = "=1.9.3"
 compatible_pandoc = ">=3.0,<4.0"
 checksum_algorithm = "sha256"
 checksum_file = "checksums.sha256"
@@ -41,6 +41,7 @@ required_resources = [
   "pandoc/data/filters/display-math.lua",
   "pandoc/data/filters/admonition.lua",
   "pandoc/data/filters/emoji.lua",
+  "pandoc/data/filters/listings-language-aliases.lua",
   "pandoc/data/scripts/render-circuit.py",
   "pandoc/data/scripts/render-spiceplot.py",
   "pandoc/headers/engineering-book.tex",
@@ -57,6 +58,7 @@ required_resources = [
   "texmf/tex/common/omni-blocks-admonition.sty",
   "texmf/tex/common/omni-engineering-book.sty",
   "texmf/tex/common/omni-document-themes.sty",
+  "texmf/tex/common/listings-config.sty",
   "texmf/tex/latex/twemojis/twemojis.sty",
   "texmf/tex/latex/twemojis/all-twemojis.pdf",
   "texmf/tex/latex/twemojis/LICENSES.md",
