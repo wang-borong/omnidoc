@@ -8,6 +8,7 @@
 ---   - Automatically finds and corrects image paths
 ---   - Removes spaces before citations and references
 ---   - Adds spaces after citations when needed
+---   - Preserves Unicode quotes and readable math in PDF bookmarks
 ---
 --- Copyright: Original author unknown
 --- License:   MIT
@@ -122,6 +123,307 @@ local function find_image_file(root, image_name, legal_ext)
   end
 
   return nil
+end
+
+-- ============================================================================
+-- PDF Bookmark Processing
+-- ============================================================================
+
+local math_commands = {
+  alpha = 'α', beta = 'β', gamma = 'γ', delta = 'δ', epsilon = 'ε',
+  varepsilon = 'ϵ', zeta = 'ζ', eta = 'η', theta = 'θ', vartheta = 'ϑ',
+  iota = 'ι', kappa = 'κ', lambda = 'λ', mu = 'μ', nu = 'ν', xi = 'ξ',
+  omicron = 'ο', pi = 'π', varpi = 'ϖ', rho = 'ρ', varrho = 'ϱ',
+  sigma = 'σ', varsigma = 'ς', tau = 'τ', upsilon = 'υ', phi = 'φ',
+  varphi = 'ϕ', chi = 'χ', psi = 'ψ', omega = 'ω',
+  Gamma = 'Γ', Delta = 'Δ', Theta = 'Θ', Lambda = 'Λ', Xi = 'Ξ', Pi = 'Π',
+  Sigma = 'Σ', Upsilon = 'Υ', Phi = 'Φ', Psi = 'Ψ', Omega = 'Ω',
+  pm = '±', mp = '∓', times = '×', cdot = '·', div = '÷', ast = '∗',
+  le = '≤', leq = '≤', ge = '≥', geq = '≥', ne = '≠', neq = '≠',
+  approx = '≈', sim = '∼', simeq = '≃', equiv = '≡', propto = '∝',
+  to = '→', rightarrow = '→', leftarrow = '←', leftrightarrow = '↔',
+  Rightarrow = '⇒', Leftarrow = '⇐', Leftrightarrow = '⇔', mapsto = '↦',
+  infty = '∞', partial = '∂', nabla = '∇', sum = '∑', prod = '∏',
+  int = '∫', oint = '∮', parallel = '∥', perp = '⊥', angle = '∠',
+  ['in'] = '∈', notin = '∉', subset = '⊂', subseteq = '⊆',
+  supset = '⊃', supseteq = '⊇', cup = '∪', cap = '∩',
+  forall = '∀', exists = '∃', neg = '¬', land = '∧', lor = '∨',
+  ell = 'ℓ', hbar = 'ℏ', degree = '°', prime = '′',
+}
+
+local transparent_math_commands = {
+  mathrm = true, mathit = true, mathbf = true, mathsf = true, mathtt = true,
+  mathcal = true, mathbb = true, mathfrak = true, operatorname = true,
+  text = true, textrm = true, textit = true, textbf = true,
+  boldsymbol = true, bm = true, ensuremath = true,
+}
+
+local accent_math_commands = {
+  bar = '\204\132', overline = '\204\133', hat = '\204\130',
+  tilde = '\204\131', dot = '\204\135', ddot = '\204\136', vec = '\226\131\151',
+}
+
+local subscript_chars = {
+  ['0'] = '₀', ['1'] = '₁', ['2'] = '₂', ['3'] = '₃', ['4'] = '₄',
+  ['5'] = '₅', ['6'] = '₆', ['7'] = '₇', ['8'] = '₈', ['9'] = '₉',
+  ['+'] = '₊', ['-'] = '₋', ['='] = '₌', ['('] = '₍', [')'] = '₎',
+  a = 'ₐ', e = 'ₑ', h = 'ₕ', i = 'ᵢ', j = 'ⱼ', k = 'ₖ', l = 'ₗ',
+  m = 'ₘ', n = 'ₙ', o = 'ₒ', p = 'ₚ', r = 'ᵣ', s = 'ₛ', t = 'ₜ', x = 'ₓ',
+}
+
+local superscript_chars = {
+  ['0'] = '⁰', ['1'] = '¹', ['2'] = '²', ['3'] = '³', ['4'] = '⁴',
+  ['5'] = '⁵', ['6'] = '⁶', ['7'] = '⁷', ['8'] = '⁸', ['9'] = '⁹',
+  ['+'] = '⁺', ['-'] = '⁻', ['='] = '⁼', ['('] = '⁽', [')'] = '⁾',
+  a = 'ᵃ', b = 'ᵇ', c = 'ᶜ', d = 'ᵈ', e = 'ᵉ', f = 'ᶠ', g = 'ᵍ',
+  h = 'ʰ', i = 'ⁱ', j = 'ʲ', k = 'ᵏ', l = 'ˡ', m = 'ᵐ', n = 'ⁿ',
+  o = 'ᵒ', p = 'ᵖ', r = 'ʳ', s = 'ˢ', t = 'ᵗ', u = 'ᵘ', v = 'ᵛ',
+  w = 'ʷ', x = 'ˣ', y = 'ʸ', z = 'ᶻ',
+}
+
+local bookmark_quotes = {
+  ['“'] = '``',
+  ['”'] = "''",
+  ['‘'] = '`',
+  ['’'] = "'",
+}
+
+local quote_characters = {'“', '”', '‘', '’'}
+
+local function next_utf8_character(value, index)
+  local first = value:byte(index)
+  if not first then
+    return nil, index
+  end
+  local length = 1
+  if first >= 0xF0 then
+    length = 4
+  elseif first >= 0xE0 then
+    length = 3
+  elseif first >= 0xC0 then
+    length = 2
+  end
+  return value:sub(index, index + length - 1), index + length
+end
+
+local function script_text(value, characters, fallback_open, fallback_close)
+  local converted = {}
+  local index = 1
+  while index <= #value do
+    local character
+    character, index = next_utf8_character(value, index)
+    local mapped = characters[character]
+    if not mapped and character:match('^[A-Z]$') then
+      mapped = characters[character:lower()]
+    end
+    if not mapped then
+      return fallback_open .. value .. fallback_close
+    end
+    converted[#converted + 1] = mapped
+  end
+  return table.concat(converted)
+end
+
+local parse_math_sequence
+local parse_math_atom
+
+local function parse_math_command(value, index)
+  local name = value:match('^([A-Za-z]+)', index)
+  if not name then
+    local escaped
+    escaped, index = next_utf8_character(value, index)
+    if escaped == ',' or escaped == '!' or escaped == ';' or escaped == ':' then
+      return '', index
+    elseif escaped == ' ' then
+      return ' ', index
+    end
+    return escaped or '', index
+  end
+
+  index = index + #name
+  if value:sub(index, index) == ' ' then
+    index = index + 1
+  end
+
+  if math_commands[name] then
+    return math_commands[name], index
+  end
+
+  if transparent_math_commands[name] then
+    return parse_math_atom(value, index)
+  end
+
+  if name == 'frac' or name == 'dfrac' or name == 'tfrac' then
+    local numerator
+    numerator, index = parse_math_atom(value, index)
+    local denominator
+    denominator, index = parse_math_atom(value, index)
+    return numerator .. '⁄' .. denominator, index
+  end
+
+  if name == 'sqrt' then
+    if value:sub(index, index) == '[' then
+      local close = value:find(']', index + 1, true)
+      if close then
+        index = close + 1
+      end
+    end
+    local radicand
+    radicand, index = parse_math_atom(value, index)
+    return '√' .. radicand, index
+  end
+
+  if name == 'left' or name == 'right' then
+    return '', index
+  end
+
+  if accent_math_commands[name] then
+    local accented
+    accented, index = parse_math_atom(value, index)
+    return accented .. accent_math_commands[name], index
+  end
+
+  -- Unknown commands remain readable without leaking raw TeX syntax into the
+  -- bookmark. Any following group is handled normally by the main parser.
+  return name, index
+end
+
+parse_math_atom = function(value, index)
+  while value:sub(index, index):match('%s') do
+    index = index + 1
+  end
+  if value:sub(index, index) == '{' then
+    return parse_math_sequence(value, index + 1, '}')
+  end
+  if value:sub(index, index) == '\\' then
+    return parse_math_command(value, index + 1)
+  end
+  local character
+  character, index = next_utf8_character(value, index)
+  return character or '', index
+end
+
+parse_math_sequence = function(value, index, stop_character)
+  local result = {}
+  while index <= #value do
+    local byte = value:sub(index, index)
+    if stop_character and byte == stop_character then
+      return table.concat(result), index + 1
+    elseif byte == '\\' then
+      local converted
+      converted, index = parse_math_command(value, index + 1)
+      result[#result + 1] = converted
+    elseif byte == '_' or byte == '^' then
+      local script
+      script, index = parse_math_atom(value, index + 1)
+      if byte == '_' then
+        result[#result + 1] = script_text(script, subscript_chars, '₍', '₎')
+      else
+        result[#result + 1] = script_text(script, superscript_chars, '⁽', '⁾')
+      end
+    elseif byte == '{' then
+      local group
+      group, index = parse_math_sequence(value, index + 1, '}')
+      result[#result + 1] = group
+    elseif byte == '}' then
+      return table.concat(result), index + 1
+    elseif byte == '$' then
+      index = index + 1
+    elseif byte == '~' then
+      result[#result + 1] = ' '
+      index = index + 1
+    else
+      local character
+      character, index = next_utf8_character(value, index)
+      result[#result + 1] = character
+    end
+  end
+  return table.concat(result), index
+end
+
+local function math_to_bookmark(value)
+  local converted = parse_math_sequence(value, 1, nil)
+  return converted:gsub('%s+', ' '):gsub('^%s+', ''):gsub('%s+$', '')
+end
+
+local function bookmark_inline(typeset, fallback)
+  return pandoc.List({
+    latex('\\texorpdfstring{' .. typeset .. '}{'),
+    pandoc.Str(fallback),
+    latex('}'),
+  })
+end
+
+local function split_bookmark_quotes(value)
+  local result = pandoc.List()
+  local cursor = 1
+  local changed = false
+  while cursor <= #value do
+    local quote
+    local quote_start
+    for _, candidate in ipairs(quote_characters) do
+      local start = value:find(candidate, cursor, true)
+      if start and (not quote_start or start < quote_start) then
+        quote = candidate
+        quote_start = start
+      end
+    end
+    if not quote_start then
+      result:insert(pandoc.Str(value:sub(cursor)))
+      break
+    end
+    if quote_start > cursor then
+      result:insert(pandoc.Str(value:sub(cursor, quote_start - 1)))
+    end
+    local wrapped = bookmark_inline(bookmark_quotes[quote], quote)
+    for _, part in ipairs(wrapped) do
+      result:insert(part)
+    end
+    cursor = quote_start + #quote
+    changed = true
+  end
+  if not changed then
+    return nil
+  end
+  return result
+end
+
+local function bookmark_math(math)
+  return bookmark_inline('\\(' .. math.text .. '\\)', math_to_bookmark(math.text))
+end
+
+local function process_header_inlines(inlines)
+  local result = pandoc.List()
+  for _, inline in ipairs(inlines) do
+    if inline.t == 'Math' then
+      for _, part in ipairs(bookmark_math(inline)) do
+        result:insert(part)
+      end
+    elseif inline.t == 'Str' then
+      local split = split_bookmark_quotes(inline.text)
+      if split then
+        for _, part in ipairs(split) do
+          result:insert(part)
+        end
+      else
+        result:insert(inline)
+      end
+    else
+      if inline.content then
+        inline.content = process_header_inlines(inline.content)
+      end
+      result:insert(inline)
+    end
+  end
+  return result
+end
+
+local function fix_pdf_bookmark(header)
+  if not FORMAT:match('latex') then
+    return nil
+  end
+  header.content = process_header_inlines(header.content)
+  return header
 end
 
 -- ============================================================================
@@ -368,6 +670,7 @@ end
 -- ============================================================================
 
 return {
+  { Header = fix_pdf_bookmark },
   { RawInline = fix_rawinline },
   { Image = proc_image },
   { Inlines = proc_inlines },

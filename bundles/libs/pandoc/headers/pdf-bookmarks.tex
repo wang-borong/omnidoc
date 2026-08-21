@@ -1,0 +1,31 @@
+% Keep Pandoc's TeX quote ligatures readable in Unicode PDF strings.
+%
+% Pandoc writes curly quotes as `` and ''. Hyperref normally leaves those
+% ASCII pairs unchanged in bookmarks produced by ctex classes, even though
+% the visible heading and printed table of contents render the ligatures
+% correctly. At the post-processing hook the Unicode PDF string is already
+% escaped as UTF-16BE, so replace the two encoded ASCII characters with the
+% corresponding U+201C/U+201D code unit.
+\makeatletter
+\def\omnidoc@install@pdfbookmarkquotes{%
+  \edef\omnidoc@pdf@openquote@source{%
+    \@backslashchar000`\@backslashchar000`}%
+  \edef\omnidoc@pdf@openquote@target{%
+    \@backslashchar040\@backslashchar034}%
+  \edef\omnidoc@pdf@closequote@source{%
+    \@backslashchar000'\@backslashchar000'}%
+  \edef\omnidoc@pdf@closequote@target{%
+    \@backslashchar040\@backslashchar035}%
+  \let\omnidoc@pdfstringdefPostHook\pdfstringdefPostHook
+  \def\pdfstringdefPostHook##1{%
+    \omnidoc@pdfstringdefPostHook{##1}%
+    \expandafter\HyPsd@Subst\expandafter
+      {\omnidoc@pdf@openquote@source}{\omnidoc@pdf@openquote@target}##1%
+    \expandafter\HyPsd@Subst\expandafter
+      {\omnidoc@pdf@closequote@source}{\omnidoc@pdf@closequote@target}##1%
+  }%
+}
+\AtBeginDocument{%
+  \@ifundefined{pdfstringdefPostHook}{}{\omnidoc@install@pdfbookmarkquotes}%
+}
+\makeatother

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.9.4 - 2026-08-21
+
+- Fixed PDF outline bookmarks generated from Chinese headings so curved
+  double quotes remain proper Unicode punctuation instead of TeX quote
+  markers.
+- Converted supported LaTeX math in heading bookmarks to readable Unicode
+  text while preserving the correctly rendered formulas in the document body
+  and table of contents.
+- Added a `ctexbook` bookmark regression probe covering Chinese quotes and
+  representative subscripted and Greek-symbol formulas.
+
 ## 1.9.3 - 2026-08-05
 
 - Added idiomatic LaTeX listings language aliases for YAML, Markdown, and

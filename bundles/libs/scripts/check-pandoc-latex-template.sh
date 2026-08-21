@@ -5,7 +5,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-for tool in pandoc pandoc-crossref rg rsvg-convert xelatex pdfinfo; do
+for tool in pandoc pandoc-crossref rg rsvg-convert xelatex pdfinfo qpdf; do
   command -v "$tool" >/dev/null || {
     echo "missing required LaTeX template contract tool: $tool" >&2
     exit 1
@@ -33,12 +33,12 @@ printf '%s\n' \
   'author:' \
   '  - Alice Example' \
   '  - Bob Example' \
-  'lang: en-US' \
-  'documentclass: book' \
+  'lang: zh-CN' \
+  'documentclass: ctexbook' \
   'classoption: openany' \
   '---' \
   '' \
-  '# Writer features' \
+  '# Writer “features” with $V_T$, $\beta$, $r_o$, $r_\pi$, and $C_C$' \
   '' \
   'Inline `code` must keep its writer support after external filters.' \
   '' \
@@ -93,12 +93,16 @@ TEXMFHOME="$root/texmf//:" pandoc "$work/probe.md" \
   --lua-filter="$root/pandoc/data/filters/listings-language-aliases.lua" \
   --lua-filter="$root/pandoc/data/filters/latex-patch.lua" \
   --lua-filter="$root/pandoc/data/filters/emoji.lua" \
+  --include-in-header="$root/pandoc/headers/pdf-bookmarks.tex" \
   --include-in-header="$root/pandoc/headers/emoji.tex" \
   --include-in-header="$root/pandoc/headers/engineering-book.tex" \
   --pdf-engine=xelatex \
   -o "$work/probe.pdf"
 
 pdfinfo "$work/probe.pdf" | rg -q '^Pages:[[:space:]]+[1-9][0-9]*$'
+qpdf --json --json-key=outlines "$work/probe.pdf" > "$work/probe-outlines.json"
+rg -Fq '"title": "Writer “features” with Vₜ, β, rₒ, r₍π₎, and C₍C₎"' \
+  "$work/probe-outlines.json"
 
 TEXMFHOME="$root/texmf//:" pandoc "$root/tests/blocks-showcase.md" \
   --standalone \

@@ -109,6 +109,7 @@ pub mod pandoc {
     pub const LIB_PANDOC_DATA: &str = "pandoc/data";
     pub const LIB_PANDOC_FILTERS: &str = "pandoc/data/filters";
     pub const LIB_PANDOC_HEADERS: &str = "pandoc/headers";
+    pub const LIB_PANDOC_HEADER_PDF_BOOKMARKS: &str = "pandoc/headers/pdf-bookmarks.tex";
     pub const LIB_PANDOC_HEADER_EMOJI: &str = "pandoc/headers/emoji.tex";
     pub const LIB_PANDOC_HEADER_SEMANTIC_BLOCKS: &str = "pandoc/headers/semantic-blocks.tex";
     pub const LIB_PANDOC_CSL: &str = "pandoc/csl";

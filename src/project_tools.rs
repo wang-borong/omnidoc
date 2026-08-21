@@ -1133,6 +1133,7 @@ fn resolved_build_resources(project_path: &Path, config: &MergedConfig) -> Vec<R
     }
     if output_kind.uses_latex_defaults() {
         for (filter, relative) in [
+            ("latex-patch.lua", pandoc::LIB_PANDOC_HEADER_PDF_BOOKMARKS),
             ("emoji.lua", pandoc::LIB_PANDOC_HEADER_EMOJI),
             ("admonition.lua", pandoc::LIB_PANDOC_HEADER_SEMANTIC_BLOCKS),
         ] {
