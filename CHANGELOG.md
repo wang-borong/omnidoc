@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fixed PDF outline fallback for scripts without dedicated Unicode glyphs:
+  values now use script-position parentheses, so `C_C` becomes `C₍C₎` and
+  `r_\pi` becomes `r₍π₎` without leaking raw TeX markers.
+
 ## 1.9.5 - 2026-08-23
 
 - Fixed PDF outline math fallback for characters without Unicode script forms,

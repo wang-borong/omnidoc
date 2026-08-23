@@ -207,11 +207,15 @@ local function next_utf8_character(value, index)
 end
 
 local function fallback_script_text(value, marker)
-  local first, next_index = next_utf8_character(value, 1)
-  if first and next_index > #value then
-    return marker .. value
+  -- PDF outline titles are plain strings and cannot apply arbitrary
+  -- subscript/superscript styling. Script-position parentheses communicate
+  -- the intended relationship without leaking raw TeX markers, including for
+  -- glyphs that have no Unicode script form (C_C becomes C₍C₎ and r_\pi
+  -- becomes r₍π₎).
+  if marker == '_' then
+    return '₍' .. value .. '₎'
   end
-  return marker .. '{' .. value .. '}'
+  return '⁽' .. value .. '⁾'
 end
 
 local function script_text(value, characters, fallback_marker)
@@ -225,13 +229,6 @@ local function script_text(value, characters, fallback_marker)
       mapped = characters[character:lower()]
     end
     if not mapped then
-      -- PDF outline strings are plain text, and Unicode has no general
-      -- subscript/superscript styling. In particular, there is no subscript
-      -- Latin c or Greek pi. Wrapping such glyphs in script parentheses makes
-      -- C_C and r_\pi look like C(C) and r(pi), while the glyph itself still
-      -- remains on the baseline. Preserve the explicit TeX script marker
-      -- instead; braces are only needed when the script contains several
-      -- characters.
       return fallback_script_text(value, fallback_marker)
     end
     converted[#converted + 1] = mapped

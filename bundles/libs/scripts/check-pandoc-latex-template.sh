@@ -42,6 +42,10 @@ printf '%s\n' \
   '' \
   '## Grouped subscript $r_{\pi}$ matches $r_\pi$' \
   '' \
+  '## MOS 的小信号模型：把 $r_\pi$ 拿掉' \
+  '' \
+  '## 第三级与补偿：射极跟随器 + 第 8 章的 $C_C$' \
+  '' \
   'Inline `code` must keep its writer support after external filters.' \
   '' \
   '```console' \
@@ -103,9 +107,13 @@ TEXMFHOME="$root/texmf//:" pandoc "$work/probe.md" \
 
 pdfinfo "$work/probe.pdf" | rg -q '^Pages:[[:space:]]+[1-9][0-9]*$'
 qpdf --json --json-key=outlines "$work/probe.pdf" > "$work/probe-outlines.json"
-rg -Fq '"title": "Writer “features” with Vₜ, β, rₒ, r_π, and C_C"' \
+rg -Fq '"title": "Writer “features” with Vₜ, β, rₒ, r₍π₎, and C₍C₎"' \
   "$work/probe-outlines.json"
-rg -Fq '"title": "Grouped subscript r_π matches r_π"' \
+rg -Fq '"title": "Grouped subscript r₍π₎ matches r₍π₎"' \
+  "$work/probe-outlines.json"
+rg -Fq '"title": "MOS 的小信号模型：把 r₍π₎ 拿掉"' \
+  "$work/probe-outlines.json"
+rg -Fq '"title": "第三级与补偿：射极跟随器 + 第 8 章的 C₍C₎"' \
   "$work/probe-outlines.json"
 
 TEXMFHOME="$root/texmf//:" pandoc "$root/tests/blocks-showcase.md" \
