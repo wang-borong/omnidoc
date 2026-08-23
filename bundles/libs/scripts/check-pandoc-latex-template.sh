@@ -40,6 +40,8 @@ printf '%s\n' \
   '' \
   '# Writer “features” with $V_T$, $\beta$, $r_o$, $r_\pi$, and $C_C$' \
   '' \
+  '## Grouped subscript $r_{\pi}$ matches $r_\pi$' \
+  '' \
   'Inline `code` must keep its writer support after external filters.' \
   '' \
   '```console' \
@@ -101,7 +103,9 @@ TEXMFHOME="$root/texmf//:" pandoc "$work/probe.md" \
 
 pdfinfo "$work/probe.pdf" | rg -q '^Pages:[[:space:]]+[1-9][0-9]*$'
 qpdf --json --json-key=outlines "$work/probe.pdf" > "$work/probe-outlines.json"
-rg -Fq '"title": "Writer “features” with Vₜ, β, rₒ, r₍π₎, and C₍C₎"' \
+rg -Fq '"title": "Writer “features” with Vₜ, β, rₒ, r_π, and C_C"' \
+  "$work/probe-outlines.json"
+rg -Fq '"title": "Grouped subscript r_π matches r_π"' \
   "$work/probe-outlines.json"
 
 TEXMFHOME="$root/texmf//:" pandoc "$root/tests/blocks-showcase.md" \

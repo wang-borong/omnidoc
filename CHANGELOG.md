@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.9.5 - 2026-08-23
+
+- Fixed PDF outline math fallback for characters without Unicode script forms,
+  preserving explicit notation such as `C_C` and `r_π` instead of the
+  misleading `C₍C₎` and `r₍π₎` forms.
+
 ## 1.9.4 - 2026-08-21
 
 - Fixed PDF outline bookmarks generated from Chinese headings so curved

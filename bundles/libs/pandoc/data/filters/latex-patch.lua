@@ -206,7 +206,15 @@ local function next_utf8_character(value, index)
   return value:sub(index, index + length - 1), index + length
 end
 
-local function script_text(value, characters, fallback_open, fallback_close)
+local function fallback_script_text(value, marker)
+  local first, next_index = next_utf8_character(value, 1)
+  if first and next_index > #value then
+    return marker .. value
+  end
+  return marker .. '{' .. value .. '}'
+end
+
+local function script_text(value, characters, fallback_marker)
   local converted = {}
   local index = 1
   while index <= #value do
@@ -217,7 +225,14 @@ local function script_text(value, characters, fallback_open, fallback_close)
       mapped = characters[character:lower()]
     end
     if not mapped then
-      return fallback_open .. value .. fallback_close
+      -- PDF outline strings are plain text, and Unicode has no general
+      -- subscript/superscript styling. In particular, there is no subscript
+      -- Latin c or Greek pi. Wrapping such glyphs in script parentheses makes
+      -- C_C and r_\pi look like C(C) and r(pi), while the glyph itself still
+      -- remains on the baseline. Preserve the explicit TeX script marker
+      -- instead; braces are only needed when the script contains several
+      -- characters.
+      return fallback_script_text(value, fallback_marker)
     end
     converted[#converted + 1] = mapped
   end
@@ -317,9 +332,9 @@ parse_math_sequence = function(value, index, stop_character)
       local script
       script, index = parse_math_atom(value, index + 1)
       if byte == '_' then
-        result[#result + 1] = script_text(script, subscript_chars, '₍', '₎')
+        result[#result + 1] = script_text(script, subscript_chars, '_')
       else
-        result[#result + 1] = script_text(script, superscript_chars, '⁽', '⁾')
+        result[#result + 1] = script_text(script, superscript_chars, '^')
       end
     elseif byte == '{' then
       local group
