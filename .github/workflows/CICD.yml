@@ -116,6 +116,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             fonts-noto-cjk librsvg2-bin lua5.4 poppler-utils qpdf ripgrep \
+            python3-matplotlib python3-numpy \
             texlive-fonts-recommended texlive-lang-chinese \
             texlive-latex-extra texlive-xetex xz-utils
           curl --fail --location --retry 3 \

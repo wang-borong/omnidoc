@@ -134,6 +134,45 @@ rg -q 'bitfield smoke' "$work/figures/fig-smoke.svg"
 )
 rg -q 'bitfield updated' "$work/figures/fig-smoke.svg"
 
+# Matplotlib plots are optional at runtime, but fully provisioned CI installs
+# the two Python packages so this path is exercised for every library change.
+if MPLCONFIGDIR="$work/matplotlib" python3 -c 'import matplotlib, numpy' >/dev/null 2>&1; then
+  cat >"$work/tanh.py" <<'EOF'
+x = np.linspace(-3.0, 3.0, 301)
+ax.plot(x, np.tanh(x), label=r"$\tanh(x)$")
+ax.set(xlabel="x", ylabel="y")
+ax.grid(True, alpha=0.25)
+ax.legend(frameon=False)
+EOF
+
+  cat >"$work/matplot.md" <<'EOF'
+~~~{.matplot #fig-matplot-smoke include-code="tanh.py" caption="Matplot smoke" width="80%"}
+~~~
+EOF
+
+  (
+    cd "$work"
+    PYTHON=python3 MPLCONFIGDIR="$work/matplotlib" pandoc matplot.md \
+      --metadata omnidoc-depfile-include-code-files="$work/include-code.d" \
+      --lua-filter="$root/pandoc/data/filters/include-code-files.lua" \
+      --lua-filter="$root/pandoc/data/filters/diagram-generator.lua" \
+      --standalone --embed-resources -t html5 -o matplot.html
+    PYTHON=python3 MPLCONFIGDIR="$work/matplotlib" pandoc matplot.md \
+      --lua-filter="$root/pandoc/data/filters/include-code-files.lua" \
+      --lua-filter="$root/pandoc/data/filters/diagram-generator.lua" \
+      --standalone -t latex -o matplot.tex
+    PYTHON=python3 MPLCONFIGDIR="$work/matplotlib" pandoc matplot.md \
+      --lua-filter="$root/pandoc/data/filters/include-code-files.lua" \
+      --lua-filter="$root/pandoc/data/filters/diagram-generator.lua" \
+      -t docx -o matplot.docx
+  )
+  rg -q 'Matplot smoke' "$work/matplot.html"
+  test -s "$work/figures/fig-matplot-smoke.svg"
+  test -s "$work/figures/fig-matplot-smoke.pdf"
+  test -s "$work/figures/fig-matplot-smoke.png"
+  rg -q "$work/tanh.py" "$work/include-code.d"
+fi
+
 # Exercise the native circuit and spiceplot blocks when their optional Python
 # dependencies and ngspice are available. The package smoke test remains
 # usable on minimal release hosts, while fully provisioned CI validates the

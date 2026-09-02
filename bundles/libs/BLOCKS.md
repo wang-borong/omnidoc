@@ -121,6 +121,26 @@ JSON 必须包含：
 
 可选字段包括 `xlabel`、`ylabel`、`title`、`xscale`、`yscale`、`x_multiplier`、`figsize` 和 `legend`。网表也会进入依赖图。
 
+### Matplotlib 函数曲线
+
+`matplot` 块执行受信任的 Python 绘图片段。渲染器预置 NumPy、Pyplot、画布和坐标轴，分别命名为 `np`、`plt`、`fig` 和 `ax`；代码只需描述数据与图形，图片会按目标格式自动保存：
+
+~~~~markdown
+~~~{.matplot #fig-tanh caption="双曲正切函数" width="82%"}
+x = np.linspace(-4.0, 4.0, 801)
+ax.plot(x, np.tanh(x), linewidth=2.2, label=r"$\tanh(x)$")
+ax.axhline(1.0, color="0.45", linestyle=":")
+ax.axhline(-1.0, color="0.45", linestyle=":")
+ax.set(xlabel=r"$x$", ylabel=r"$y$", xlim=(-4, 4), ylim=(-1.1, 1.1))
+ax.grid(True, alpha=0.25)
+ax.legend(frameon=False)
+~~~
+~~~~
+
+不要在片段中调用 `savefig`；OmniDoc 会保存最终的 `fig`。如需自定义布局，可以重新赋值 `fig`/`ax`，也可以通过 `include-code` 引入独立的 `.py` 文件。构建环境需提供 NumPy 与 Matplotlib；Python 解释器由项目的 `[tools].python3` 或 `PATH` 决定。
+
+和 `circuit`、`py2image` 一样，`matplot` 会执行文档仓库中的代码，因此只应构建受信任的内容。
+
 ### 寄存器位域
 
 ````markdown

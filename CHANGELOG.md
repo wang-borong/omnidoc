@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.9.6 - 2026-09-02
+
+- Added trusted `.matplot` fenced blocks for deterministic NumPy/Matplotlib
+  function and data plots, with automatic SVG, PDF, and PNG rendering plus
+  `include-code` dependency tracking.
 - Fixed PDF outline fallback for scripts without dedicated Unicode glyphs:
   values now use script-position parentheses, so `C_C` becomes `C₍C₎` and
   `r_\pi` becomes `r₍π₎` without leaking raw TeX markers.

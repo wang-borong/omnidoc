@@ -7,6 +7,7 @@ It supports multiple diagram generation engines:
   - GraphViz: Graph visualization (dot, neato, etc.)
   - TikZ: LaTeX graphics
   - Python: Custom image generation scripts
+  - Matplotlib: Function and data plots from trusted Python snippets
   - Asymptote: Mathematical graphics
   - Bitfield: OmniDoc JSON bitfield descriptions
 
@@ -257,6 +258,10 @@ local function spiceplot(code, output_type)
     code, output_type, 'render-spiceplot.py', 'json',
     {'--ngspice', ngspice_path}
   )
+end
+
+local function matplot(code, output_type)
+  return python_helper(code, output_type, 'render-matplot.py', 'py')
 end
 
 -- ============================================================================
@@ -639,6 +644,7 @@ local converters = {
   bitfield = bitfield,
   circuit = circuit,
   spiceplot = spiceplot,
+  matplot = matplot,
 }
 
 --- Get the converter function for a code block class
@@ -745,6 +751,9 @@ end
 --- - py2image: Python image generation
 --- - asymptote: Asymptote graphics
 --- - bitfield: OmniDoc bitfield JSON
+--- - circuit: Schemdraw circuit snippets
+--- - spiceplot: ngspice analysis specifications
+--- - matplot: Matplotlib function and data plots
 ---
 --- @param block table The CodeBlock element
 --- @return table|nil The processed block (Image or Figure), or nil if unchanged

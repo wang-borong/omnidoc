@@ -1,6 +1,6 @@
 manifest_version = 1
-version = "1.9.5"
-compatible_omnidoc = "=1.9.5"
+version = "1.9.6"
+compatible_omnidoc = "=1.9.6"
 compatible_pandoc = ">=3.0,<4.0"
 checksum_algorithm = "sha256"
 checksum_file = "checksums.sha256"
@@ -43,6 +43,7 @@ required_resources = [
   "pandoc/data/filters/emoji.lua",
   "pandoc/data/filters/listings-language-aliases.lua",
   "pandoc/data/scripts/render-circuit.py",
+  "pandoc/data/scripts/render-matplot.py",
   "pandoc/data/scripts/render-spiceplot.py",
   "pandoc/headers/pdf-bookmarks.tex",
   "pandoc/headers/engineering-book.tex",

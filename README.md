@@ -51,7 +51,7 @@ Markdown / LaTeX + references + figures
 | ⚡ | **Incremental builds** | Content-aware cache, authoritative depfiles, native file watching, and automatic invalidation. |
 | 🔒 | **Reproducible delivery** | Lockfiles, toolchain fingerprints, BLAKE3 digests, build reports, and transactional publishing. |
 | 🧠 | **Actionable diagnostics** | Compact errors map Pandoc and LaTeX failures back to Markdown source lines with context and guidance. |
-| 📐 | **Technical figures** | Draw.io, Graphviz, PlantUML, bitfields, KiCad, SVG conversion, circuits, and SPICE plots. |
+| 📐 | **Technical figures** | Draw.io, Graphviz, PlantUML, bitfields, KiCad, SVG conversion, circuits, SPICE plots, and Matplotlib curves. |
 | 🤖 | **Automation-first CLI** | Stable JSON, dry-run and diff previews, strict CI gates, shell completion, and nested project discovery. |
 
 ## 📦 Installation
@@ -255,8 +255,9 @@ omnidoc figure kicad board.kicad_sch --format svg --exclude-drawing-sheet
 omnidoc figure convert diagram.svg --format pdf
 ```
 
-Markdown fenced blocks can also render bitfields, circuits, and SPICE plots to
-PDF for print and SVG for web/office outputs. See the complete
+Markdown fenced blocks can also render bitfields, circuits, SPICE plots, and
+Matplotlib curves to PDF for print and SVG/PNG for web and office outputs.
+See the complete
 [semantic block syntax](bundles/libs/BLOCKS.md).
 
 Optional renderers include Draw.io, Graphviz, PlantUML, KiCad CLI, Inkscape,
