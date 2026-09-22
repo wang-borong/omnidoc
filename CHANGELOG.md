@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 1.9.7 - 2026-09-22
+
+- Bounded generated diagrams in PDF/LaTeX output with a safe default maximum
+  height, source-anchored placement, and level-1/2 heading barriers so
+  deferred figures cannot overtake following prose, long tables, or sections.
+- Added the shared `omni-floats` LaTeX package and enabled it in generated
+  native `main.tex` projects, with balanced float-page parameters and optional
+  section/subsection barriers.
+
 ## 1.9.6 - 2026-09-02
 
 - Added trusted `.matplot` fenced blocks for deterministic NumPy/Matplotlib

@@ -410,6 +410,7 @@ impl PandocBuilder {
         let filters = output_kind.filters(&self.config);
         for (index, (filter, relative)) in [
             ("latex-patch.lua", pandoc::LIB_PANDOC_HEADER_PDF_BOOKMARKS),
+            ("latex-floats.lua", pandoc::LIB_PANDOC_HEADER_FLOAT_LAYOUT),
             ("emoji.lua", pandoc::LIB_PANDOC_HEADER_EMOJI),
             ("admonition.lua", pandoc::LIB_PANDOC_HEADER_SEMANTIC_BLOCKS),
         ]
@@ -1344,6 +1345,10 @@ latex_headers = ["latex/header.tex"]
             .join("headers")
             .join("pdf-bookmarks.tex");
         let emoji_header = library.join("pandoc").join("headers").join("emoji.tex");
+        let float_layout_header = library
+            .join("pandoc")
+            .join("headers")
+            .join("float-layout.tex");
         let semantic_blocks_header = library
             .join("pandoc")
             .join("headers")
@@ -1363,10 +1368,15 @@ latex_headers = ["latex/header.tex"]
                     pdf_bookmarks_header.display()
                 ),
                 "--metadata".to_string(),
-                format!("omnidoc-theme-latex-header-0002={}", emoji_header.display()),
+                format!(
+                    "omnidoc-theme-latex-header-0002={}",
+                    float_layout_header.display()
+                ),
+                "--metadata".to_string(),
+                format!("omnidoc-theme-latex-header-0003={}", emoji_header.display()),
                 "--metadata".to_string(),
                 format!(
-                    "omnidoc-theme-latex-header-0003={}",
+                    "omnidoc-theme-latex-header-0004={}",
                     semantic_blocks_header.display()
                 ),
             ]

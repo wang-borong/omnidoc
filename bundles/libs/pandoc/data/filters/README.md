@@ -14,6 +14,7 @@
 - `include-files.lua`：章节包含；
 - `include-code-files.lua`：源码包含；
 - `diagram-generator.lua`：图形块；
+- `latex-floats.lua`：PDF/LaTeX 图形限域与章节浮动屏障；
 - `admonition.lua`：语义容器；
 - `display-math.lua`：HTML/EPUB 独立公式布局；
 - `latex-headers.lua`、`latex-patch.lua`：LaTeX writer 集成；

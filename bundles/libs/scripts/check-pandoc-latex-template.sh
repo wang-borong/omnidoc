@@ -5,7 +5,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-for tool in pandoc pandoc-crossref rg rsvg-convert xelatex pdfinfo qpdf; do
+for tool in pandoc pandoc-crossref rg rsvg-convert xelatex pdfinfo pdftotext qpdf; do
   command -v "$tool" >/dev/null || {
     echo "missing required LaTeX template contract tool: $tool" >&2
     exit 1
@@ -100,6 +100,7 @@ TEXMFHOME="$root/texmf//:" pandoc "$work/probe.md" \
   --lua-filter="$root/pandoc/data/filters/latex-patch.lua" \
   --lua-filter="$root/pandoc/data/filters/emoji.lua" \
   --include-in-header="$root/pandoc/headers/pdf-bookmarks.tex" \
+  --include-in-header="$root/pandoc/headers/float-layout.tex" \
   --include-in-header="$root/pandoc/headers/emoji.tex" \
   --include-in-header="$root/pandoc/headers/engineering-book.tex" \
   --pdf-engine=xelatex \
@@ -115,6 +116,33 @@ rg -Fq '"title": "MOS 的小信号模型：把 r₍π₎ 拿掉"' \
   "$work/probe-outlines.json"
 rg -Fq '"title": "第三级与补偿：射极跟随器 + 第 8 章的 C₍C₎"' \
   "$work/probe-outlines.json"
+
+printf '%s\n' \
+  'Before the anchored diagram.' \
+  '' \
+  '![Anchored SVG](probe.svg)' \
+  '' \
+  'After the anchored diagram.' \
+  > "$work/float-probe.md"
+printf '%s\n' \
+  'function Figure(figure)' \
+  "  figure.classes:insert('omnidoc-diagram')" \
+  '  return figure' \
+  'end' \
+  > "$work/mark-diagram.lua"
+TEXMFHOME="$root/texmf//:" pandoc "$work/float-probe.md" \
+  --standalone \
+  --resource-path="$work" \
+  --lua-filter="$work/mark-diagram.lua" \
+  --lua-filter="$root/pandoc/data/filters/latex-floats.lua" \
+  --lua-filter="$root/pandoc/data/filters/latex-patch.lua" \
+  --include-in-header="$root/pandoc/headers/float-layout.tex" \
+  --pdf-engine=xelatex \
+  -o "$work/float-probe.pdf"
+pdftotext "$work/float-probe.pdf" "$work/float-probe.txt"
+rg -Fq 'Before the anchored diagram.' "$work/float-probe.txt"
+rg -Fq 'After the anchored diagram.' "$work/float-probe.txt"
+! rg -Fq 'original@float' "$work/float-probe.txt"
 
 TEXMFHOME="$root/texmf//:" pandoc "$root/tests/blocks-showcase.md" \
   --standalone \

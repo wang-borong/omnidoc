@@ -154,6 +154,7 @@ local filetype = "svg"
 local mimetype = "image/svg+xml"
 local bitfield_filetype = "svg"
 local bitfield_mimetype = "image/svg+xml"
+local diagram_max_height = "72%"
 
 -- Determine output format based on pandoc output format
 -- Some formats don't support SVG well, so we use PNG or PDF instead
@@ -217,7 +218,18 @@ function Meta(meta)
   ngspice_path = stringify(
     meta.ngspice_path or meta.ngspicePath or ngspice_path
   )
-  
+
+  local configured_max_height = meta['omnidoc-diagram-max-height']
+  if configured_max_height ~= nil then
+    local value = stringify(configured_max_height)
+    local normalized = value:lower()
+    if normalized == '' or normalized == 'none' or normalized == 'off' then
+      diagram_max_height = nil
+    else
+      diagram_max_height = value
+    end
+  end
+
   return nil
 end
 
@@ -711,12 +723,15 @@ end
 --- @return table Para block containing the image
 local function create_image_pandoc2(block, fname, caption, alt)
   local title = #caption > 0 and "fig:" or ""
-  local img_attr = {
-    id = block.identifier,
+  local attributes = {
     name = block.attributes.name,
     width = block.attributes.width,
-    height = block.attributes.height
+    height = block.attributes.height or
+             ((FORMAT == 'pdf' or FORMAT:match('latex')) and diagram_max_height or nil),
+    ['data-omnidoc-diagram'] = block.classes[1],
   }
+  local classes = {'omnidoc-diagram', 'omnidoc-diagram-' .. block.classes[1]}
+  local img_attr = pandoc.Attr(block.identifier or '', classes, attributes)
   local img_obj = pandoc.Image(alt, fname, title, img_attr)
   return pandoc.Para{img_obj}
 end
@@ -729,13 +744,18 @@ end
 --- @param alt table Inlines representing the alt text
 --- @return table Figure element
 local function create_figure_pandoc3(block, fname, caption, alt)
-  local fig_attr = {
-    id = block.identifier,
-    name = block.attributes.name,
-  }
+  local fig_attr = pandoc.Attr(
+    block.identifier or '',
+    {'omnidoc-diagram', 'omnidoc-diagram-' .. block.classes[1]},
+    {
+      name = block.attributes.name,
+      ['data-omnidoc-diagram'] = block.classes[1],
+    }
+  )
   local img_attr = {
     width = block.attributes.width,
-    height = block.attributes.height,
+    height = block.attributes.height or
+             ((FORMAT == 'pdf' or FORMAT:match('latex')) and diagram_max_height or nil),
   }
   local img_obj = pandoc.Image(alt, fname, "", img_attr)
   return pandoc.Figure(pandoc.Plain{img_obj}, caption, fig_attr)

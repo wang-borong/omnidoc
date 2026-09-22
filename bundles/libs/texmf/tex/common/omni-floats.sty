@@ -1,0 +1,57 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{omni-floats}[2026/09/22 v0.1 OmniDoc float placement policy]
+
+\newif\ifOmniFloatSectionBarriers
+\newif\ifOmniFloatSubsectionBarriers
+\DeclareOption{none}{%
+  \OmniFloatSectionBarriersfalse
+  \OmniFloatSubsectionBarriersfalse}
+\DeclareOption{section}{%
+  \OmniFloatSectionBarrierstrue
+  \OmniFloatSubsectionBarriersfalse}
+\DeclareOption{subsection}{%
+  \OmniFloatSectionBarrierstrue
+  \OmniFloatSubsectionBarrierstrue}
+\ExecuteOptions{section}
+\ProcessOptions\relax
+
+\RequirePackage{placeins}
+\RequirePackage{flafter}
+\RequirePackage{float}
+\RequirePackage{etoolbox}
+
+% Allow useful text/figure combinations while retaining enough body text to
+% avoid pages that look like accidental float dumps.
+\setcounter{topnumber}{4}
+\setcounter{bottomnumber}{3}
+\setcounter{totalnumber}{6}
+\renewcommand{\topfraction}{0.85}
+\renewcommand{\bottomfraction}{0.80}
+\renewcommand{\textfraction}{0.12}
+\renewcommand{\floatpagefraction}{0.80}
+\renewcommand{\dbltopfraction}{0.85}
+\renewcommand{\dblfloatpagefraction}{0.80}
+
+% Ordinary figures remain floats, but the leading ! lets them use physically
+% available page space instead of being deferred solely by a fraction counter.
+% OmniDoc-generated diagrams are source-anchored separately by the Lua filter.
+\def\fps@figure{!htbp}
+
+\providecommand{\OmniFloatBarrier}{\FloatBarrier}
+\providecommand{\OmniDiagramFloatBegin}{%
+  \begingroup
+  \let\omni@original@float\@float
+  \def\@float##1{\omni@original@float{##1}[H]}}
+\providecommand{\OmniDiagramFloatEnd}{\endgroup}
+
+% Native LaTeX projects do not run the Pandoc filter. The package therefore
+% offers heading barriers as options; generated main.tex files use subsection.
+\AtBeginDocument{%
+  \ifOmniFloatSectionBarriers
+    \@ifundefined{section}{}{\pretocmd{\section}{\FloatBarrier}{}{}}%
+  \fi
+  \ifOmniFloatSubsectionBarriers
+    \@ifundefined{subsection}{}{\pretocmd{\subsection}{\FloatBarrier}{}{}}%
+  \fi}
+
+\endinput

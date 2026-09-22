@@ -488,6 +488,8 @@ pub fn generate_latex_template(title: &str, author: &str, dt: TemplateDocType) -
         }
         let template = r#"{{ doclass }}
 
+\usepackage[subsection]{omni-floats}
+
 %\addbibresource{}
 
 \title{ {{ title }} }
@@ -697,5 +699,17 @@ pub fn generate_template(
         generate_markdown_template(title, author, dt)
     } else {
         generate_latex_template(title, author, dt)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{generate_latex_template, TemplateDocType};
+
+    #[test]
+    fn native_latex_templates_enable_the_shared_float_policy() {
+        let rendered = generate_latex_template("Manual", "Author", TemplateDocType::CTEXART);
+
+        assert!(rendered.contains(r"\usepackage[subsection]{omni-floats}"));
     }
 }

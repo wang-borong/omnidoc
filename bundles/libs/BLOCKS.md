@@ -175,6 +175,16 @@ digraph G { input -> amplifier -> output }
 
 `py2image` 同样执行可信 Python 代码。外部渲染器必须能通过项目 `[tools]` 配置或 `PATH` 找到。
 
+PDF/LaTeX 输出默认采用 `bounded` 浮动策略：生成图按源码位置锚定，不会越过其后的正文或表格；一级、二级标题也会清空上一节尚未落位的普通浮动体。未显式给出 `height` 的生成图最高为正文高度的 72%，避免图片连同标题超过可排版页高。项目可在 YAML 元数据中调整：
+
+```yaml
+omnidoc-float-policy: bounded       # bounded | strict | section | diagram | "off"
+omnidoc-float-barrier-level: 2      # 0 表示关闭标题屏障
+omnidoc-diagram-max-height: 72%     # none 表示不设置默认限高
+```
+
+`strict` 还会在每个普通 Pandoc Figure 后放置屏障；`section` 只保留标题屏障；`diagram` 只锚定生成图。单个生成图可显式设置 `height` 覆盖默认限高。原生 LaTeX 工程可加载 `\usepackage[subsection]{omni-floats}` 获得相同的全局参数和标题边界约束。
+
 ## 输出格式
 
 图形渲染器按目标格式自动选择资源：

@@ -1,0 +1,7 @@
+% OmniDoc's Markdown-to-LaTeX float contract. The Lua filter inserts the
+% semantic barriers; this package supplies the LaTeX primitive and balanced
+% page-allocation defaults without overriding project-specific settings that
+% are loaded later.
+\makeatletter
+\@ifpackageloaded{omni-floats}{}{\usepackage[none]{omni-floats}}
+\makeatother

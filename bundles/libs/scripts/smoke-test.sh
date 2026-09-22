@@ -257,6 +257,47 @@ rg -Fq '\newcommand{\ProjectHeaderMarker}{project}' "$work/header-smoke.tex"
 rg -Fq '\newcommand{\OmniManagedHeaderMarker}{managed}' "$work/header-smoke.tex"
 rg -Fq '\newcommand{\OmniUserHeaderMarker}{user}' "$work/header-smoke.tex"
 
+# The default LaTeX float policy must keep generated diagrams within a bounded
+# region while remaining configurable. This probe does not need a real image:
+# Pandoc can emit the LaTeX figure contract from an unresolved PDF reference.
+cat >"$work/float-smoke.md" <<'EOF'
+## First module
+
+![Float smoke](missing.pdf){#fig:float-smoke .omnidoc-diagram}
+
+Following prose.
+
+## Second module
+EOF
+cat >"$work/mark-diagram.lua" <<'EOF'
+function Figure(figure)
+  figure.classes:insert('omnidoc-diagram')
+  return figure
+end
+EOF
+pandoc "$work/float-smoke.md" \
+  --lua-filter="$work/mark-diagram.lua" \
+  --lua-filter="$root/pandoc/data/filters/latex-floats.lua" \
+  --standalone -t latex -o "$work/float-smoke.tex"
+test "$(rg -Fc '\FloatBarrier' "$work/float-smoke.tex")" -eq 2
+rg -Fq '\OmniDiagramFloatBegin' "$work/float-smoke.tex"
+rg -Fq '\OmniDiagramFloatEnd' "$work/float-smoke.tex"
+
+cat >"$work/float-off.md" <<'EOF'
+---
+omnidoc-float-policy: off
+---
+
+## Free-floating module
+
+![Float smoke](missing.pdf){#fig:float-off .omnidoc-diagram}
+EOF
+pandoc "$work/float-off.md" \
+  --lua-filter="$root/pandoc/data/filters/latex-floats.lua" \
+  --standalone -t latex -o "$work/float-off.tex"
+! rg -Fq '\FloatBarrier' "$work/float-off.tex"
+! rg -Fq '\OmniDiagramFloatBegin' "$work/float-off.tex"
+
 # Theme/global values are defaults, not command-line overrides of publication
 # metadata. The same filter also selects Chinese cross-reference labels only
 # after the final document language is known.
