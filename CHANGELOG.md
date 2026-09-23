@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.9.8 - 2026-09-23
+
+- Preserve image aspect ratios in PDF/LaTeX output when a generated figure has
+  both a requested width and the default or explicit maximum height.
+
 ## 1.9.7 - 2026-09-22
 
 - Bounded generated diagrams in PDF/LaTeX output with a safe default maximum

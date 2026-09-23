@@ -183,7 +183,7 @@ omnidoc-float-barrier-level: 2      # 0 表示关闭标题屏障
 omnidoc-diagram-max-height: 72%     # none 表示不设置默认限高
 ```
 
-`strict` 还会在每个普通 Pandoc Figure 后放置屏障；`section` 只保留标题屏障；`diagram` 只锚定生成图。单个生成图可显式设置 `height` 覆盖默认限高。原生 LaTeX 工程可加载 `\usepackage[subsection]{omni-floats}` 获得相同的全局参数和标题边界约束。
+`strict` 还会在每个普通 Pandoc Figure 后放置屏障；`section` 只保留标题屏障；`diagram` 只锚定生成图。单个生成图可显式设置 `height` 覆盖默认限高。PDF/LaTeX 输出将 `width` 与 `height` 作为最大尺寸，按原始比例缩放图片，避免指定宽度时被默认限高拉伸。原生 LaTeX 工程可加载 `\usepackage[subsection]{omni-floats}` 获得相同的全局参数和标题边界约束。
 
 ## 输出格式
 
